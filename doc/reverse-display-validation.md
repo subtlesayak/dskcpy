@@ -364,3 +364,39 @@ Verified locally for this update:
 No new physical Android install/test or Apple SDK build was performed for this
 update. Actual telemetry from the user's Mac, Safari and real connection timing
 remain manual verification items. The existing companion APK is unchanged.
+
+## Mac desktop audio and clean CI builds (2026-09-06)
+
+The experimental Mac host now captures system audio through ScreenCaptureKit and
+uses the existing Android Opus player. Its worker discards stale/oversized chunks,
+uses a four-packet acknowledgement window and recreates encoder state after
+mute/background transitions. Audio capture callbacks never perform network I/O;
+audio and video acknowledgements have separate watchdogs.
+
+Automated evidence for the audio slice:
+
+- Windows native release build and all 15 native test programs pass locally.
+- The dashboard production build passes; 54 Node tests pass locally, with four
+  opt-in Windows capture/Internet cases not run in this slice.
+- An Apple-silicon GitHub runner compiles the opt-in Mac host and passes all 16
+  native tests. The new CoreMedia test uses synthetic interleaved and planar
+  stereo buffers, verifies converted sample values, and rejects unsupported
+  rates, channel counts and excessive sample counts. The Opus test encodes and
+  decodes actual packets and checks stale samples, mute cleanup and backpressure.
+- The CoreMedia test first failed with `ArrayTooSmall` when an overallocated
+  list was supplied. Querying and using CoreMedia's exact required list size
+  fixed it; allocations are still bounded by two audio channels.
+- Native Mac pipe telemetry reaches the dashboard before process exit. No
+  capture permissions, recording or physical Android device is used by CI.
+- Android debug/release packaging, companion signature checks, JVM tests and the
+  standalone no-Gradle server build pass in CI after explicit SDK setup and
+  separation of app-only Material UI classes from the standalone server.
+
+This does **not** verify audible Mac-to-phone playback, mute/resume timing on a
+physical device, Safari/iOS receiving or motion-to-photon latency. Follow the
+[Mac audio checklist](macos-host.md#testing-mac-desktop-audio) before treating the
+audio path as hardware-validated. Windows' existing WASAPI capture implementation
+and the Android audio wire protocol are unchanged.
+
+API references: Apple's [system-audio output](https://developer.apple.com/documentation/screencapturekit/scstreamoutputtype/audio)
+and [CoreMedia buffer-list sizing](https://developer.apple.com/documentation/coremedia/cmsamplebuffergetaudiobufferlistwithretainedblockbuffer(_:bufferlistsizeneededout:bufferlistout:bufferlistsize:blockbufferallocator:blockbuffermemoryallocator:flags:blockbufferout:)).

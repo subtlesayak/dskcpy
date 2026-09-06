@@ -18,17 +18,15 @@ function Add-Source([string]$relative, [string]$target = $relative) {
 }
 foreach ($file in @('LICENSE', 'README.md', 'meson.build', 'meson_options.txt',
     'build.gradle', 'settings.gradle', 'gradle.properties', 'gradlew', 'gradlew.bat',
-    'server/build.gradle', 'server/proguard-rules.pro',
+    'server/build.gradle', 'server/proguard-rules.pro', 'server/build_without_gradle.sh',
     'gui/package.json', 'gui/package-lock.json', 'gui/index.html', 'gui/vite.config.ts',
     'gui/tsconfig.json', 'gui/README.md',
     'tools/macos-build.sh', 'tools/macos-start.sh', 'release/package_macos_source.ps1',
-    'release/build_common', 'release/build_server.sh', 'release/package_client.sh',
-    'doc/macos-host.md', 'doc/internet-mode.md', 'doc/reverse-display.md',
-    'doc/roadmap.md', 'doc/reverse-display-validation.md', 'doc/build.md')) {
+    'release/build_common', 'release/build_server.sh', 'release/package_client.sh')) {
     Add-Source $file
 }
 foreach ($directory in @('app', 'server/src', 'server/scripts', 'gradle/wrapper',
-    'gui/src', 'gui/server', 'gui/scripts')) {
+    'gui/src', 'gui/server', 'gui/scripts', 'doc')) {
     $sourceDirectory = Join-Path $repo $directory
     foreach ($item in Get-ChildItem -LiteralPath $sourceDirectory -File -Recurse) {
         if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Symlinks are not allowed in this source bundle.' }
