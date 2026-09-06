@@ -44,7 +44,7 @@ if [[ -f SHA256SUMS ]]; then
     shasum -a 256 -c SHA256SUMS >/dev/null
 fi
 
-printf '%s\n' 'Building EXPERIMENTAL Mac host (video and mouse/scroll; no Mac audio forwarding).'
+printf '%s\n' 'Building EXPERIMENTAL Mac host (video, mouse/scroll and desktop audio).'
 # -Dusb=false disables upstream HID/OTG, NOT Android ADB USB streaming.
 setup=(build-macos -Dcompile_server=false -Dreverse_macos=true -Dusb=false
     -Dbuildtype=debug -Db_lto=false -Dstrip=false)

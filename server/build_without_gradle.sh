@@ -76,7 +76,6 @@ SRC=( \
     com/genymobile/scrcpy/display/*.java \
     com/genymobile/scrcpy/model/*.java \
     com/genymobile/scrcpy/opengl/*.java \
-    com/genymobile/scrcpy/reverse/*.java \
     com/genymobile/scrcpy/util/*.java \
     com/genymobile/scrcpy/video/*.java \
     com/genymobile/scrcpy/wrappers/*.java \
@@ -90,6 +89,15 @@ done
 
 echo "Compiling java sources..."
 cd ../java
+# The standalone server has no Android resources or AndroidX/Material runtime.
+# Keep its legacy reverse window, but build the installable app UI with Gradle.
+for src in com/genymobile/scrcpy/reverse/*.java; do
+    case "${src##*/}" in
+        ReverseDisplayActivity.java|ReverseSessionService.java|RepeatMaterialButton.java) continue ;;
+    esac
+    SRC+=("$src")
+done
+CLASSES+=('com/genymobile/scrcpy/reverse/*.class')
 javac -encoding UTF-8 -bootclasspath "$ANDROID_JAR" \
     -cp "$JAVA_CLASSPATH" \
     -d "$CLASSES_DIR" \

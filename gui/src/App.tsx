@@ -656,7 +656,7 @@ export default function App() {
               {busy === 'stopping' || status.stopping ? 'Stopping…' : status.reconnecting ? 'Cancel reconnection' : connecting ? 'Cancel connection' : busy === 'starting' ? 'Starting…' : status.running ? 'Stop streaming' : status.error && status.lastExitCode !== null ? 'Reconnect' : 'Start streaming'}
             </button>
             <p id="stream-hint" className="action-note" role="status">{status.stopping ? 'Stopping the stream and releasing the connection…' : status.reconnecting ? `Reconnecting to the selected device · attempt ${status.reconnectAttempt} of ${status.reconnectLimit}. You can cancel at any time.` : connecting ? 'Connecting and waiting for the first decoded frames…' : status.running ? 'Streaming. Connection and quality changes apply the next time you start.' : startHint}</p>
-            {macHost && <p className="action-note">Experimental Mac host: allow Screen Recording and Accessibility for the launching Terminal or dskcpy in System Settings → Privacy &amp; Security. Restart the launcher after granting access. Mac audio forwarding is not yet available.</p>}
+            {macHost && <p className="action-note">Experimental Mac host: allow Screen &amp; System Audio Recording and Accessibility for the launching Terminal or dskcpy in System Settings → Privacy &amp; Security. Restart the launcher after granting access. To hear desktop audio, enable phone audio in dskcpy on Android.</p>}
             {status.readiness && (
               <ul className="readiness-checks" aria-label="Local component checks">
                 {status.readiness.checks.filter((check) => localReadiness?.required.includes(check.id)).map((check) => (
@@ -749,7 +749,7 @@ export default function App() {
 
             <div className="feature-list">
               <FeatureRow icon={<Hand size={16} />} label="Touch input" value={macHost ? 'Mouse + two-finger scroll' : 'Native'} />
-              {macHost && <FeatureRow icon={<Laptop size={16} />} label="Mac audio to phone" value="Not yet available" planned />}
+              {macHost && <FeatureRow icon={<Laptop size={16} />} label="Mac audio to phone" value="Opus · experimental" planned />}
               <FeatureRow icon={<MousePointer2 size={16} />} label="Cursor" value="Visible" />
               <FeatureRow icon={<Cpu size={16} />} label="Encoder" value={status.encoder ? encoderNames[status.encoder as Encoder] || status.encoder : encoderNames[effectiveEncoder]} />
               <FeatureRow icon={<Activity size={16} />} label="Frame policy" value="Newest wins" />

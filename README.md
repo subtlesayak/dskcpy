@@ -5,8 +5,9 @@
 
 dskcpy is an experimental fork of [scrcpy](https://github.com/Genymobile/scrcpy)
 that adds the reverse direction: Windows or macOS desktop video on your Android
-phone or tablet, with input sent back to the computer. Windows also forwards
-desktop audio. Use USB, a local wireless connection, or a private VPN network.
+phone or tablet, with input sent back to the computer. Desktop audio forwarding
+is implemented on Windows and experimental on macOS. Use USB, a local wireless
+connection, or a private VPN network.
 
 [Quick start](#quick-start) · [Connections](#connection-options) ·
 [macOS setup](doc/macos-host.md) · [Documentation](#documentation)
@@ -24,8 +25,8 @@ desktop audio. Use USB, a local wireless connection, or a private VPN network.
   available, a visible cursor, and adjustable resolution, frame rate and bitrate.
 - **Touch control:** native multi-touch injection on Windows; click, drag and
   two-finger scrolling on the experimental Mac host.
-- **Desktop audio on Android:** Windows system playback over USB, LAN or Internet
-  mode, with a separate phone-playback mute control.
+- **Desktop audio on Android:** Windows system playback and experimental Mac
+  system audio over USB, LAN or Internet, with a separate phone-playback mute control.
 - **Flexible connections:** USB, paired ADB Wi-Fi, direct IP, and experimental
   Tailscale-backed Internet sessions without ADB after app installation.
 - **Leave and return:** background the Android app and return to the same
@@ -46,7 +47,7 @@ open source, and USB/LAN streaming does not require a dskcpy account.
 | Host → receiver | Status |
 | --- | --- |
 | Windows → Android | Implemented: video, native touch and system audio. Physical-device testing covers USB and authenticated VPN sessions. |
-| macOS → Android | Experimental, opt-in source build. Wireless video has been reported working on an M3 Mac. Mouse/scroll controls are implemented; broader hardware testing remains incomplete. **No Mac audio forwarding yet.** |
+| macOS → Android | Experimental, opt-in source build. Wireless video has been reported working on an M3 Mac. Mouse/scroll controls and ScreenCaptureKit → Opus system audio are implemented. **Mac audio playback and broader hardware testing remain unverified.** |
 | Linux → Android | Reverse hosting is not implemented. |
 | Desktop → iPhone/iPad | No iOS receiver is implemented. |
 | Desktop → browser | The web app controls the native host; it is **not** a browser video receiver. |
@@ -210,7 +211,7 @@ into a CLI command. See [reverse-display options](doc/reverse-display.md).
 
 This mirrors an existing desktop display. It does **not** add a virtual monitor
 or Windows Extend mode. Stylus pressure/Windows Ink, an iOS receiver, a browser
-media receiver, a packaged Tauri desktop wrapper and Mac audio are not implemented.
+media receiver and a packaged Tauri desktop wrapper are not implemented.
 There is no zero-latency or fixed-latency guarantee.
 
 ADB grants powerful access to a device: authorize only trusted computers and
@@ -227,7 +228,8 @@ private screen content.
 
 ## Documentation
 
-- [Reverse display, desktop controls and Windows audio](doc/reverse-display.md)
+- [Reverse display, desktop controls and audio](doc/reverse-display.md)
+- [Remaining implementation and validation work](doc/roadmap.md)
 - [Dashboard setup, runtime configuration and reconnection](gui/README.md)
 - [Mac build, permissions and manual test checklist](doc/macos-host.md)
 - [Internet mode, shared devices and authentication](doc/internet-mode.md)

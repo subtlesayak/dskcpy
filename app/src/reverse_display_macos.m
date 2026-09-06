@@ -10,6 +10,8 @@
 #include "reverse_macos_helpers.h"
 #include "reverse_watchdog.h"
 #include "reverse_audio.h"
+#include "reverse_audio_encoder.h"
+#include "reverse_macos_audio.h"
 #include "receiver.h"
 #include "options.h"
 #include "util/binary.h"
@@ -30,9 +32,12 @@ struct mac_state {
     sc_socket video_socket, control_socket;
     sc_mutex mutex, send_mutex;
     bool mutex_ready, send_mutex_ready;
-    _Atomic bool stopped, failed, disconnected, quit, paused, force_key, audio_notice;
-    _Atomic int64_t acked_pts, sent_pts, encoding_since;
-    struct sc_reverse_watchdog watchdog;
+    _Atomic bool stopped, failed, disconnected, quit, paused, force_key, audio_enabled, audio_available;
+    _Atomic int64_t acked_pts, sent_pts, encoding_since, audio_acked_pts;
+    struct sc_reverse_watchdog watchdog, audio_watchdog;
+    CMSampleBufferRef latest_audio; // One bounded callback buffer, protected by mutex.
+    int64_t audio_received_us;
+    uint64_t audio_epoch, audio_sequence; // Epoch changes even for rapid mute/unmute.
     CVPixelBufferRef latest; // Exactly one newest capture, protected by mutex.
     uint64_t generation;
     VTCompressionSessionRef encoder;
@@ -55,9 +60,12 @@ struct mac_state {
         atomic_init(&state.stopped, false); atomic_init(&state.failed, false);
         atomic_init(&state.disconnected, false); atomic_init(&state.quit, false);
         atomic_init(&state.paused, false); atomic_init(&state.force_key, true);
-        atomic_init(&state.audio_notice, false); atomic_init(&state.acked_pts, -1);
+        atomic_init(&state.audio_enabled, false); atomic_init(&state.audio_available, false);
+        atomic_init(&state.audio_acked_pts, -1); atomic_init(&state.acked_pts, -1);
         atomic_init(&state.sent_pts, -1); atomic_init(&state.encoding_since, 0);
         sc_reverse_watchdog_init(&state.watchdog);
+        sc_reverse_watchdog_init(&state.audio_watchdog);
+        state.audio_watchdog.paused = true;
         state.mutex_ready = sc_mutex_init(&state.mutex);
         state.send_mutex_ready = sc_mutex_init(&state.send_mutex);
         if (!state.mutex_ready || !state.send_mutex_ready) return nil;
@@ -66,11 +74,17 @@ struct mac_state {
 }
 - (void)dealloc {
     if (state.latest) CVPixelBufferRelease(state.latest);
+    if (state.latest_audio) CFRelease(state.latest_audio);
     if (state.encoder) { VTCompressionSessionInvalidate(state.encoder); CFRelease(state.encoder); }
     if (state.mutex_ready) sc_mutex_destroy(&state.mutex);
     if (state.send_mutex_ready) sc_mutex_destroy(&state.send_mutex);
 }
 @end
+
+static bool mac_audio_active(struct mac_state *s) {
+    return atomic_load(&s->audio_enabled) && !atomic_load(&s->paused)
+        && !atomic_load(&s->stopped) && !atomic_load(&s->failed);
+}
 
 @interface SCMacOutput : NSObject <SCStreamOutput, SCStreamDelegate>
 @property(atomic, strong) SCMacState *owner;
@@ -79,8 +93,24 @@ struct mac_state {
 - (void)stream:(SCStream *)stream didOutputSampleBuffer:(CMSampleBufferRef)sample ofType:(SCStreamOutputType)type {
     (void)stream;
     SCMacState *owner = self.owner;
-    if (!owner || type != SCStreamOutputTypeScreen || atomic_load(&owner->state.stopped)
+    if (!owner || atomic_load(&owner->state.stopped)
             || !CMSampleBufferDataIsReady(sample)) return;
+    if (type == SCStreamOutputTypeAudio) {
+        struct mac_state *s = &owner->state;
+        // Never encode or perform socket I/O on an Apple capture callback.
+        if (CMSampleBufferGetNumSamples(sample) <= 0
+                || CMSampleBufferGetNumSamples(sample) > SC_REVERSE_AUDIO_MAX_CHUNK) return;
+        sc_mutex_lock(&s->mutex);
+        if (mac_audio_active(s)) {
+            if (s->latest_audio) CFRelease(s->latest_audio);
+            s->latest_audio = (CMSampleBufferRef)CFRetain(sample);
+            s->audio_received_us = av_gettime_relative();
+            ++s->audio_sequence;
+        }
+        sc_mutex_unlock(&s->mutex);
+        return;
+    }
+    if (type != SCStreamOutputTypeScreen) return;
     NSArray *attachments = (__bridge NSArray *)CMSampleBufferGetSampleAttachmentsArray(sample, false);
     NSNumber *status = attachments.firstObject[SCStreamFrameInfoStatus];
     if (!status || status.integerValue != SCFrameStatusComplete) return;
@@ -133,12 +163,14 @@ static bool mac_send(struct mac_state *s, const void *data, size_t size, int64_t
     sc_write32be(header, (uint32_t)size); sc_write64be(header + 4, (uint64_t)pts); sc_write32be(header + 12, flags);
     sc_mutex_lock(&s->send_mutex);
     sc_mutex_lock(&s->mutex);
-    sc_reverse_watchdog_begin(&s->watchdog, av_gettime_relative());
-    if (!(flags & (1u | SC_REVERSE_AUDIO_UNAVAILABLE))) sc_reverse_watchdog_submit(&s->watchdog, pts);
+    bool audio = flags & (SC_REVERSE_AUDIO_CONFIG | SC_REVERSE_AUDIO_PACKET | SC_REVERSE_AUDIO_UNAVAILABLE);
+    struct sc_reverse_watchdog *watchdog = audio ? &s->audio_watchdog : &s->watchdog;
+    sc_reverse_watchdog_begin(watchdog, av_gettime_relative());
+    if (audio ? flags == SC_REVERSE_AUDIO_PACKET : !(flags & 1u)) sc_reverse_watchdog_submit(watchdog, pts);
     sc_mutex_unlock(&s->mutex);
     bool ok = net_send_all(s->video_socket, header, sizeof(header)) == sizeof(header)
            && net_send_all(s->video_socket, data, size) == (ssize_t)size;
-    sc_mutex_lock(&s->mutex); sc_reverse_watchdog_end(&s->watchdog); sc_mutex_unlock(&s->mutex);
+    sc_mutex_lock(&s->mutex); sc_reverse_watchdog_end(watchdog); sc_mutex_unlock(&s->mutex);
     sc_mutex_unlock(&s->send_mutex);
     if (!ok && !atomic_load(&s->stopped)) atomic_store(&s->failed, true);
     return ok;
@@ -227,11 +259,6 @@ static int mac_video_thread(void *context) {
         uint64_t generation = 0; int64_t last_encode = 0, last_key = 0;
         while (!atomic_load(&s->stopped) && !atomic_load(&s->failed)) {
             @autoreleasepool {
-                if (atomic_exchange(&s->audio_notice, false)) {
-                    const uint8_t unavailable = 0;
-                    if (!mac_send(s, &unavailable, 1, 0, SC_REVERSE_AUDIO_UNAVAILABLE)) break;
-                    LOGW("Mac desktop audio forwarding is not implemented in this experimental build; video continues");
-                }
                 if (atomic_load(&s->paused)) { SDL_Delay(10); continue; }
                 int64_t acked = atomic_load(&s->acked_pts);
                 while (pending_count && pending[0] <= acked) {
@@ -266,6 +293,86 @@ static int mac_video_thread(void *context) {
         }
     }
     return 0;
+}
+
+struct mac_audio_context { struct mac_state *state; uint64_t epoch; };
+static bool mac_audio_stopped(void *context) {
+    struct mac_state *s = ((struct mac_audio_context *)context)->state;
+    return atomic_load(&s->stopped) || atomic_load(&s->failed);
+}
+static bool mac_audio_enabled(void *context) {
+    struct mac_audio_context *audio = context;
+    sc_mutex_lock(&audio->state->mutex);
+    bool enabled = mac_audio_active(audio->state) && audio->epoch == audio->state->audio_epoch;
+    sc_mutex_unlock(&audio->state->mutex);
+    return enabled;
+}
+static int64_t mac_audio_acked(void *context) {
+    return atomic_load(&((struct mac_audio_context *)context)->state->audio_acked_pts);
+}
+static bool mac_audio_send(void *context, const uint8_t *data, size_t size, int64_t pts, uint32_t flags) {
+    struct mac_audio_context *audio = context;
+    // Phone also discards in-flight data on mute. Avoid sending an old epoch's tail.
+    if (!mac_audio_enabled(context)) return true;
+    return mac_send(audio->state, data, size, pts, flags);
+}
+
+
+static int mac_audio_thread(void *context) {
+    @autoreleasepool {
+        SCMacState *owner = (__bridge SCMacState *)context;
+        struct mac_state *s = &owner->state;
+        struct mac_audio_context audio = {.state = s, .epoch = UINT64_MAX};
+        static const struct sc_reverse_audio_callbacks cbs = {.stopped = mac_audio_stopped,
+            .enabled = mac_audio_enabled, .acked_pts = mac_audio_acked, .send = mac_audio_send};
+        struct sc_reverse_audio_encoder *encoder = NULL;
+        uint64_t sequence = 0;
+        bool unavailable = false;
+        while (!mac_audio_stopped(&audio)) {
+            sc_mutex_lock(&s->mutex);
+            uint64_t epoch = s->audio_epoch, current = s->audio_sequence;
+            bool active = mac_audio_active(s);
+            CMSampleBufferRef sample = s->latest_audio; s->latest_audio = NULL;
+            int64_t received = s->audio_received_us;
+            sc_mutex_unlock(&s->mutex);
+            if (audio.epoch != epoch || !active) {
+                sc_reverse_audio_encoder_destroy(encoder); encoder = NULL;
+                audio.epoch = epoch; sequence = current; unavailable = false;
+            }
+            if (active && !unavailable && (!atomic_load(&s->audio_available) || sample)) {
+                if (!encoder && atomic_load(&s->audio_available)) {
+                    encoder = sc_reverse_audio_encoder_create(&cbs, &audio);
+                    if (encoder) LOGI("Desktop audio: ScreenCaptureKit -> Opus, 48 kHz stereo, 128 kbps, 10 ms (experimental)");
+                }
+                int16_t pcm[SC_REVERSE_AUDIO_MAX_CHUNK * 2]; size_t frames = 0;
+                bool ok = encoder && sample && sc_reverse_macos_audio_pcm(sample, pcm, &frames);
+                if (ok) {
+                    if (current != sequence + 1) sc_reverse_audio_encoder_discard_partial(encoder);
+                    ok = sc_reverse_audio_encoder_push(encoder, pcm, frames, received, av_gettime_relative());
+                }
+                if (!ok && !mac_audio_stopped(&audio)) {
+                    const uint8_t notice = 0;
+                    mac_audio_send(&audio, &notice, 1, 0, SC_REVERSE_AUDIO_UNAVAILABLE);
+                    LOGW("Mac desktop audio unavailable (capture format or libopus); video continues. Toggle phone audio to retry.");
+                    sc_reverse_audio_encoder_destroy(encoder); encoder = NULL;
+                    unavailable = true;
+                }
+                sequence = current;
+            }
+            if (sample) CFRelease(sample);
+            SDL_Delay(2);
+        }
+        sc_reverse_audio_encoder_destroy(encoder);
+    }
+    return 0;
+}
+
+// Called with mutex held by the control thread. Clear both buffered samples and
+// partial encoder data (via epoch) even if pause/resume coalesce between polls.
+static void mac_audio_transition(struct mac_state *s) {
+    ++s->audio_epoch;
+    if (s->latest_audio) { CFRelease(s->latest_audio); s->latest_audio = NULL; }
+    sc_reverse_watchdog_set_paused(&s->audio_watchdog, !mac_audio_active(s), av_gettime_relative());
 }
 
 static void mac_mouse(struct mac_state *s, CGEventType type, CGPoint point) {
@@ -384,13 +491,21 @@ static void mac_action(struct sc_receiver *receiver, const struct sc_device_msg 
         bool paused = action == SC_REVERSE_SYSTEM_ACTION_PAUSE_VIDEO;
         mac_cancel_input(s);
         atomic_store(&s->paused, paused);
-        sc_mutex_lock(&s->mutex); sc_reverse_watchdog_set_paused(&s->watchdog, paused, av_gettime_relative()); sc_mutex_unlock(&s->mutex);
+        sc_mutex_lock(&s->mutex);
+        sc_reverse_watchdog_set_paused(&s->watchdog, paused, av_gettime_relative());
+        mac_audio_transition(s);
+        sc_mutex_unlock(&s->mutex);
         if (!paused) atomic_store(&s->force_key, true);
         LOGI("Reverse display %s (Android %s)", paused ? "paused" : "resumed", paused ? "background" : "foreground");
         return;
     }
-    if (action == SC_REVERSE_SYSTEM_ACTION_AUDIO_ENABLE) { atomic_store(&s->audio_notice, true); return; }
-    if (action == SC_REVERSE_SYSTEM_ACTION_AUDIO_DISABLE) { atomic_store(&s->audio_notice, false); return; }
+    if (action == SC_REVERSE_SYSTEM_ACTION_AUDIO_ENABLE || action == SC_REVERSE_SYSTEM_ACTION_AUDIO_DISABLE) {
+        sc_mutex_lock(&s->mutex);
+        bool enabled = action == SC_REVERSE_SYSTEM_ACTION_AUDIO_ENABLE;
+        if (atomic_exchange(&s->audio_enabled, enabled) != enabled) mac_audio_transition(s);
+        sc_mutex_unlock(&s->mutex);
+        return;
+    }
     if (atomic_load(&s->paused)) return;
     dispatch_async(dispatch_get_main_queue(), ^{
         if (atomic_load(&owner->state.stopped) || atomic_load(&owner->state.paused)) return;
@@ -419,6 +534,16 @@ static void mac_ack(struct sc_receiver *receiver, const struct sc_device_msg *ms
         s->metrics_us = now;
     }
 }
+static void mac_audio_ack(struct sc_receiver *receiver, const struct sc_device_msg *msg, void *context) {
+    (void)receiver;
+    SCMacState *owner = (__bridge SCMacState *)context;
+    struct mac_state *s = &owner->state;
+    int64_t pts = msg->reverse_frame_ack.pts;
+    sc_mutex_lock(&s->mutex);
+    bool accepted = sc_reverse_watchdog_ack(&s->audio_watchdog, pts, av_gettime_relative());
+    sc_mutex_unlock(&s->mutex);
+    if (accepted) atomic_store(&s->audio_acked_pts, pts);
+}
 static void mac_ended(struct sc_receiver *receiver, bool error, void *context) {
     (void)receiver;
     SCMacState *owner = (__bridge SCMacState *)context;
@@ -445,7 +570,7 @@ sc_reverse_display_macos_run(sc_socket video_socket, sc_socket control_socket, c
     @autoreleasepool {
         if (@available(macOS 13.0, *)) {
             [NSApplication sharedApplication];
-            LOGW("Experimental macOS host: manual Apple-hardware verification required; desktop audio is unavailable");
+            LOGW("Experimental macOS host: video, input and desktop audio require Apple-hardware verification");
             if (!CGPreflightScreenCaptureAccess() && !CGRequestScreenCaptureAccess()) {
                 LOGE("Allow Screen Recording for the launching Terminal/dskcpy in System Settings > Privacy & Security, then restart it");
                 return SCRCPY_EXIT_FAILURE;
@@ -488,30 +613,61 @@ sc_reverse_display_macos_run(sc_socket video_socket, sc_socket control_socket, c
             if (net_send_all(video_socket, header, sizeof(header)) != sizeof(header)) return SCRCPY_EXIT_FAILURE;
             s->start_us = av_gettime_relative();
             static const struct sc_receiver_callbacks callbacks = {.on_ended = mac_ended, .on_reverse_touch = mac_touch,
-                .on_reverse_frame_ack = mac_ack, .on_reverse_system_action = mac_action};
+                .on_reverse_frame_ack = mac_ack, .on_reverse_system_action = mac_action, .on_reverse_audio_ack = mac_audio_ack};
             struct sc_receiver receiver;
             if (!sc_receiver_init(&receiver, control_socket, &callbacks, (__bridge void *)owner)) return SCRCPY_EXIT_FAILURE;
             bool input_started = sc_receiver_start(&receiver);
             SCMacOutput *output = [SCMacOutput new]; output.owner = owner;
             dispatch_queue_t queue = dispatch_queue_create("dskcpy.mac.capture", DISPATCH_QUEUE_SERIAL);
+            dispatch_queue_t audio_queue = dispatch_queue_create("dskcpy.mac.audio", DISPATCH_QUEUE_SERIAL);
             SCStreamConfiguration *configuration = [SCStreamConfiguration new];
             configuration.width = s->width; configuration.height = s->height;
             configuration.pixelFormat = kCVPixelFormatType_32BGRA;
             configuration.minimumFrameInterval = CMTimeMake(1, s->fps);
-            configuration.queueDepth = 3; configuration.showsCursor = YES; configuration.capturesAudio = NO;
+            configuration.queueDepth = 3; configuration.showsCursor = YES;
+            configuration.capturesAudio = options->reverse_audio;
+            configuration.sampleRate = 48000; configuration.channelCount = 2;
+            configuration.excludesCurrentProcessAudio = YES;
+            // No microphone output is requested. --no-audio disables capture too.
             SCContentFilter *filter = [[SCContentFilter alloc] initWithDisplay:display excludingWindows:@[]];
             SCStream *stream = [[SCStream alloc] initWithFilter:filter configuration:configuration delegate:output];
             NSError *error = nil;
             bool output_added = input_started && [stream addStreamOutput:output type:SCStreamOutputTypeScreen sampleHandlerQueue:queue error:&error];
+            bool audio_added = output_added && options->reverse_audio
+                && [stream addStreamOutput:output type:SCStreamOutputTypeAudio sampleHandlerQueue:audio_queue error:&error];
+            if (!audio_added) configuration.capturesAudio = NO;
             SCMacCompletion *started = [SCMacCompletion new];
+            // SCStream copies configuration at construction. Apply video-only
+            // fallback if its audio output could not be registered.
+            if (output_added && options->reverse_audio && !audio_added) {
+                SCMacCompletion *updated = [SCMacCompletion new];
+                [stream updateConfiguration:configuration completionHandler:^(NSError *failure) { updated.error = failure; updated.done = YES; }];
+                output_added = mac_wait(updated, 5);
+            }
             if (output_added) [stream startCaptureWithCompletionHandler:^(NSError *failure) { started.error = failure; started.done = YES; }];
             bool capture_started = output_added && mac_wait(started, 15);
+            if (!capture_started && output_added && audio_added && started.done && started.error) {
+                LOGW("Mac capture with audio failed; retrying video only");
+                [stream removeStreamOutput:output type:SCStreamOutputTypeAudio error:NULL];
+                audio_added = false; configuration.capturesAudio = NO;
+                SCMacCompletion *updated = [SCMacCompletion new];
+                [stream updateConfiguration:configuration completionHandler:^(NSError *failure) { updated.error = failure; updated.done = YES; }];
+                if (mac_wait(updated, 5)) {
+                    SCMacCompletion *retry = [SCMacCompletion new];
+                    [stream startCaptureWithCompletionHandler:^(NSError *failure) { retry.error = failure; retry.done = YES; }];
+                    capture_started = mac_wait(retry, 15);
+                }
+            }
+            atomic_store(&s->audio_available, capture_started && audio_added);
             // Permission/capture startup is not a stream stall. The PTS clock
             // stays fixed; only the first-frame deadline starts after setup.
             int64_t capture_ready_us = av_gettime_relative();
             sc_thread worker;
             // sc_thread_create permits at most 15 bytes, even on macOS.
             bool worker_started = capture_started && sc_thread_create(&worker, mac_video_thread, "rev-mac-video", (__bridge void *)owner);
+            sc_thread audio_worker;
+            bool audio_started = worker_started && sc_thread_create(&audio_worker, mac_audio_thread, "rev-mac-audio", (__bridge void *)owner);
+            if (worker_started && !audio_started) LOGW("Mac audio worker unavailable; video continues");
             enum scrcpy_exit_code result = SCRCPY_EXIT_FAILURE;
             if (worker_started) {
                 LOGI("Mac desktop: %ux%u at %u fps; touch maps to mouse, two fingers scroll", s->width, s->height, s->fps);
@@ -522,7 +678,8 @@ sc_reverse_display_macos_run(sc_socket video_socket, sc_socket control_socket, c
                     if (atomic_load(&s->disconnected)) { result = SCRCPY_EXIT_DISCONNECTED; break; }
                     int64_t now = av_gettime_relative(), encoding = atomic_load(&s->encoding_since);
                     sc_mutex_lock(&s->mutex);
-                    bool expired = sc_reverse_watchdog_expired(&s->watchdog, now);
+                    bool expired = sc_reverse_watchdog_expired(&s->watchdog, now)
+                        || sc_reverse_watchdog_expired(&s->audio_watchdog, now);
                     bool missing = !s->latest && now - capture_ready_us > 10000000;
                     sc_mutex_unlock(&s->mutex);
                     if (expired || missing || (encoding && now - encoding > 10000000)) {
@@ -537,13 +694,16 @@ sc_reverse_display_macos_run(sc_socket video_socket, sc_socket control_socket, c
             net_interrupt(video_socket); net_interrupt(control_socket);
             if (input_started) sc_receiver_join(&receiver);
             if (worker_started) sc_thread_join(&worker, NULL);
+            if (audio_started) sc_thread_join(&audio_worker, NULL);
             sc_receiver_destroy(&receiver);
             SCMacCompletion *ended = [SCMacCompletion new];
             [stream stopCaptureWithCompletionHandler:^(NSError *failure) { ended.error = failure; ended.done = YES; }];
             (void)mac_wait(ended, 5);
             if (output_added) [stream removeStreamOutput:output type:SCStreamOutputTypeScreen error:NULL];
+            if (audio_added) [stream removeStreamOutput:output type:SCStreamOutputTypeAudio error:NULL];
             output.owner = nil;
             dispatch_sync(queue, ^{}); // Drain output callbacks before releasing capture state.
+            dispatch_sync(audio_queue, ^{});
             return result;
         }
         LOGE("The experimental Mac host requires macOS 13 or newer");

@@ -79,8 +79,9 @@ was 17 bytes; the corrected name is 13 bytes. Keep debug assertions enabled.
 - The localhost browser dashboard, with Mac-only encoder choices and explicit
   experimental/permission information.
 
-Mac desktop audio forwarding is **not implemented**. The receiver is notified
-that audio is unavailable; Windows audio is unchanged. No iOS or browser media
+Mac desktop audio forwarding is **implemented experimentally**, using
+ScreenCaptureKit system capture and 10 ms Opus packets. Audible playback still
+requires manual Mac verification; Windows audio is unchanged. No iOS or browser media
 receiver, extended virtual monitor, HDR, system-wide text keyboard, or zero-latency
 guarantee is included. The Android companion is debug-signed for testing.
 
@@ -160,8 +161,33 @@ needed. The dashboard must show `macOS · experimental`.
    Mac measurement starts at encode submission and includes decode acknowledgement;
    it excludes capture wait and physical display scan-out.
 
-Audio on the phone is not expected from a Mac yet. Computer volume controls are
-separate from forwarding audio to the phone.
+Computer volume controls are separate from forwarding audio to the phone.
+
+## Testing Mac desktop audio
+
+Rebuild the latest source using the commands above; an old native binary will
+still report audio unavailable. The existing audio-capable Android companion
+does not need a new protocol version.
+
+1. Start a stream, enable **Play desktop audio on phone** in Android dskcpy,
+   and play a quiet, non-protected audio clip on the Mac. Check the phone's media
+   volume. Keep volume low because the Mac continues playing too.
+2. Activity should report `Desktop audio: ScreenCaptureKit -> Opus`. This proves
+   encoder initialization, not audible playback; confirm the sound on the phone.
+3. Toggle the phone-audio button off/on. It should mute/resume only the phone,
+   without a burst of old sound. Test quick off/on toggles too.
+4. Go Home on Android, wait 10 seconds, and return. Audio should be silent while
+   away and resume with current content. Repeat, then stop/reconnect the stream.
+5. Repeat over Wi-Fi with USB disconnected. Internet audio uses the same private
+   VPN session but needs its own physical test. Record dropouts or stale sound,
+   not only whether the encoder log appears.
+
+If audio is unavailable, check Screen & System Audio Recording permission and
+that FFmpeg includes `libopus` (`ffmpeg -encoders`). Toggle phone audio to retry.
+Protected media may not be capturable. `--no-audio` disables host audio capture.
+No microphone permission or microphone output is requested. The capture callback
+retains at most one sample buffer, rejects oversized chunks, and never performs
+network I/O. Separate audio acknowledgements cannot unblock the video window.
 
 ## 5. Then test wireless modes
 

@@ -121,6 +121,15 @@ discarded to avoid a growing backlog. No microphone permission or audio-file
 recording is used. Home/Back pauses both streams; returning resumes the retained
 session and mute preference. Losing audio focus pauses phone playback.
 
+The opt-in Mac host now has an experimental ScreenCaptureKit audio path using
+the same Opus framing and Android player. It requests 48 kHz stereo system audio,
+not microphone capture, and keeps video and audio capture callbacks separate.
+One bounded capture buffer and four unacknowledged 10 ms packets prevent growing
+queues. Mute/background transitions discard partial samples, including rapid
+pause/resume cycles. Audio failure reports unavailable while video can continue;
+`--no-audio` disables Mac audio capture. Audible playback still needs a physical
+Mac test; see the [Mac audio checklist](macos-host.md#testing-mac-desktop-audio).
+
 Protected/exclusive-mode content or an unavailable output device may not be
 capturable. Decoder/output failures disable audio without intentionally stopping
 video. Changing the default Windows output may require toggling phone audio or
@@ -159,7 +168,7 @@ without allowing an unconsumed video socket to grow memory without bound.
 | Path | Current implementation |
 | --- | --- |
 | Windows desktop to Android | Native video, touch and system audio; USB, ADB Wi-Fi/direct IP, and authenticated VPN Internet mode |
-| macOS desktop to Android | Opt-in experimental source backend: ScreenCaptureKit/VideoToolbox video, mouse/scroll and system controls. Wireless video is user-reported working; broader hardware and latest telemetry validation remain incomplete. No Mac audio forwarding. See [Mac test guide](macos-host.md). |
+| macOS desktop to Android | Opt-in experimental source backend: ScreenCaptureKit/VideoToolbox video, mouse/scroll, system controls and ScreenCaptureKit/Opus audio. Wireless video is user-reported working; audio playback, broader hardware and latest telemetry validation remain incomplete. See [Mac test guide](macos-host.md). |
 | Desktop to iPhone/iPad | No iOS receiver is present; the Android APK is not an iOS app |
 | Web app | Working localhost control dashboard, not a browser media receiver or remote-hosted service |
 

@@ -7,10 +7,13 @@ import test from 'node:test';
 import { createControlService } from './service.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const binary = process.env.SCRCPY_LOG_PIPE_TEST_BINARY || path.join(root,
-  process.platform === 'win32' ? '.tmp/x-tests/app/log-pipe-fixture.exe' : 'build-macos/app/log-pipe-fixture');
+const binary = path.resolve(root, process.env.SCRCPY_LOG_PIPE_TEST_BINARY ||
+  (process.platform === 'win32' ? '.tmp/x-tests/app/log-pipe-fixture.exe' : 'build-macos/app/log-pipe-fixture'));
 
-test('native buffered-pipe telemetry updates the dashboard BEFORE process exit', { skip: !existsSync(binary), timeout: 10000 }, async t => {
+test('native buffered-pipe telemetry updates the dashboard BEFORE process exit', {
+  skip: !process.env.SCRCPY_LOG_PIPE_TEST_BINARY && !existsSync(binary), timeout: 10000,
+}, async t => {
+  assert.ok(existsSync(binary), 'Explicit logger fixture override must exist');
   const children = [];
   const service = createControlService({
     platform: 'darwin', configuredPort: 0,
@@ -41,6 +44,7 @@ test('native buffered-pipe telemetry updates the dashboard BEFORE process exit',
   async function until(predicate, message) {
     for (let n = 0; n < 100; n++) {
       if (predicate()) return;
+      assert.ok(children.every(child => child.exitCode === null), 'Logger fixture exited before telemetry arrived');
       await new Promise(resolve => setTimeout(resolve, 10));
     }
     assert.fail(message);

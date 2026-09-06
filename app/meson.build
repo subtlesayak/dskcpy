@@ -31,6 +31,7 @@ src = [
     'src/recorder.c',
     'src/reverse_display.c',
     'src/reverse_audio.c',
+    'src/reverse_audio_encoder.c',
     'src/reverse_macos_helpers.c',
     'src/scrcpy.c',
     'src/screen.c',
@@ -82,7 +83,7 @@ reverse_macos = get_option('reverse_macos') and host_machine.system() == 'darwin
 conf.set('HAVE_REVERSE_MACOS', reverse_macos)
 if reverse_macos
     add_languages('objc', native: false)
-    src += 'src/reverse_display_macos.m'
+    src += ['src/reverse_display_macos.m', 'src/reverse_macos_audio.m']
     add_project_arguments('-fobjc-arc', '-fblocks', '-std=gnu11', '-mmacosx-version-min=13.0', language: 'objc')
     add_project_link_arguments('-mmacosx-version-min=13.0', language: ['c', 'objc'])
 endif
@@ -245,9 +246,16 @@ endif
 # do not build tests in release (assertions would not be executed at all)
 if get_option('buildtype') == 'debug'
     # Driven by the Node pipe-telemetry regression; not a capture executable.
+    if reverse_macos
+        mac_audio_test = executable('test_reverse_macos_audio',
+            ['tests/test_reverse_macos_audio.m', 'src/reverse_macos_audio.m', 'src/reverse_audio_encoder.c'],
+            include_directories: src_dir, dependencies: dependencies)
+        test('test_reverse_macos_audio', mac_audio_test)
+    endif
     executable('log-pipe-fixture', ['tests/log_pipe_fixture.c', 'src/util/log.c', 'src/compat.c'],
                include_directories: src_dir, dependencies: dependencies)
     tests = [
+        ['test_reverse_audio_encoder', ['tests/test_reverse_audio_encoder.c', 'src/reverse_audio_encoder.c']],
         ['test_reverse_watchdog', ['tests/test_reverse_watchdog.c']],
         ['test_reverse_macos_helpers', ['tests/test_reverse_macos_helpers.c', 'src/reverse_macos_helpers.c']],
         ['test_adb_parser', [

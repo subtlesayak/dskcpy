@@ -122,10 +122,11 @@ stream start/stop, generated commands, logs, selected encoder, and live
 capture-to-decode acknowledgement are wired to the local service.
 
 The opt-in experimental macOS host now provides ScreenCaptureKit/VideoToolbox
-video and mouse/scroll controls. Use the [Mac setup guide](../doc/macos-host.md)
-and its launcher to configure the correct native build. Mac audio forwarding
-is not implemented. Wireless Mac video is user-reported working; the latest
-telemetry update and the remaining hardware checklist need manual Mac testing.
+video, mouse/scroll controls and experimental ScreenCaptureKit-to-Opus desktop
+audio. Use the [Mac setup guide](../doc/macos-host.md) and its launcher to configure
+the correct native build. Wireless Mac video is user-reported working; audio
+playback, the latest telemetry update and the remaining hardware checklist need
+manual Mac testing. The audio row describes capability, not proof of live playback.
 
 A remote browser *viewer* remains a separate follow-up slice. A hosted webpage
 cannot capture the desktop, invoke ADB, or

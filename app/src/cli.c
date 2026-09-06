@@ -961,7 +961,7 @@ static const struct sc_option options[] = {
 #ifdef HAVE_REVERSE_MACOS
                 "\nExperimental Mac backend: ScreenCaptureKit/VideoToolbox. "
                 "Requires macOS 13+, Screen Recording and Accessibility permissions. "
-                "Mac audio forwarding is not available yet."
+                "Experimental system audio uses ScreenCaptureKit and Opus; --no-audio disables it."
 #else
                 " macOS requires an opt-in -Dreverse_macos=true source build."
 #endif

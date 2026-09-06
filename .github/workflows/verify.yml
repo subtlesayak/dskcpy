@@ -58,7 +58,6 @@ jobs:
           meson compile -C .tmp/ci-native
           meson test -C .tmp/ci-native --print-errorlogs
       - name: Verify live native log delivery to the dashboard
-        shell: pwsh
         env:
           SCRCPY_LOG_PIPE_TEST_BINARY: .tmp/ci-native/app/log-pipe-fixture.exe
         run: node --test gui/server/telemetry.test.mjs
