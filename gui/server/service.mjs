@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { openInternetBridge, summarizeTailnet } from './internet.mjs';
 import { resolveRuntime, inspectReadiness } from './runtime.mjs';
 import { parseMdnsServices } from './discovery.mjs';
+import { createBrowserReceiver } from './browser.mjs';
 
 import {
   buildScrcpyArgs,
@@ -29,6 +30,7 @@ export function createControlService({
   bridgeOpener = openInternetBridge,
   stopGraceMs = 3000,
   reconnectDelayMs = 1500,
+  browserPort = Number(environment.DSKCPY_VIEWER_PORT || 27180),
 } = {}) {
   const guiDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   const repoDir = path.resolve(guiDir, '..');
@@ -42,6 +44,25 @@ export function createControlService({
   let reconnectTimer = null;
   let reconnectSession = null;
   let discoveryAttempt = null;
+  let browserPreparation = null;
+  let browserConfig = null;
+  let browserUsbCleanup = null;
+  let browserUsbCleanupPending = Promise.resolve();
+  const browserReceiver = createBrowserReceiver({ configuredPort: browserPort,
+    origin: environment.DSKCPY_VIEWER_ORIGIN,
+    tls: environment.DSKCPY_VIEWER_TLS_CERT && environment.DSKCPY_VIEWER_TLS_KEY ? {
+      cert: environment.DSKCPY_VIEWER_TLS_CERT, key: environment.DSKCPY_VIEWER_TLS_KEY,
+      bind: environment.DSKCPY_VIEWER_TLS_BIND, port: Number(environment.DSKCPY_VIEWER_TLS_PORT || 27181),
+    } : null,
+    onChange: () => {
+      broadcast();
+      const { waiting, connected } = browserReceiver.status();
+      if (!waiting && !connected && browserUsbCleanup) {
+        const cleanup = browserUsbCleanup; browserUsbCleanup = null; browserUsbCleanupPending = cleanup();
+      }
+    },
+    onConnect: (bridge) => startStream(browserConfig, null, bridge),
+  });
   const reconnectLimit = 3;
   const runCommand = commandRunner || defaultRunCommand;
   const clients = new Set();
@@ -93,7 +114,9 @@ export function createControlService({
 
   function exitError(code) {
     if (code === 2) {
-      return 'The phone ended the stream or the connection was lost. Start streaming again to reconnect.';
+      return state.config?.connection === 'browser'
+        ? 'The browser ended the stream or the connection was lost. Create a new browser session to reconnect.'
+        : 'The phone ended the stream or the connection was lost. Start streaming again to reconnect.';
     }
     if (platform === 'win32' && code === 0xc0000135) {
       return 'scrcpy could not start because a required runtime DLL was not found.';
@@ -131,6 +154,7 @@ export function createControlService({
   function publicState() {
     return {
       ...state,
+      browser: browserReceiver.status(),
       binaryAvailable: state.readiness?.checks.some((check) => check.id === 'binary' && check.ready) ?? false,
     };
   }
@@ -338,8 +362,61 @@ export function createControlService({
     }
   }
 
-  async function startStream(rawConfig, retrySession = null) {
+  async function prepareBrowser(rawConfig) {
+    if (shuttingDown || state.running || startAttempt || browserPreparation
+        || browserReceiver.status().waiting || browserReceiver.status().connected) {
+      throw new Error('Stop the current stream or browser invitation first.');
+    }
+    const attempt = new AbortController();
+    browserPreparation = attempt;
+    try {
+      await browserUsbCleanupPending;
+      const config = sanitizeStreamConfig({ ...rawConfig, connection: 'browser', serial: '', address: '' });
+      validateHostEncoder(config.encoder, platform);
+      const readiness = await refreshReadiness();
+      if (attempt.signal.aborted) throw new Error('Connection cancelled.');
+      const transport = readiness.transports.browser;
+      if (!transport?.ready) throw new Error(transport?.message || 'Browser capture is not ready.');
+      browserConfig = config;
+      const mode = rawConfig.browserTransport || 'local';
+      let usbDevice;
+      if (mode === 'usb') {
+        if (!readiness.checks.some((check) => check.id === 'adb' && check.ready)) throw new Error('USB browser mode requires ADB and an authorized USB device.');
+        const devices = (await listDevices()).filter((d) => d.authorized && d.transport === 'USB');
+        usbDevice = rawConfig.browserSerial ? devices.find((d) => d.serial === rawConfig.browserSerial)
+          : devices.length === 1 ? devices[0] : null;
+        if (!usbDevice) throw new Error('Select one authorized USB device in Connect before starting a USB browser session.');
+      }
+      if (attempt.signal.aborted) throw new Error('Connection cancelled.');
+      const invitation = await browserReceiver.invite(mode);
+      if (usbDevice) {
+        const runtime = currentRuntime();
+        const args = ['-s', usbDevice.serial, 'reverse'];
+        const endpoint = `tcp:${browserReceiver.port}`;
+        try {
+          await runCommand(runtime.adb, [...args, '--no-rebind', endpoint, endpoint], { env: runtime.env, cwd: repoDir });
+        } catch {
+          browserReceiver.cancel();
+          throw new Error('Could not open the USB browser tunnel. Authorize USB debugging; an existing tunnel will not be overwritten.');
+        }
+        browserUsbCleanup = async () => {
+          try { await runCommand(runtime.adb, [...args, '--remove', endpoint], { env: runtime.env, cwd: repoDir }); }
+          catch { /* Device may already be disconnected. */ }
+        };
+      }
+      if (attempt.signal.aborted || !browserReceiver.status().waiting) {
+        browserReceiver.cancel(); throw new Error('Connection cancelled or invitation expired.');
+      }
+      return invitation; // The key is returned once, never put in state or logs.
+    } finally { if (browserPreparation === attempt) browserPreparation = null; }
+  }
+
+  async function startStream(rawConfig, retrySession = null, browserBridge = null) {
     if (shuttingDown) throw new Error('The local service is shutting down.');
+    if (!browserBridge && (rawConfig.connection === 'browser' || browserPreparation
+        || browserReceiver.status().waiting || browserReceiver.status().connected)) {
+      throw new Error('Stop the browser session first, or authenticate with a new browser key.');
+    }
     if (retrySession && retrySession !== reconnectSession) throw new Error('Connection cancelled.');
     if (streamProcess || startAttempt || (!retrySession && state.running)) {
       throw new Error('A stream started by this control center is already running.');
@@ -369,6 +446,7 @@ export function createControlService({
     try {
       const readiness = await refreshReadiness();
       if (attempt.signal.aborted) throw new Error('Connection cancelled.');
+      if (browserBridge?.closed) throw new Error('The browser disconnected before capture started.');
       const transport = readiness.transports[config.connection];
       if (!transport.ready) throw new Error(transport.message);
       if (config.autoReconnect && ['usb', 'wifi'].includes(config.connection) && !config.serial) {
@@ -386,6 +464,7 @@ export function createControlService({
         internetBridge = await bridgeOpener({ address: config.address,
           sessionKey: rawConfig.sessionKey, tailnet, signal: attempt.signal });
       }
+      if (browserBridge) internetBridge = browserBridge;
       if (attempt.signal.aborted) throw new Error('Connection cancelled.');
       if (!retrySession && config.autoReconnect) reconnectSession = { config: { ...config }, attempts: 0 };
       const session = reconnectSession;
@@ -442,6 +521,7 @@ export function createControlService({
       broadcast();
       return publicState();
     } catch (error) {
+      browserBridge?.close();
       internetBridge?.close();
       internetBridge = null;
       state.running = false;
@@ -457,6 +537,8 @@ export function createControlService({
   }
 
   function stopStream() {
+    browserPreparation?.abort();
+    browserReceiver.cancel();
     cancelReconnect();
     streamStopRequested = true;
     if (startAttempt) {
@@ -617,6 +699,10 @@ export function createControlService({
         writeJson(response, 202, await startStream(body));
         return;
       }
+      if (request.method === 'POST' && url.pathname === '/api/browser/invite') {
+        writeJson(response, 201, await prepareBrowser(await readJson(request)));
+        return;
+      }
       if (request.method === 'POST' && url.pathname === '/api/stream/stop') {
         writeJson(response, 202, stopStream());
         return;
@@ -653,6 +739,8 @@ export function createControlService({
     shuttingDown = true;
     clearInterval(heartbeat);
     stopStream();
+    await browserReceiver.shutdown();
+    await browserUsbCleanupPending;
     for (const response of clients) response.end();
     clients.clear();
     pendingClients.clear();

@@ -324,3 +324,13 @@ select { min-width: 0; height: 37px; padding-inline: 8px; color: var(--text); ba
 .readiness-checks li > span:first-child { flex: 0 0 14px; }
 .readiness-checks [data-ready="true"] > span:first-child { color: #68dba1; }
 .readiness-checks [data-ready="false"] > span:first-child { color: #ffc875; }
+/* Receiver setup follows the existing panel/spacing system. */
+.browser-host-panel { margin-block-start: 24px; }
+.browser-host-panel > p { max-width: 80ch; line-height: 1.55; }
+.browser-actions, .browser-invitation { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-block-start: 20px; }
+.browser-invitation label { flex: 1 1 300px; display: grid; gap: 8px; }
+.browser-invitation input { min-width: 0; width: 100%; font: inherit; padding: 12px; border: 1px solid var(--border); border-radius: 8px; color: inherit; background: transparent; }
+.browser-invitation p { flex-basis: 100%; overflow-wrap: anywhere; }
+.browser-host-panel code { overflow-wrap: anywhere; }
+.browser-transport { display: grid; gap: 8px; max-width: 32rem; margin-block: 20px; }
+.browser-transport select { min-height: 48px; width: 100%; min-width: 0; background: var(--surface-2); color: inherit; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border); }

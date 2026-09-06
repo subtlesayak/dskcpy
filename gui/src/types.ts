@@ -1,4 +1,4 @@
-export type ConnectionMode = 'usb' | 'wifi' | 'ip' | 'internet';
+export type ConnectionMode = 'usb' | 'wifi' | 'ip' | 'internet' | 'browser';
 export interface InternetStatus {
   ready: boolean;
   message: string;
@@ -46,6 +46,7 @@ export interface WirelessService {
 }
 
 export interface BridgeStatus {
+  browser?: { waiting: boolean; connected: boolean; url: string | null; remote: boolean; remoteAvailable: boolean; mode: string; expiresAt: string | null };
   reconnecting: boolean;
   reconnectAttempt: number;
   reconnectLimit: number;

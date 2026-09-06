@@ -128,6 +128,9 @@ the correct native build. Wireless Mac video is user-reported working; audio
 playback, the latest telemetry update and the remaining hardware checklist need
 manual Mac testing. The audio row describes capability, not proof of live playback.
 
-A remote browser *viewer* remains a separate follow-up slice. A hosted webpage
+An experimental browser **receiver** is now available under Connect → Browser
+receiver. It uses a separate authenticated media endpoint, not the controller
+API. See the [browser setup guide](../doc/browser-receiver.md) for USB, Wi-Fi,
+direct-IP and Internet/VPN configuration and validation limits. A hosted webpage
 cannot capture the desktop, invoke ADB, or
 inject operating-system input without a local native helper.

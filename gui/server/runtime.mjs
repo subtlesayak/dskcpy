@@ -71,7 +71,7 @@ export async function inspectReadiness(runtime, runCommand) {
   add('capture', platform === 'darwin' ? 'Experimental Mac capture' : 'Desktop capture',
     platform === 'win32' ? supported : platform === 'darwin' && macBackend,
     platform === 'darwin' ? macBackend
-      ? 'Experimental Mac backend found. Screen Recording and Accessibility permissions are checked when streaming starts. Mac audio forwarding is unavailable.'
+      ? 'Experimental Mac backend found. Screen & System Audio Recording and Accessibility permissions are checked when streaming starts. Opus audio forwarding is experimental.'
       : 'Build this fork on the Mac with -Dreverse_macos=true. An ordinary scrcpy build cannot host reverse display.'
     : platform === 'win32' ? supported ? 'Reverse display is supported.' : 'Use this fork’s reverse-display build.'
       : 'Desktop capture is available on Windows or an experimental macOS source build, not this platform.');
@@ -86,9 +86,9 @@ export async function inspectReadiness(runtime, runCommand) {
   }
   add('adb', 'Android connection tool', adbReady, adbReady ? 'ADB loads successfully.' : 'Install or configure Android platform-tools (ADB).');
   const base = ['binary', 'runtime', 'capture'];
-  const transports = Object.fromEntries(['usb', 'wifi', 'ip', 'internet'].map((connection) => {
+  const transports = Object.fromEntries(['usb', 'wifi', 'ip', 'internet', 'browser'].map((connection) => {
     // Internet mode uses no ADB/server/APK on the desktop. The phone app is installed separately.
-    const required = connection === 'internet' ? base : [...base, 'companion', 'adb'];
+    const required = ['internet', 'browser'].includes(connection) ? base : [...base, 'companion', 'adb'];
     const failed = checks.filter((check) => required.includes(check.id) && !check.ready);
     return [connection, { ready: failed.length === 0, message: failed[0]?.message || 'Local components are ready.', required }];
   }));

@@ -10,7 +10,7 @@ is implemented on Windows and experimental on macOS. Use USB, a local wireless
 connection, or a private VPN network.
 
 [Quick start](#quick-start) · [Connections](#connection-options) ·
-[macOS setup](doc/macos-host.md) · [Documentation](#documentation)
+[macOS setup](doc/macos-host.md) · [Browser receiver](doc/browser-receiver.md) · [Documentation](#documentation)
 
 > [!IMPORTANT]
 > This is **dskcpy**, not an official Genymobile release. Get this fork's source
@@ -35,6 +35,9 @@ connection, or a private VPN network.
   touch enable/disable, Stop, and hide/show controls. Hold an icon for its hint.
 - **Local browser dashboard:** Connect, Device, Performance and Activity views;
   wireless pairing/discovery, encoder selection, logs and live decode-ack metrics.
+- **Experimental browser receiver:** native H.264 video, optional Opus audio and
+  authenticated touch input. USB uses an Android ADB tunnel; Wi-Fi/direct IP and
+  Internet/VPN require explicitly configured trusted HTTPS.
 - **Bounded recovery:** optional, limited retries for USB/LAN sessions. Internet
   sessions deliberately require a fresh secret after disconnection.
 
@@ -49,8 +52,8 @@ open source, and USB/LAN streaming does not require a dskcpy account.
 | Windows → Android | Implemented: video, native touch and system audio. Physical-device testing covers USB and authenticated VPN sessions. |
 | macOS → Android | Experimental, opt-in source build. Wireless video has been reported working on an M3 Mac. Mouse/scroll controls and ScreenCaptureKit → Opus system audio are implemented. **Mac audio playback and broader hardware testing remain unverified.** |
 | Linux → Android | Reverse hosting is not implemented. |
-| Desktop → iPhone/iPad | No iOS receiver is implemented. |
-| Desktop → browser | The web app controls the native host; it is **not** a browser video receiver. |
+| Desktop → iPhone/iPad | No native iOS receiver. Experimental browser path exists; Safari/iOS compatibility is not yet verified. USB browser tunneling is Android-only. |
+| Desktop → browser | Experimental WebCodecs receiver. Windows NVENC video, audio enable/mute and pause/resume tested on localhost. Physical USB-browser and remote HTTPS/VPN tests remain pending. |
 
 The original Android-to-computer scrcpy mode remains in the codebase. Its
 platform support and features are separate from dskcpy's reverse mode.

@@ -26,7 +26,7 @@ foreach ($file in @('LICENSE', 'README.md', 'meson.build', 'meson_options.txt',
     Add-Source $file
 }
 foreach ($directory in @('app', 'server/src', 'server/scripts', 'gradle/wrapper',
-    'gui/src', 'gui/server', 'gui/scripts', 'doc')) {
+    'gui/src', 'gui/server', 'gui/scripts', 'gui/receiver', 'doc')) {
     $sourceDirectory = Join-Path $repo $directory
     foreach ($item in Get-ChildItem -LiteralPath $sourceDirectory -File -Recurse) {
         if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Symlinks are not allowed in this source bundle.' }

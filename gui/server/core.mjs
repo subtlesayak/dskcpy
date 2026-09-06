@@ -1,6 +1,6 @@
 import { isOverlayIp } from './internet.mjs';
 
-const VALID_CONNECTIONS = new Set(['usb', 'wifi', 'ip', 'internet']);
+const VALID_CONNECTIONS = new Set(['usb', 'wifi', 'ip', 'internet', 'browser']);
 const VALID_ENCODERS = new Set([
   'auto',
   'h264_nvenc',
@@ -71,7 +71,7 @@ export function sanitizeStreamConfig(input = {}) {
     maxFps: numberInRange(input.maxFps, 60, 15, 240),
     bitRateMbps: numberInRange(input.bitRateMbps, 12, 2, 64),
     encoder,
-    autoReconnect: input.autoReconnect === true && connection !== 'internet',
+    autoReconnect: input.autoReconnect === true && !['internet', 'browser'].includes(connection),
   };
 }
 
@@ -105,14 +105,14 @@ export function isAllowedMutation(headers, port) {
 }
 
 export function buildScrcpyArgs(config, bridgePort) {
-  if (config.connection === 'internet' && (!Number.isInteger(bridgePort) || bridgePort < 1 || bridgePort > 65535)) {
+  if (['internet', 'browser'].includes(config.connection) && (!Number.isInteger(bridgePort) || bridgePort < 1 || bridgePort > 65535)) {
     throw new Error('Authenticate the private Internet connection before starting capture.');
   }
   const args = [
     '--reverse-display',
     '--verbosity=debug',
     '--port=27184:27199',
-    config.connection === 'internet' ? `--reverse-socket=${bridgePort}`
+    ['internet', 'browser'].includes(config.connection) ? `--reverse-socket=${bridgePort}`
       : config.serial && config.connection !== 'ip' ? `--serial=${config.serial}`
       : config.connection === 'wifi' ? '--select-tcpip'
       : `--connection=${config.connection === 'ip' ? `ip:${config.address}` : config.connection}`,

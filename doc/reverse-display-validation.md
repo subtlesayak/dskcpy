@@ -365,6 +365,44 @@ No new physical Android install/test or Apple SDK build was performed for this
 update. Actual telemetry from the user's Mac, Safari and real connection timing
 remain manual verification items. The existing companion APK is unchanged.
 
+## Browser receiving and connection modes (2026-09-06)
+
+The receiver is separate from the controller: fixed assets plus a WebSocket
+bridge to the native SRD1 stream. Each explicit invitation grants one browser
+view/control access using a 192-bit key, expires after five minutes and is not
+stored in public state or browser storage. Network hosting is never enabled
+automatically. USB uses an owned ADB reverse tunnel; remote modes require a
+configured HTTPS proxy or trusted certificate on an explicit private interface.
+
+Verification in this slice:
+
+- 69 Node tests pass, including fragmented media framing, in-band NVENC SPS/PPS,
+  original Opus input timestamp ACKs, authentication, origin/Host rejection,
+  expiration, single-client ownership, cancellation, USB tunnel ownership and
+  authenticated TLS/WebSocket. Four separate opt-in native Internet cases remain
+  skipped in the ordinary suite. The TLS test generates a disposable issuer and
+  validates against it explicitly; it does not disable certificate checks or
+  install a certificate authority.
+- Production TypeScript/Vite build passes. Receiver JavaScript syntax checks pass.
+- A real Windows NVENC stream renders at 1920x1080 in the Chromium-based in-app
+  browser over loopback. Video pause/resume, audio enable/mute, Touch off, More
+  controls, Escape and Disconnect were exercised. More than 1,700 video frames
+  decoded across the pause/resume checks. Native process cleanup was checked.
+- The live test exposed NVENC's in-band SPS/PPS and Opus timestamp adjustment;
+  the receiver now extracts parameter sets from the first IDR and acknowledges
+  original audio packet timestamps as they leave its bounded decoder queue.
+- Browser console checks reported no application warnings/errors on the passing
+  live path. A 390x844 receiver layout was visually inspected without horizontal
+  clipping. Direct-IP without HTTPS shows an actionable setup error.
+
+Not verified here: audible browser playback as heard by a person, physical USB
+Android-browser streaming, real Wi-Fi/IP/VPN round trips, iOS/Safari, Mac capture,
+desktop hot-plug, physical motion-to-photon latency, or long-duration soak tests.
+Live loopback decode ACKs are **not** phone latency measurements. No real captured
+desktop frames, session keys or TLS private keys are committed or published.
+
+Setup and limitations: [browser receiver](browser-receiver.md).
+
 ## Mac desktop audio and clean CI builds (2026-09-06)
 
 The experimental Mac host now captures system audio through ScreenCaptureKit and

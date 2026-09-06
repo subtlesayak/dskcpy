@@ -76,7 +76,7 @@ test('Mac readiness requires the compiled opt-in marker, not just upstream rever
   status = await inspectReadiness(runtime, probe);
   assert.equal(status.transports.internet.ready, true);
   assert.equal(status.transports.usb.ready, false);
-  assert.match(status.checks.find((c) => c.id === 'capture').message, /audio forwarding is unavailable/);
+  assert.match(status.checks.find((c) => c.id === 'capture').message, /audio forwarding is experimental/);
   await writeFile(runtime.env.SCRCPY_REVERSE_DISPLAY_APK, 'APK fixture');
   status = await inspectReadiness(runtime, probe);
   for (const mode of ['usb', 'wifi', 'ip']) assert.equal(status.transports[mode].ready, true);

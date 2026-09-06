@@ -1,10 +1,10 @@
 # Remaining dskcpy work
 
 This checklist records remaining implementation and verification work. It is
-not a claim that untested platforms are supported. macOS hosting stays ahead of
-browser/iPhone receiving, following the selected product priority.
+not a claim that untested platforms are supported. Physical Mac verification is
+paused while the Mac is unavailable; the browser receiver is the current slice.
 
-## 1. Mac hosting completion — active
+## 1. Mac hosting completion — hardware verification pending
 
 - [x] ScreenCaptureKit video, VideoToolbox H.264, mouse/scroll and window controls.
 - [x] Fix worker-name startup assertion and piped-log telemetry buffering.
@@ -25,13 +25,18 @@ browser/iPhone receiving, following the selected product priority.
 
 ## 3. Browser and iPhone/iPad receiving
 
-- [ ] Choose and implement a secure browser media transport and native host adapter.
-- [ ] Implement browser decoding/rendering and authenticated input return.
+- [x] Implement a separate authenticated WebSocket receiver and native SRD1 bridge.
+- [x] Implement WebCodecs video/audio, input return, bounded queues and pause/resume.
+- [x] Add USB reverse-tunnel, Wi-Fi/direct-IP HTTPS and private VPN connection setup.
+- [x] Verify real Windows NVENC video and browser audio lifecycle on localhost.
+- [ ] Verify physical USB Android-browser and Wi-Fi/direct-IP/VPN end-to-end paths.
 - [ ] Test Safari/iOS codec, gesture, audio and background restrictions.
 - [ ] Define any native iOS receiver only after browser receiver constraints are tested.
 
-The existing web dashboard is a localhost controller, not a media receiver.
-No public listener, relay deployment or new account permission is implied.
+The dashboard remains a localhost controller. The separate experimental
+[browser receiver](browser-receiver.md) serves only media-receiver assets and
+authenticated streaming. Remote TLS listeners require explicit configuration;
+no public listener, relay deployment or new account permission is implied.
 
 ## 4. Distribution and advanced input
 

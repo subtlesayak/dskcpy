@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Receiver · dskcpy</title>
+  <link rel="stylesheet" href="/receiver.css">
+  <script type="module" src="/receiver.mjs"></script>
+</head>
+<body>
+  <main>
+    <header><a class="brand" href="/">dskcpy <span>Browser receiver · experimental</span></a><p id="status" role="status">Not connected</p></header>
+    <section id="join-panel" aria-labelledby="join-title">
+      <p class="eyebrow">Your desktop, here</p>
+      <h1 id="join-title">Connect to a desktop</h1>
+      <p>On the computer, open Connect → Browser receiver and create a session key. No Android app or USB cable is needed.</p>
+      <form id="join-form">
+        <label for="session-key">Temporary session key</label>
+        <input id="session-key" name="session-key" type="password" autocomplete="off" autocapitalize="none" spellcheck="false" maxlength="32" required aria-describedby="key-help error">
+        <p id="key-help">One use. Expires after five minutes. Never saved in this browser.</p>
+        <button id="join" type="submit">Connect</button>
+      </form>
+      <p id="capability">Checking browser video support…</p>
+      <p class="subtle">Use a trusted HTTPS receiver address on another device. The localhost address works only on this computer. Safari/iPhone support requires device testing.</p>
+    </section>
+    <p id="error" role="alert"></p>
+    <section id="stream-panel" hidden aria-label="Remote desktop">
+      <div id="stage"><canvas id="display" aria-label="Streamed desktop. Touch to control; desktop keyboard forwarding is not yet supported."></canvas></div>
+      <div id="toolbar" aria-label="Stream controls">
+        <button id="touch" type="button" aria-pressed="true">Touch on</button>
+        <button id="pause" type="button" aria-pressed="false">Pause video</button>
+        <button id="audio" type="button" aria-pressed="false">Enable audio</button>
+        <button id="fullscreen" type="button">Full screen</button>
+        <button id="more" type="button" aria-expanded="false" aria-controls="more-controls">More controls</button>
+        <button id="disconnect" type="button">Disconnect</button>
+      </div>
+      <div id="more-controls" hidden>
+        <p>Computer controls</p>
+        <div class="controls">
+          <button id="volume-down" type="button" title="Lower computer volume. Hold to repeat.">Volume −</button>
+          <button id="volume-up" type="button" title="Raise computer volume. Hold to repeat.">Volume +</button>
+          <button id="minimize" type="button">Minimize window</button>
+          <button id="maximize" type="button">Maximize / restore</button>
+        </div>
+        <p class="subtle">Touch controls the computer. Disable it to view only. Close and Lock are not available in this experimental receiver.</p>
+      </div>
+      <p id="stats" class="subtle">Waiting for the first decoded frame…</p>
+    </section>
+  </main>
+</body>
+</html>

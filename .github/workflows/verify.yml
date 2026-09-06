@@ -61,7 +61,9 @@ jobs:
         env:
           MSYS2_PATH_TYPE: inherit
           SCRCPY_LOG_PIPE_TEST_BINARY: .tmp/ci-native/app/log-pipe-fixture.exe
-        run: node --test gui/server/telemetry.test.mjs
+        run: |
+          npm ci --prefix gui --ignore-scripts
+          node --test gui/server/telemetry.test.mjs
 
   native-macos:
     runs-on: macos-15
@@ -79,6 +81,7 @@ jobs:
           meson test -C build-macos --print-errorlogs
       - name: Verify native capabilities and live dashboard telemetry
         run: |
+          npm ci --prefix gui --ignore-scripts
           build-macos/app/scrcpy --help | grep -F 'ScreenCaptureKit/VideoToolbox'
           node --test gui/server/macos-build.test.mjs gui/server/telemetry.test.mjs
 

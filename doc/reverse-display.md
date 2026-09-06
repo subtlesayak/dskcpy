@@ -169,8 +169,8 @@ without allowing an unconsumed video socket to grow memory without bound.
 | --- | --- |
 | Windows desktop to Android | Native video, touch and system audio; USB, ADB Wi-Fi/direct IP, and authenticated VPN Internet mode |
 | macOS desktop to Android | Opt-in experimental source backend: ScreenCaptureKit/VideoToolbox video, mouse/scroll, system controls and ScreenCaptureKit/Opus audio. Wireless video is user-reported working; audio playback, broader hardware and latest telemetry validation remain incomplete. See [Mac test guide](macos-host.md). |
-| Desktop to iPhone/iPad | No iOS receiver is present; the Android APK is not an iOS app |
-| Web app | Working localhost control dashboard, not a browser media receiver or remote-hosted service |
+| Desktop to iPhone/iPad | Experimental browser path; Safari/iOS remains unverified. No native iOS app or iPhone USB transport |
+| Web app | Localhost dashboard plus a separate authenticated WebCodecs receiver; USB (Android), Wi-Fi/direct-IP HTTPS and private VPN setup |
 
 Upstream scrcpy platform support does not make this fork's Windows reverse
 capture, audio and input code portable automatically. The new Mac backend is
@@ -179,9 +179,8 @@ reverse hosting. Its separate native capture/input implementation needs manual
 Apple-hardware validation. This source implementation is not a verified Mac
 release and does not imply parity with Windows touch/audio or SuperDisplay.
 
-A future [WebRTC](https://www.w3.org/TR/webrtc/) receiver could share browser
-video/audio and a control data channel across Android, iOS and desktop browsers.
-It still needs a native host for desktop capture/control, session authentication,
-explicit input consent, transport integration and physical Safari/device tests.
-This is a proposed extension, not existing web/iOS streaming support. The
-dashboard intentionally remains bound to localhost.
+The [browser receiver](browser-receiver.md) reuses the native H.264/Opus stream
+through an authenticated WebSocket bridge. It does not use WebRTC. Remote access
+requires an explicitly configured trusted HTTPS origin and private interface or
+proxy. The dashboard intentionally remains bound to localhost. Safari/device
+validation and physical network latency measurements are still pending.

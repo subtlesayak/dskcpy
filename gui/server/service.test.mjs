@@ -2,12 +2,15 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import http from 'node:http';
 import { PassThrough, Writable } from 'node:stream';
+import { WebSocket } from 'ws';
+import net from 'node:net';
+import { once } from 'node:events';
 import test from 'node:test';
 import { createControlService } from './service.mjs';
 
 const ready = {
   checks: [{ id: 'binary', label: 'Program', ready: true }],
-  transports: Object.fromEntries(['usb', 'wifi', 'ip', 'internet'].map((mode) => [mode, { ready: true, required: [], message: 'Ready' }])),
+  transports: Object.fromEntries(['usb', 'wifi', 'ip', 'internet', 'browser'].map((mode) => [mode, { ready: true, required: [], message: 'Ready' }])),
 };
 
 function fakeChild({ fail = false, ignoreStop = false } = {}) {
@@ -37,6 +40,7 @@ async function fixture(t, options = {}) {
     // The real Node executable satisfies path resolution, but is never launched.
     environment: { ...process.env, SCRCPY_GUI_BINARY: process.execPath },
     configuredPort: 0,
+    browserPort: 0,
     readinessProbe: async () => ready,
     commandRunner: async () => ({ stdout: '', stderr: '' }),
     spawnProcess: (executable, args, spawnOptions) => {
@@ -84,6 +88,100 @@ test('Mac capability follows the binary probe and rejects incompatible encoders 
   assert.equal(f.publicState().reverseDisplaySupported, true);
   assert.ok(f.children[0].args.includes('--video-encoder=h264_videotoolbox'));
   await f.request('/api/stream/stop', {});
+});
+
+test('browser invitation reserves capture, key never enters status, Stop invalidates it', async (t) => {
+  const f = await fixture(t);
+  const invite = await f.request('/api/browser/invite', { maxSize: 1280 });
+  assert.equal(invite.code, 201); assert.equal(f.children.length, 0);
+  assert.match(invite.body.key, /^[A-Za-z0-9_-]{32}$/);
+  assert.ok(!JSON.stringify(f.publicState()).includes(invite.body.key));
+  assert.equal((await f.request('/api/stream/start', { connection: 'usb' })).code, 400);
+  assert.equal((await f.request('/api/browser/invite', {})).code, 400);
+  await f.request('/api/stream/stop', {});
+  assert.equal(f.publicState().browser.waiting, false);
+  assert.equal((await f.request('/api/stream/start', { connection: 'browser' })).code, 400);
+  assert.equal(f.children.length, 0);
+});
+
+test('browser authenticates before native launch, bypasses ADB, and stops its exact process', async (t) => {
+  let native;
+  const f = await fixture(t, { spawnProcess: (exe, args) => {
+    assert.ok(args.includes('--max-size=1280'));
+    assert.ok(!args.some((a) => a.startsWith('--connection=')));
+    const port = Number(args.find((a) => a.startsWith('--reverse-socket=')).split('=')[1]);
+    native = net.connect(port, '127.0.0.1'); native.on('error', () => {});
+    const child = fakeChild();
+    native.on('close', () => child.exit(2));
+    return child;
+  } });
+  t.after(() => native?.destroy());
+  const { body } = await f.request('/api/browser/invite', { maxSize: 1280, sessionKey: 'must-not-persist' });
+  const ws = new WebSocket(body.url.replace('http:', 'ws:') + 'stream', { origin: body.url.slice(0, -1) });
+  ws.on('error', () => {}); t.after(() => ws.terminate());
+  await once(ws, 'open'); ws.send(body.key);
+  await waitFor(() => f.publicState().running);
+  assert.equal(f.publicState().config.connection, 'browser');
+  assert.ok(!JSON.stringify(f.publicState()).includes(body.key));
+  assert.ok(!JSON.stringify(f.publicState()).includes('must-not-persist'));
+  ws.close();
+  await waitFor(() => !f.publicState().running && !f.publicState().browser.connected);
+});
+
+test('Stop during browser readiness cancels invitation creation without capture', async (t) => {
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const f = await fixture(t, { readinessProbe: () => gate });
+  const invite = f.request('/api/browser/invite', {});
+  await new Promise((resolve) => setTimeout(resolve, 15));
+  await f.request('/api/stream/stop', {}); release(ready);
+  assert.equal((await invite).code, 400);
+  assert.equal(f.publicState().browser.waiting, false); assert.equal(f.children.length, 0);
+});
+
+test('USB browser mode owns one non-rebinding tunnel and removes only that tunnel', async (t) => {
+  const commands = [];
+  const f = await fixture(t, {
+    readinessProbe: async () => ({ ...ready, checks: [...ready.checks, { id: 'adb', ready: true }] }),
+    commandRunner: async (exe, args) => {
+      commands.push(args);
+      return { stdout: args[0] === 'devices' ? 'List of devices attached\ntest-usb device model:Test\n' : '' };
+    },
+  });
+  const result = await f.request('/api/browser/invite', { browserTransport: 'usb' });
+  assert.equal(result.code, 201); assert.equal(result.body.mode, 'usb');
+  const reverse = commands.find((args) => args.includes('--no-rebind'));
+  assert.deepEqual(reverse.slice(0, 4), ['-s', 'test-usb', 'reverse', '--no-rebind']);
+  assert.equal(reverse[4], reverse[5]);
+  assert.equal(Number(reverse[4].slice(4)), Number(new URL(result.body.url).port));
+  assert.equal(f.children.length, 0);
+  await f.request('/api/stream/stop', {});
+  await waitFor(() => commands.some((args) => args.includes('--remove')));
+  assert.deepEqual(commands.find((args) => args.includes('--remove')), ['-s', 'test-usb', 'reverse', '--remove', reverse[4]]);
+  assert.ok(!commands.flat().includes('--remove-all'));
+});
+
+test('USB tunnel creation failure never overwrites an existing mapping or leaks an invitation', async (t) => {
+  const f = await fixture(t, {
+    readinessProbe: async () => ({ ...ready, checks: [...ready.checks, { id: 'adb', ready: true }] }),
+    commandRunner: async (exe, args) => {
+      if (args.includes('--no-rebind')) throw new Error('existing mapping');
+      return { stdout: 'List of devices attached\ntest-usb device model:Test\n' };
+    },
+  });
+  const result = await f.request('/api/browser/invite', { browserTransport: 'usb' });
+  assert.equal(result.code, 400); assert.match(result.body.error, /will not be overwritten/);
+  assert.equal(f.publicState().browser.waiting, false); assert.equal(f.children.length, 0);
+});
+
+test('remote browser modes fail closed without trusted HTTPS and never fall back to ADB', async (t) => {
+  const f = await fixture(t, { commandRunner: async () => { throw new Error('ADB must not run'); } });
+  for (const browserTransport of ['wifi', 'ip', 'internet']) {
+    const result = await f.request('/api/browser/invite', { browserTransport });
+    assert.equal(result.code, 400); assert.match(result.body.error, /trusted HTTPS/);
+    assert.equal(f.publicState().browser.waiting, false);
+  }
+  assert.equal(f.children.length, 0);
 });
 
 test('Mac private-network discovery forces CLI mode and never launches Tailscale UI', async (t) => {

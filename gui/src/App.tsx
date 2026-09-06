@@ -21,6 +21,7 @@ import {
   Wifi,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import BrowserHostPanel from './BrowserHostPanel';
 
 import {
   fetchDevices,
@@ -246,7 +247,7 @@ export default function App() {
     fetchStatus()
       .then((next) => {
         setStatus(next);
-        if (next.config) setConfig(next.config);
+        if (next.config && next.config.connection !== 'browser') setConfig(next.config);
         setServiceOnline(true);
       })
       .catch(() => setServiceOnline(false));
@@ -306,6 +307,7 @@ export default function App() {
   const preview = useMemo(() => commandPreview(effectiveConfig), [effectiveConfig]);
   const localReadiness = status.readiness?.transports[config.connection];
   const canStart = serviceOnline
+    && !status.browser?.waiting
     && Boolean(localReadiness?.ready)
     && status.binaryAvailable
     && status.reverseDisplaySupported
@@ -608,7 +610,7 @@ export default function App() {
         )}
 
         <div className="dashboard-grid" hidden={activeSection === 'activity'}>
-          <section className="panel device-panel" id="device" aria-labelledby="device-title" hidden={activeSection !== 'connection' && activeSection !== 'device'}>
+          <section className="panel device-panel" id="device" aria-labelledby="device-title" hidden={(activeSection !== 'connection' && activeSection !== 'device') || (activeSection === 'connection' && Boolean(status.browser?.waiting || status.browser?.connected))}>
             <div className="panel-header">
               <div>
                 <p className="eyebrow">Android target</p>
@@ -740,7 +742,7 @@ export default function App() {
 
             <div className="latency-card">
               <div>
-                <span>{macHost ? 'Encode → Android decode' : 'Capture → Android decode'}</span>
+                <span>{status.config?.connection === 'browser' ? 'Capture → browser decode' : macHost ? 'Encode → Android decode' : 'Capture → Android decode'}</span>
                 <strong>{latency === null ? '—' : `${Math.round(latency)} ms`}</strong>
               </div>
               <p className="action-note">{latency === null ? status.running ? 'Waiting for the first decode acknowledgement…' : 'No measurement yet. Start a stream to receive real latency data.' : status.running ? 'Latest measured decode acknowledgement.' : 'Last measurement from the previous stream.'}</p>
@@ -753,10 +755,12 @@ export default function App() {
               <FeatureRow icon={<MousePointer2 size={16} />} label="Cursor" value="Visible" />
               <FeatureRow icon={<Cpu size={16} />} label="Encoder" value={status.encoder ? encoderNames[status.encoder as Encoder] || status.encoder : encoderNames[effectiveEncoder]} />
               <FeatureRow icon={<Activity size={16} />} label="Frame policy" value="Newest wins" />
-              <FeatureRow icon={<Globe2 size={16} />} label="Remote web viewer" value="Planned" planned />
+              <FeatureRow icon={<Globe2 size={16} />} label="Remote web viewer" value="Experimental · Connect to set up" planned />
             </div>
           </section>
         </div>
+
+        {activeSection === 'connection' && <BrowserHostPanel status={status} config={effectiveConfig} online={serviceOnline} />}
 
         <section className="panel activity-panel" id="activity" aria-labelledby="activity-title" hidden={activeSection !== 'activity'}>
           <div className="panel-header">
