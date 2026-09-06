@@ -59,6 +59,7 @@ jobs:
           meson test -C .tmp/ci-native --print-errorlogs
       - name: Verify live native log delivery to the dashboard
         env:
+          MSYS2_PATH_TYPE: inherit
           SCRCPY_LOG_PIPE_TEST_BINARY: .tmp/ci-native/app/log-pipe-fixture.exe
         run: node --test gui/server/telemetry.test.mjs
 

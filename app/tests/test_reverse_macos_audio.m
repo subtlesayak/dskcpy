@@ -49,8 +49,24 @@ int main(void) {
         CMSampleBufferRef sample = sample_buffer(planar, 48000, 2, 1024);
         assert(CMSampleBufferDataIsReady(sample));
         bool converted = sc_reverse_macos_audio_pcm(sample, pcm, &count);
-        if (!converted) fprintf(stderr, "Synthetic PCM conversion failed: planar=%u samples=%ld dataBytes=%zu\n",
-            planar, (long)CMSampleBufferGetNumSamples(sample), CMSampleBufferGetTotalSampleSize(sample));
+        if (!converted) {
+            const AudioStreamBasicDescription *asbd = CMAudioFormatDescriptionGetStreamBasicDescription(CMSampleBufferGetFormatDescription(sample));
+            fprintf(stderr, "Synthetic PCM: planar=%u samples=%ld bytes=%zu rate=%.0f channels=%u bits=%u flags=%u stride=%u\n",
+                planar, (long)CMSampleBufferGetNumSamples(sample), CMSampleBufferGetTotalSampleSize(sample),
+                asbd->mSampleRate, (unsigned)asbd->mChannelsPerFrame, (unsigned)asbd->mBitsPerChannel,
+                (unsigned)asbd->mFormatFlags, (unsigned)asbd->mBytesPerFrame);
+            size_t size = offsetof(AudioBufferList, mBuffers) + 2 * sizeof(AudioBuffer), needed = 0;
+            AudioBufferList *list = calloc(1, size); assert(list);
+            CMBlockBufferRef block = NULL;
+            OSStatus status = CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(sample, &needed, list, size,
+                kCFAllocatorDefault, kCFAllocatorDefault, kCMSampleBufferFlag_AudioBufferList_Assure16ByteAlignment, &block);
+            fprintf(stderr, "Synthetic PCM list: status=%d capacity=%zu needed=%zu buffers=%u\n", (int)status, size, needed, (unsigned)list->mNumberBuffers);
+            if (status == noErr) for (unsigned i = 0; i < list->mNumberBuffers && i < 2; ++i)
+                fprintf(stderr, "Synthetic PCM buffer: channels=%u bytes=%u data=%s\n", (unsigned)list->mBuffers[i].mNumberChannels,
+                    (unsigned)list->mBuffers[i].mDataByteSize, list->mBuffers[i].mData ? "present" : "missing");
+            if (block) CFRelease(block);
+            free(list);
+        }
         assert(converted && count == 1024);
         for (size_t i = 0; i < count; ++i) assert(pcm[2*i] == 16384 && pcm[2*i+1] == -16384);
         CFRelease(sample);
