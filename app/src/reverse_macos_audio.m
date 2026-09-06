@@ -15,12 +15,17 @@ bool sc_reverse_macos_audio_pcm(CMSampleBufferRef sample, int16_t *pcm, size_t *
     if (count <= 0 || count > SC_REVERSE_AUDIO_MAX_CHUNK) return false;
     bool planar = asbd->mFormatFlags & kAudioFormatFlagIsNonInterleaved;
     if (asbd->mBytesPerFrame != (planar ? 4u : 8u)) return false;
-    // Enough room for the two requested channels; reject unexpected layouts.
-    size_t size = offsetof(AudioBufferList, mBuffers) + 2 * sizeof(AudioBuffer);
-    AudioBufferList *list = malloc(size);
+    // Query CoreMedia's exact list size. Keep the allocation bounded by the
+    // two requested channels, rather than guessing an overallocated list size.
+    size_t size = 0;
+    OSStatus status = CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(sample, &size, NULL, 0,
+        kCFAllocatorDefault, kCFAllocatorDefault, kCMSampleBufferFlag_AudioBufferList_Assure16ByteAlignment, NULL);
+    if (status != noErr || size < sizeof(AudioBufferList)
+            || size > offsetof(AudioBufferList, mBuffers) + 2 * sizeof(AudioBuffer)) return false;
+    AudioBufferList *list = calloc(1, size);
     if (!list) return false;
     CMBlockBufferRef block = NULL;
-    OSStatus status = CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(sample, NULL, list, size,
+    status = CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(sample, NULL, list, size,
         kCFAllocatorDefault, kCFAllocatorDefault, kCMSampleBufferFlag_AudioBufferList_Assure16ByteAlignment, &block);
     bool ok = status == noErr && list->mNumberBuffers == (planar ? 2u : 1u);
     if (ok) {
