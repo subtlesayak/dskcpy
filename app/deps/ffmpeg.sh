@@ -96,6 +96,12 @@ else
         )
     fi
 
+    if [[ "$HOST" == win* ]]; then
+        # Reverse display encodes the Windows desktop. Keep the built-in
+        # Media Foundation fallback in otherwise decoder-only release builds.
+        conf+=(--enable-mediafoundation --enable-encoder=h264_mf)
+    fi
+
     if [[ "$LINK_TYPE" == static ]]
     then
         conf+=(
@@ -139,6 +145,11 @@ else
     fi
 
     "$SOURCES_DIR/$PROJECT_DIR"/configure "${conf[@]}"
+fi
+
+if [[ "$HOST" == win* ]] && ! grep -q '^#define CONFIG_H264_MF_ENCODER 1' config_components.h; then
+    echo "Windows reverse display requires h264_mf. Reconfigure this FFmpeg build." >&2
+    exit 1
 fi
 
 make -j

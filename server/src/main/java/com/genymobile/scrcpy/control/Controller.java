@@ -870,9 +870,14 @@ public class Controller implements AsyncProcessor, VirtualDisplayListener {
     }
 
     private void resetVideo() {
-        if (surfaceCapture != null) {
+        // The capture control is set only after the encoder has started. A
+        // reset received before then is unnecessary and must not crash the
+        // controller thread.
+        CaptureControl captureControl = surfaceCapture != null
+                ? surfaceCapture.getCaptureControl() : null;
+        if (captureControl != null) {
             Ln.i("Video capture reset");
-            surfaceCapture.getCaptureControl().reset(CaptureControl.RESET_REASON_CLIENT_RESET);
+            captureControl.reset(CaptureControl.RESET_REASON_CLIENT_RESET);
         }
     }
 

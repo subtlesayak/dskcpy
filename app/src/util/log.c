@@ -147,6 +147,10 @@ sc_sdl_log_print(void *userdata, int category, SDL_LogPriority priority,
     assert(priority < SDL_LOG_PRIORITY_COUNT);
     const char *prio_name = sc_sdl_log_priority_names[priority];
     fprintf(out, "%s: %s\n", prio_name, message);
+    // A dashboard launches scrcpy with pipes. Non-Windows stdout is normally
+    // fully buffered, delaying encoder/ACK telemetry until the buffer fills or
+    // the process exits. Deliver complete log records immediately on every OS.
+    fflush(out);
 }
 
 void

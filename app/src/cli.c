@@ -23,6 +23,7 @@ enum {
     OPT_WINDOW_TITLE = 1000,
     OPT_PUSH_TARGET,
     OPT_ALWAYS_ON_TOP,
+    OPT_CONNECTION,
     OPT_CROP,
     OPT_RECORD_FORMAT,
     OPT_PREFER_TEXT,
@@ -48,6 +49,9 @@ enum {
     OPT_V4L2_BUFFER,
     OPT_TUNNEL_HOST,
     OPT_TUNNEL_PORT,
+    OPT_REVERSE_DISPLAY,
+    OPT_REVERSE_DISPLAY_INDEX,
+    OPT_REVERSE_SOCKET,
     OPT_NO_CLIPBOARD_AUTOSYNC,
     OPT_TCPIP,
     OPT_RAW_KEY_EVENTS,
@@ -338,6 +342,20 @@ static const struct sc_option options[] = {
                 "If '@' is passed alone, then the rotation is locked to the "
                 "initial device orientation.\n"
                 "Default is 0.",
+    },
+    {
+        .longopt_id = OPT_CONNECTION,
+        .longopt = "connection",
+        .argdesc = "mode",
+        .text = "Select how to reach the Android device.\n"
+                "Possible values are \"usb\", \"wifi\" and "
+                "\"ip:<address>[:port]\".\n"
+                "\"usb\" selects the single USB device.\n"
+                "\"wifi\" reuses an existing TCP/IP device, or switches "
+                "the single USB device to TCP/IP and reconnects it.\n"
+                "\"ip:<address>[:port]\" connects directly to that address "
+                "(default port 5555).\n"
+                "The existing -d, -e and --tcpip options remain supported.",
     },
     {
         .longopt_id = OPT_CROP,
@@ -934,6 +952,34 @@ static const struct sc_option options[] = {
                 "--force-adb-forward.\n"
                 "Default is 0 (not forced): the local port used for "
                 "establishing the tunnel will be used.",
+    },
+    {
+        .longopt_id = OPT_REVERSE_DISPLAY,
+        .longopt = "reverse-display",
+        .text = "Stream a desktop monitor to Android and return touch input.\n"
+                "Windows uses GPU desktop capture and low-latency H.264."
+#ifdef HAVE_REVERSE_MACOS
+                "\nExperimental Mac backend: ScreenCaptureKit/VideoToolbox. "
+                "Requires macOS 13+, Screen Recording and Accessibility permissions. "
+                "Mac audio forwarding is not available yet."
+#else
+                " macOS requires an opt-in -Dreverse_macos=true source build."
+#endif
+                ,
+    },
+    {
+        .longopt_id = OPT_REVERSE_DISPLAY_INDEX,
+        .longopt = "reverse-display-index",
+        .argdesc = "index",
+        .text = "Select the zero-based desktop monitor to stream in "
+                "--reverse-display mode. Default is 0.",
+    },
+    {
+        .longopt_id = OPT_REVERSE_SOCKET,
+        .longopt = "reverse-socket",
+        .argdesc = "port",
+        .text = "Use an authenticated Display Bridge proxy on localhost. "
+                "Requires --reverse-display; bypasses ADB. Do not expose this proxy.",
     },
     {
         .shortopt = 'v',
@@ -1917,7 +1963,7 @@ parse_shortcut_mods(const char *s, uint8_t *shortcut_mods) {
     // A list of shortcut modifiers, for example "lctrl,rctrl,rsuper"
 
     for (;;) {
-        char *comma = strchr(s, ',');
+        const char *comma = strchr(s, ',');
         assert(!comma || comma > s);
         size_t limit = comma ? (size_t) (comma - s) : strlen(s);
 
@@ -2488,9 +2534,41 @@ parse_render_fit(const char *optarg, enum sc_render_fit *mode) {
 }
 
 static bool
+parse_connection(const char *value, struct scrcpy_options *opts) {
+    if (!strcmp(value, "usb")) {
+        opts->select_usb = true;
+        return true;
+    }
+
+    if (!strcmp(value, "wifi")) {
+        // Match --tcpip without an address: reuse an existing TCP/IP device,
+        // or bootstrap one from the single USB device.
+        opts->tcpip = true;
+        return true;
+    }
+
+    static const char ip_prefix[] = "ip:";
+    if (!strncmp(value, ip_prefix, sizeof(ip_prefix) - 1)) {
+        const char *address = value + sizeof(ip_prefix) - 1;
+        if (!*address) {
+            LOGE("--connection=ip: requires an address");
+            return false;
+        }
+        opts->tcpip = true;
+        opts->tcpip_dst = address;
+        return true;
+    }
+
+    LOGE("Unsupported connection mode: %s "
+         "(expected usb, wifi or ip:<address>[:port])", value);
+    return false;
+}
+
+static bool
 parse_args_with_getopt(struct scrcpy_cli_args *args, int argc, char *argv[],
                        const char *optstring, const struct option *longopts) {
     struct scrcpy_options *opts = &args->opts;
+    const char *connection = NULL;
 
     optind = 0; // reset to start from the first argument in tests
 
@@ -2509,6 +2587,13 @@ parse_args_with_getopt(struct scrcpy_cli_args *args, int argc, char *argv[],
                 break;
             case OPT_CROP:
                 opts->crop = optarg;
+                break;
+            case OPT_CONNECTION:
+                if (connection) {
+                    LOGE("--connection may only be passed once");
+                    return false;
+                }
+                connection = optarg;
                 break;
             case OPT_DISPLAY_ID:
                 if (!parse_display_id(optarg, &opts->display_id)) {
@@ -2745,6 +2830,7 @@ parse_args_with_getopt(struct scrcpy_cli_args *args, int argc, char *argv[],
                 break;
             case OPT_NO_AUDIO:
                 opts->audio = false;
+                opts->reverse_audio = false;
                 break;
             case OPT_NO_CLEANUP:
                 opts->cleanup = false;
@@ -2945,6 +3031,24 @@ parse_args_with_getopt(struct scrcpy_cli_args *args, int argc, char *argv[],
             case OPT_NO_TERMINAL_TITLE:
                 opts->update_terminal_title = false;
                 break;
+            case OPT_REVERSE_DISPLAY:
+                opts->reverse_display = true;
+                opts->window = false;
+                opts->audio = false;
+                opts->video_playback = false;
+                opts->audio_playback = false;
+                opts->clipboard_autosync = false;
+                break;
+            case OPT_REVERSE_DISPLAY_INDEX:
+                if (!parse_display_id(optarg, &opts->reverse_display_index)) {
+                    return false;
+                }
+                break;
+            case OPT_REVERSE_SOCKET:
+                if (!parse_port(optarg, &opts->reverse_socket) || !opts->reverse_socket) {
+                    return false;
+                }
+                break;
             default:
                 // getopt prints the error message on stderr
                 return false;
@@ -2955,6 +3059,23 @@ parse_args_with_getopt(struct scrcpy_cli_args *args, int argc, char *argv[],
     if (index < argc) {
         LOGE("Unexpected additional argument: %s", argv[index]);
         return false;
+    }
+
+    if (opts->reverse_socket && (!opts->reverse_display || connection
+            || opts->serial || opts->select_usb || opts->select_tcpip || opts->tcpip)) {
+        LOGE("--reverse-socket requires --reverse-display and no ADB selector");
+        return false;
+    }
+    if (connection) {
+        if (opts->serial || opts->select_usb || opts->select_tcpip
+                || opts->tcpip) {
+            LOGE("--connection cannot be combined with --serial, "
+                 "--select-usb, --select-tcpip or --tcpip");
+            return false;
+        }
+        if (!parse_connection(connection, opts)) {
+            return false;
+        }
     }
 
     // If a TCP/IP address is provided, then tcpip must be enabled
@@ -2999,8 +3120,51 @@ parse_args_with_getopt(struct scrcpy_cli_args *args, int argc, char *argv[],
         opts->audio_playback = false;
     }
 
+    if (opts->reverse_display) {
+#if !defined(_WIN32) && !defined(HAVE_REVERSE_MACOS)
+        LOGE("--reverse-display needs Windows or an experimental macOS build (-Dreverse_macos=true)");
+        return false;
+#endif
+        if (!opts->video) {
+            LOGE("--reverse-display requires video capture");
+            return false;
+        }
+        if (!opts->control) {
+            LOGE("--reverse-display requires the control channel for touch input");
+            return false;
+        }
+        if (otg) {
+            LOGE("--reverse-display cannot be combined with --otg");
+            return false;
+        }
+        if (opts->video_source != SC_VIDEO_SOURCE_DISPLAY) {
+            LOGE("--reverse-display requires the display video source");
+            return false;
+        }
+        if (opts->video_codec != SC_CODEC_H264) {
+            LOGE("--reverse-display currently supports H.264 only");
+            return false;
+        }
+        if (opts->record_filename || v4l2) {
+            LOGE("--reverse-display cannot be combined with recording or V4L2 output");
+            return false;
+        }
+        if (opts->display_id || opts->new_display) {
+            LOGE("--reverse-display cannot be combined with Android display selection");
+            return false;
+        }
+        opts->window = false;
+        opts->audio = false;
+        opts->video_playback = false;
+        opts->audio_playback = false;
+        opts->clipboard_autosync = false;
+        // The companion Activity listens on the Android abstract socket, so
+        // the host must reach it through adb forward in every connection mode.
+        opts->force_adb_forward = true;
+    }
+
     if (opts->video && !opts->video_playback && !opts->record_filename
-            && !v4l2) {
+            && !v4l2 && !opts->reverse_display) {
         LOGI("No video playback, no recording, no V4L2 sink: video disabled");
         opts->video = false;
     }

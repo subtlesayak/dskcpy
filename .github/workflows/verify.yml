@@ -1,0 +1,88 @@
+name: Verify reverse display
+
+on:
+  pull_request:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gui:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: gui/package-lock.json
+      - run: npm ci --prefix gui
+      - run: npm test --prefix gui
+      - run: npm run build --prefix gui
+
+  native-windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-meson
+            mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-pkgconf
+            mingw-w64-x86_64-ffmpeg
+            mingw-w64-x86_64-sdl3
+            mingw-w64-x86_64-libusb
+      - name: Configure clean native test build
+        run: meson setup .tmp/ci-native --buildtype=debug -Dcompile_server=false
+      - name: Compile and run native tests
+        run: |
+          meson compile -C .tmp/ci-native
+          meson test -C .tmp/ci-native --print-errorlogs
+
+  android-packaging:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        buildtype: [debug, release]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install build tools
+        run: |
+          python -m pip install meson ninja
+          sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
+      - name: Build from an empty Meson directory
+        run: |
+          meson setup .tmp/ci-android --buildtype=${{ matrix.buildtype }} -Dcompile_app=false
+          meson compile -C .tmp/ci-android
+      - name: Verify both declared outputs and companion signature
+        run: |
+          test -s .tmp/ci-android/server/scrcpy-server
+          test -s .tmp/ci-android/server/reverse-display.apk
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify .tmp/ci-android/server/reverse-display.apk
+          cmp server/build/outputs/apk/debug/server-debug.apk .tmp/ci-android/server/reverse-display.apk
+      - name: Android unit tests
+        if: matrix.buildtype == 'debug'
+        run: ./gradlew :server:testDebugUnitTest
+      - name: Build standalone server without Gradle
+        if: matrix.buildtype == 'debug'
+        run: BUILD_DIR=.tmp/ci-manual bash server/build_without_gradle.sh

@@ -285,6 +285,21 @@ net_set_tcp_nodelay(sc_socket socket, bool tcp_nodelay) {
 }
 
 bool
+net_set_socket_send_buffer(sc_socket socket, int size) {
+    sc_raw_socket raw_sock = unwrap(socket);
+
+    int ret = setsockopt(raw_sock, SOL_SOCKET, SO_SNDBUF,
+                         (const void *) &size, sizeof(size));
+    if (ret == -1) {
+        net_perror("setsockopt(SO_SNDBUF)");
+        return false;
+    }
+
+    assert(ret == 0);
+    return true;
+}
+
+bool
 net_parse_ipv4(const char *s, uint32_t *ipv4) {
     struct in_addr addr;
     if (!inet_pton(AF_INET, s, &addr)) {

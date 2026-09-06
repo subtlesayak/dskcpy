@@ -14,7 +14,7 @@ case "$1" in
         ;;
 esac
 
-cd "$(dirname ${BASH_SOURCE[0]})"
+cd "$(dirname "${BASH_SOURCE[0]}")"
 . build_common
 cd .. # root project dir
 
@@ -55,3 +55,4 @@ cp app/data/open_a_terminal_here.bat "$WINXX_BUILD_DIR/dist/"
 cp LICENSE "$WINXX_BUILD_DIR/dist/LICENSE.txt"
 cp "$DEPS_INSTALL_DIR"/bin/*.dll "$WINXX_BUILD_DIR/dist/"
 cp -r "$ADB_INSTALL_DIR"/. "$WINXX_BUILD_DIR/dist/"
+bash release/write_dependency_manifest.sh > "$WINXX_BUILD_DIR/dist/dependencies.txt"

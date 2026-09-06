@@ -2,6 +2,7 @@ package com.genymobile.scrcpy.device;
 
 import com.genymobile.scrcpy.control.ControlChannel;
 import com.genymobile.scrcpy.util.IO;
+import com.genymobile.scrcpy.util.Ln;
 import com.genymobile.scrcpy.util.StringUtils;
 
 import android.net.LocalServerSocket;
@@ -16,6 +17,7 @@ import java.nio.charset.StandardCharsets;
 public final class DesktopConnection implements Closeable {
 
     private static final int DEVICE_NAME_FIELD_LENGTH = 64;
+    private static final long VIDEO_SOCKET_WRITE_TIMEOUT_MILLIS = 2_000;
 
     private static final String SOCKET_NAME_PREFIX = "scrcpy";
 
@@ -36,6 +38,18 @@ public final class DesktopConnection implements Closeable {
         videoFd = videoSocket != null ? videoSocket.getFileDescriptor() : null;
         audioFd = audioSocket != null ? audioSocket.getFileDescriptor() : null;
         controlChannel = controlSocket != null ? new ControlChannel(controlSocket) : null;
+
+        if (videoFd != null) {
+            try {
+                IO.setWriteTimeout(videoFd, VIDEO_SOCKET_WRITE_TIMEOUT_MILLIS);
+            } catch (IOException e) {
+                // Some vendor LocalSocket implementations may reject this
+                // option. Keep the connection usable, but make the reduced
+                // protection visible in diagnostics.
+                Ln.w("Could not set video socket write timeout; a stalled client "
+                        + "may increase encoder memory", e);
+            }
+        }
     }
 
     private static LocalSocket connect(String abstractName) throws IOException {

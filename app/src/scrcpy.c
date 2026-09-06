@@ -23,6 +23,7 @@
 #include "keyboard_sdk.h"
 #include "mouse_sdk.h"
 #include "recorder.h"
+#include "reverse_display.h"
 #include "screen.h"
 #include "sdl_hints.h"
 #include "server.h"
@@ -334,6 +335,24 @@ scrcpy(struct scrcpy_options *options) {
 
     atexit(SDL_Quit);
 
+    if (options->reverse_socket) {
+        // The GUI authenticates the phone through the encrypted private network
+        // before opening this short-lived loopback proxy. One full-duplex socket
+        // carries desktop video out and frame ACKs/touch back. Never start ADB.
+        sc_socket socket = net_socket();
+        if (socket == SC_SOCKET_NONE) {
+            return SCRCPY_EXIT_FAILURE;
+        }
+        if (!net_connect(socket, IPV4_LOCALHOST, options->reverse_socket)) {
+            net_close(socket);
+            return SCRCPY_EXIT_FAILURE;
+        }
+        net_set_tcp_nodelay(socket, true);
+        enum scrcpy_exit_code result = sc_reverse_display_run(socket, socket, options);
+        net_close(socket);
+        return result;
+    }
+
     enum scrcpy_exit_code ret = SCRCPY_EXIT_FAILURE;
 
     bool server_started = false;
@@ -389,6 +408,7 @@ scrcpy(struct scrcpy_options *options) {
         .control = options->control,
         .display_id = options->display_id,
         .new_display = options->new_display,
+        .reverse_display = options->reverse_display,
         .display_ime_policy = options->display_ime_policy,
         .video = options->video,
         .audio = options->audio,
@@ -503,6 +523,12 @@ scrcpy(struct scrcpy_options *options) {
     }
 
     LOGD("Server connected");
+
+    if (options->reverse_display) {
+        ret = sc_reverse_display_run(s->server.video_socket,
+                                     s->server.control_socket, options);
+        goto end;
+    }
 
     // It is necessarily initialized here, since the device is connected
     struct sc_server_info *info = &s->server.info;

@@ -1,0 +1,26 @@
+<resources>
+    <style name="Theme.Dskcpy" parent="Theme.Material3.Dark.NoActionBar">
+        <item name="colorPrimary">#89D1E5</item>
+        <item name="colorOnPrimary">#003641</item>
+        <item name="colorPrimaryContainer">#004E5D</item>
+        <item name="colorOnPrimaryContainer">#A5EEFF</item>
+        <item name="colorSecondary">#B1CBD2</item>
+        <item name="colorOnSecondary">#1D343A</item>
+        <item name="colorSecondaryContainer">#344B52</item>
+        <item name="colorOnSecondaryContainer">#CDE7EE</item>
+        <item name="colorSurface">#101416</item>
+        <item name="colorSurfaceContainer">#1C2123</item>
+        <item name="colorSurfaceContainerHigh">#272C2E</item>
+        <item name="colorSurfaceContainerHighest">#323739</item>
+        <item name="colorOnSurface">#E0E3E5</item>
+        <item name="colorSurfaceVariant">#3F484B</item>
+        <item name="colorOnSurfaceVariant">#BFC8CC</item>
+        <item name="colorOutline">#899296</item>
+        <item name="colorError">#FFB4AB</item>
+        <item name="android:colorBackground">#101416</item>
+        <item name="android:windowBackground">#101416</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowActionModeOverlay">true</item>
+    </style>
+</resources>

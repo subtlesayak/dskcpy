@@ -15,6 +15,7 @@ fi
 PROJECT_ROOT="$1"
 OUTPUT="$2"
 BUILDTYPE="$3"
+COMPANION_OUTPUT="${4:-$(dirname "$OUTPUT")/reverse-display.apk}"
 
 # gradlew is in the parent of the server directory
 GRADLE=${GRADLE:-$PROJECT_ROOT/../gradlew}
@@ -24,6 +25,9 @@ then
     "$GRADLE" -p "$PROJECT_ROOT" assembleDebug
     cp "$PROJECT_ROOT/build/outputs/apk/debug/server-debug.apk" "$OUTPUT"
 else
-    "$GRADLE" -p "$PROJECT_ROOT" assembleRelease
+    "$GRADLE" -p "$PROJECT_ROOT" assembleRelease assembleDebug
     cp "$PROJECT_ROOT/build/outputs/apk/release/server-release-unsigned.apk" "$OUTPUT"
 fi
+
+# The companion must be installable in both debug and release host builds.
+cp "$PROJECT_ROOT/build/outputs/apk/debug/server-debug.apk" "$COMPANION_OUTPUT"

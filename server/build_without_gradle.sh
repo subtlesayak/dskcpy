@@ -19,7 +19,7 @@ BUILD_TOOLS=${ANDROID_BUILD_TOOLS:-36.0.0}
 PLATFORM_TOOLS="$ANDROID_HOME/platforms/android-$PLATFORM"
 BUILD_TOOLS_DIR="$ANDROID_HOME/build-tools/$BUILD_TOOLS"
 
-BUILD_DIR="$(realpath ${BUILD_DIR:-build_manual})"
+BUILD_DIR="$(realpath "${BUILD_DIR:-build_manual}")"
 CLASSES_DIR="$BUILD_DIR/classes"
 GEN_DIR="$BUILD_DIR/gen"
 SERVER_DIR=$(dirname "$0")
@@ -27,6 +27,10 @@ SERVER_BINARY=scrcpy-server
 ANDROID_JAR="$PLATFORM_TOOLS/android.jar"
 ANDROID_AIDL="$PLATFORM_TOOLS/framework.aidl"
 LAMBDA_JAR="$BUILD_TOOLS_DIR/core-lambda-stubs.jar"
+JAVA_CLASSPATH="$LAMBDA_JAR:$GEN_DIR"
+if [[ "$OSTYPE" == msys* || "$OSTYPE" == cygwin* ]]; then
+    JAVA_CLASSPATH="$(cygpath -w "$LAMBDA_JAR");$(cygpath -w "$GEN_DIR")"
+fi
 
 echo "Platform: android-$PLATFORM"
 echo "Build-tools: $BUILD_TOOLS"
@@ -47,10 +51,17 @@ EOF
 
 echo "Generating java from aidl..."
 cd "$SERVER_DIR/src/main/aidl"
-"$BUILD_TOOLS_DIR/aidl" -o"$GEN_DIR" -I. \
-    android/content/IOnPrimaryClipChangedListener.aidl
-"$BUILD_TOOLS_DIR/aidl" -o"$GEN_DIR" -I. -p "$ANDROID_AIDL" \
-    android/view/IDisplayWindowListener.aidl
+native_path() {
+    if [[ "$OSTYPE" == msys* || "$OSTYPE" == cygwin* ]]; then
+        cygpath -w "$1"
+    else
+        printf '%s\n' "$1"
+    fi
+}
+"$BUILD_TOOLS_DIR/aidl" -o"$(native_path "$GEN_DIR")" -I"$(native_path "$PWD")" \
+    "$(native_path "$PWD/android/content/IOnPrimaryClipChangedListener.aidl")"
+"$BUILD_TOOLS_DIR/aidl" -o"$(native_path "$GEN_DIR")" -I"$(native_path "$PWD")" -p "$(native_path "$ANDROID_AIDL")" \
+    "$(native_path "$PWD/android/view/IDisplayWindowListener.aidl")"
 
 # Fake sources to expose hidden Android types to the project
 FAKE_SRC=( \
@@ -65,6 +76,7 @@ SRC=( \
     com/genymobile/scrcpy/display/*.java \
     com/genymobile/scrcpy/model/*.java \
     com/genymobile/scrcpy/opengl/*.java \
+    com/genymobile/scrcpy/reverse/*.java \
     com/genymobile/scrcpy/util/*.java \
     com/genymobile/scrcpy/video/*.java \
     com/genymobile/scrcpy/wrappers/*.java \
@@ -79,7 +91,7 @@ done
 echo "Compiling java sources..."
 cd ../java
 javac -encoding UTF-8 -bootclasspath "$ANDROID_JAR" \
-    -cp "$LAMBDA_JAR:$GEN_DIR" \
+    -cp "$JAVA_CLASSPATH" \
     -d "$CLASSES_DIR" \
     -source 1.8 -target 1.8 \
     ${FAKE_SRC[@]} \
@@ -102,7 +114,7 @@ then
     rm -rf classes.dex
 else
     # use d8
-    "$BUILD_TOOLS_DIR/d8" --classpath "$ANDROID_JAR" \
+    java -cp "$BUILD_TOOLS_DIR/lib/d8.jar" com.android.tools.r8.D8 --classpath "$ANDROID_JAR" \
         --output "$BUILD_DIR/classes.zip" \
         android/view/*.class \
         android/content/*.class \

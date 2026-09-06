@@ -338,6 +338,10 @@ struct scrcpy_options {
     bool mouse_hover;
     bool audio_dup;
     const char *new_display; // [<width>x<height>][/<dpi>] parsed by the server
+    bool reverse_display;
+    bool reverse_audio;
+    uint32_t reverse_display_index;
+    uint16_t reverse_socket; // Authenticated GUI proxy on loopback; no ADB.
     const char *start_app;
     bool vd_destroy_content;
     bool vd_system_decorations;

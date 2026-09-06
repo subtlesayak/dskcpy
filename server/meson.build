@@ -6,8 +6,8 @@ if prebuilt_server == ''
                   # gradle is responsible for tracking source changes
                   build_by_default: true,
                   build_always_stale: true,
-                  output: 'scrcpy-server',
-                  command: [find_program('./scripts/build-wrapper.sh'), meson.current_source_dir(), '@OUTPUT@', get_option('buildtype')],
+                  output: ['scrcpy-server', 'reverse-display.apk'],
+                  command: [find_program('bash'), files('scripts/build-wrapper.sh'), meson.current_source_dir(), '@OUTPUT0@', get_option('buildtype'), '@OUTPUT1@'],
                   console: true,
                   install: true,
                   install_dir: 'share/scrcpy')
@@ -27,5 +27,8 @@ endif
 if meson.version().version_compare('>= 0.58.0')
        devenv = environment()
        devenv.set('SCRCPY_SERVER_PATH', meson.current_build_dir() / 'scrcpy-server')
+       if prebuilt_server == ''
+           devenv.set('SCRCPY_REVERSE_DISPLAY_APK', meson.current_build_dir() / 'reverse-display.apk')
+       endif
        meson.add_devenv(devenv)
 endif

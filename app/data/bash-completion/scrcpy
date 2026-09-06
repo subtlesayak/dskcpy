@@ -22,6 +22,7 @@ _scrcpy() {
         --camera-torch
         --camera-zoom=
         --capture-orientation=
+        --connection=
         --crop=
         -d --select-usb
         --disable-screensaver
@@ -55,6 +56,8 @@ _scrcpy() {
         -N --no-playback
         --new-display
         --new-display=
+        --reverse-display
+        --reverse-display-index=
         --no-audio
         --no-audio-playback
         --no-cleanup
@@ -155,6 +158,10 @@ _scrcpy() {
             COMPREPLY=($(compgen -W '0 90 180 270 flip0 flip90 flip180 flip270 @0 @90 @180 @270 @flip0 @flip90 @flip180 @flip270' -- "$cur"))
             return
             ;;
+        --connection)
+            COMPREPLY=($(compgen -W 'usb wifi ip:' -- "$cur"))
+            return
+            ;;
         --orientation|--display-orientation)
             COMPREPLY=($(compgen -W '0 90 180 270 flip0 flip90 flip180 flip270' -- "$cur"))
             return
@@ -223,6 +230,7 @@ _scrcpy() {
         |--max-fps \
         |-m|--max-size \
         |--new-display \
+        |--reverse-display-index \
         |-p|--port \
         |--push-target \
         |--rotation \

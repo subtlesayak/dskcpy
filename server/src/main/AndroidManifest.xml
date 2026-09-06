@@ -1,2 +1,28 @@
-<!-- not a real Android application, it is run by app_process manually -->
-<manifest />
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <application
+        android:label="dskcpy"
+        android:theme="@style/Theme.Dskcpy"
+        android:enableOnBackInvokedCallback="false">
+        <service android:name=".reverse.ReverseSessionService" android:exported="false"
+            android:foregroundServiceType="connectedDevice" />
+        <activity
+            android:name=".reverse.ReverseDisplayActivity"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:excludeFromRecents="false"
+            android:launchMode="singleTask"
+            android:exported="true"
+            android:screenOrientation="unspecified">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

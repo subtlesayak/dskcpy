@@ -41,6 +41,17 @@ void
 sc_adb_devices_destroy(struct sc_vec_adb_devices *devices);
 
 /**
+ * Select TCP/IP devices when available, otherwise select USB devices.
+ *
+ * Return the number of selected devices and write the index of the first one
+ * to idx_out when non-NULL. This is used by automatic Wi-Fi setup so that an
+ * existing network connection wins over the duplicate USB transport.
+ */
+size_t
+sc_adb_devices_select_tcpip_preferred(struct sc_adb_device *devices,
+                                      size_t len, size_t *idx_out);
+
+/**
  * Deduce the device type from the serial
  */
 enum sc_adb_device_type

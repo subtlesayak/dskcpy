@@ -7,6 +7,7 @@ import android.os.Build;
 import android.system.ErrnoException;
 import android.system.Os;
 import android.system.OsConstants;
+import android.system.StructTimeval;
 
 import java.io.FileDescriptor;
 import java.io.IOException;
@@ -59,6 +60,27 @@ public final class IO {
         writeFully(fd, ByteBuffer.wrap(buffer, offset, len));
     }
 
+    /**
+     * Limit how long a blocking socket write may wait for peer consumption.
+     *
+     * <p>The timeout is deliberately configured at the file-descriptor level
+     * so it also applies to writes performed through {@link Os#write}.</p>
+     */
+    public static void setWriteTimeout(FileDescriptor fd, long timeoutMillis) throws IOException {
+        if (Build.VERSION.SDK_INT < AndroidVersions.API_29_ANDROID_10) {
+            // StructTimeval and Os.setsockoptTimeval were added in Android 10.
+            // The socket remains usable without this optional guardrail on
+            // older devices.
+            return;
+        }
+        try {
+            StructTimeval timeout = StructTimeval.fromMillis(timeoutMillis);
+            Os.setsockoptTimeval(fd, OsConstants.SOL_SOCKET, OsConstants.SO_SNDTIMEO, timeout);
+        } catch (ErrnoException e) {
+            throw new IOException(e);
+        }
+    }
+
     public static String toString(InputStream inputStream) {
         StringBuilder builder = new StringBuilder();
         Scanner scanner = new Scanner(inputStream);
@@ -75,5 +97,13 @@ public final class IO {
 
     public static boolean isBrokenPipe(Exception e) {
         return e instanceof IOException && isBrokenPipe((IOException) e);
+    }
+
+    public static boolean isWriteTimeout(Exception e) {
+        if (!(e instanceof IOException)) {
+            return false;
+        }
+        Throwable cause = e.getCause();
+        return cause instanceof ErrnoException && ((ErrnoException) cause).errno == OsConstants.EAGAIN;
     }
 }

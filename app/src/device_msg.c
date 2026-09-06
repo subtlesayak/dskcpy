@@ -71,6 +71,43 @@ sc_device_msg_deserialize(const uint8_t *buf, size_t len,
 
             return 5 + size;
         }
+        case DEVICE_MSG_TYPE_REVERSE_TOUCH: {
+            // type: 1 byte; action: 1; pointer id: 8; position: 12;
+            // pressure: 2; action button: 4; buttons: 4
+            if (len < 32) {
+                return 0; // no complete message
+            }
+
+            msg->reverse_touch.action = (enum android_motionevent_action) buf[1];
+            msg->reverse_touch.pointer_id = sc_read64be(&buf[2]);
+            msg->reverse_touch.position.point.x = (int32_t) sc_read32be(&buf[10]);
+            msg->reverse_touch.position.point.y = (int32_t) sc_read32be(&buf[14]);
+            msg->reverse_touch.position.screen_size.width = sc_read16be(&buf[18]);
+            msg->reverse_touch.position.screen_size.height = sc_read16be(&buf[20]);
+            uint16_t pressure = sc_read16be(&buf[22]);
+            msg->reverse_touch.pressure = pressure == 0xffff
+                                        ? 1.0f : pressure / 65536.0f;
+            msg->reverse_touch.action_button =
+                (enum android_motionevent_buttons) sc_read32be(&buf[24]);
+            msg->reverse_touch.buttons =
+                (enum android_motionevent_buttons) sc_read32be(&buf[28]);
+
+            return 32;
+        }
+        case DEVICE_MSG_TYPE_REVERSE_FRAME_ACK:
+        case DEVICE_MSG_TYPE_REVERSE_AUDIO_ACK:
+            if (len < 9) {
+                return 0;
+            }
+            msg->reverse_frame_ack.pts = (int64_t) sc_read64be(&buf[1]);
+            return 9;
+        case DEVICE_MSG_TYPE_REVERSE_SYSTEM_ACTION:
+            if (len < 2) {
+                return 0;
+            }
+            msg->reverse_system_action.action =
+                (enum sc_reverse_system_action) buf[1];
+            return 2;
         default:
             LOGW("Unknown device message type: %d", (int) msg->type);
             return -1; // error, we cannot recover

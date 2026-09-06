@@ -1,0 +1,6 @@
+<resources>
+    <item name="connection_usb" type="id" />
+    <item name="connection_wifi" type="id" />
+    <item name="connection_internet" type="id" />
+    <item name="connection_settings" type="id" />
+</resources>

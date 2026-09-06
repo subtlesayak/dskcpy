@@ -154,6 +154,35 @@ process_msg(struct sc_receiver *receiver, struct sc_device_msg *msg) {
             }
 
             break;
+        case DEVICE_MSG_TYPE_REVERSE_TOUCH:
+            if (receiver->cbs->on_reverse_touch) {
+                receiver->cbs->on_reverse_touch(receiver, msg,
+                                                receiver->cbs_userdata);
+            } else {
+                LOGW("Received unexpected reverse touch message");
+            }
+            break;
+        case DEVICE_MSG_TYPE_REVERSE_FRAME_ACK:
+            if (receiver->cbs->on_reverse_frame_ack) {
+                receiver->cbs->on_reverse_frame_ack(receiver, msg,
+                                                    receiver->cbs_userdata);
+            } else {
+                LOGW("Received unexpected reverse frame acknowledgement");
+            }
+            break;
+        case DEVICE_MSG_TYPE_REVERSE_AUDIO_ACK:
+            if (receiver->cbs->on_reverse_audio_ack) {
+                receiver->cbs->on_reverse_audio_ack(receiver, msg, receiver->cbs_userdata);
+            }
+            break;
+        case DEVICE_MSG_TYPE_REVERSE_SYSTEM_ACTION:
+            if (receiver->cbs->on_reverse_system_action) {
+                receiver->cbs->on_reverse_system_action(
+                    receiver, msg, receiver->cbs_userdata);
+            } else {
+                LOGW("Received unexpected reverse system action");
+            }
+            break;
     }
 }
 

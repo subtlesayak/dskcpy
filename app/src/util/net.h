@@ -87,6 +87,11 @@ net_close(sc_socket socket);
 bool
 net_set_tcp_nodelay(sc_socket socket, bool tcp_nodelay);
 
+// Bound the amount of queued outgoing data. This is useful for real-time
+// streams where blocking is preferable to delivering stale buffered data.
+bool
+net_set_socket_send_buffer(sc_socket socket, int size);
+
 /**
  * Parse `ip` "xxx.xxx.xxx.xxx" to an IPv4 host representation
  */

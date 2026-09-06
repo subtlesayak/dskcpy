@@ -31,6 +31,46 @@ static void test_adb_devices(void) {
     sc_adb_devices_destroy(&vec);
 }
 
+static void test_adb_devices_prefer_tcpip(void) {
+    char output[] =
+        "List of devices attached\n"
+        "0123456789abcdef\tdevice product:MyProduct model:MyModel\n"
+        "192.168.1.1:5555\tdevice product:MyProduct model:MyModel\n";
+
+    struct sc_vec_adb_devices vec = SC_VECTOR_INITIALIZER;
+    bool ok = sc_adb_parse_devices(output, &vec);
+    assert(ok);
+
+    size_t idx = 0;
+    size_t count = sc_adb_devices_select_tcpip_preferred(vec.data, vec.size,
+                                                         &idx);
+    assert(count == 1);
+    assert(idx == 1);
+    assert(!vec.data[0].selected);
+    assert(vec.data[1].selected);
+
+    sc_adb_devices_destroy(&vec);
+}
+
+static void test_adb_devices_fallback_to_usb(void) {
+    char output[] =
+        "List of devices attached\n"
+        "0123456789abcdef\tdevice product:MyProduct model:MyModel\n";
+
+    struct sc_vec_adb_devices vec = SC_VECTOR_INITIALIZER;
+    bool ok = sc_adb_parse_devices(output, &vec);
+    assert(ok);
+
+    size_t idx = 1;
+    size_t count = sc_adb_devices_select_tcpip_preferred(vec.data, vec.size,
+                                                         &idx);
+    assert(count == 1);
+    assert(idx == 0);
+    assert(vec.data[0].selected);
+
+    sc_adb_devices_destroy(&vec);
+}
+
 static void test_adb_devices_cr(void) {
     char output[] =
         "List of devices attached\r\n"
@@ -297,6 +337,8 @@ int main(int argc, char *argv[]) {
     (void) argv;
 
     test_adb_devices();
+    test_adb_devices_prefer_tcpip();
+    test_adb_devices_fallback_to_usb();
     test_adb_devices_cr();
     test_adb_devices_daemon_start();
     test_adb_devices_daemon_start_mixed();

@@ -1,5 +1,19 @@
 # Connection
 
+For a single explicit connection option, use one of:
+
+```bash
+scrcpy --connection=usb
+scrcpy --connection=wifi
+scrcpy --connection=ip:192.168.1.1
+scrcpy --connection=ip:192.168.1.1:5555
+```
+
+`usb` selects the single USB device. `wifi` uses an existing TCP/IP device or,
+when one USB device is connected, enables TCP/IP mode and reconnects over
+Wi-Fi. `ip:` connects directly to the supplied address. The existing selector
+options described below remain available.
+
 ## Selection
 
 If exactly one device is connected (i.e. listed by `adb devices`), then it is

@@ -480,10 +480,10 @@ sc_adb_accept_device(const struct sc_adb_device *device,
             return true;
         case SC_ADB_DEVICE_SELECT_SERIAL:
             assert(selector->serial);
-            char *device_serial_colon = strchr(device->serial, ':');
+            const char *device_serial_colon = strchr(device->serial, ':');
             if (device_serial_colon) {
                 // The device serial is an IP:port...
-                char *serial_colon = strchr(selector->serial, ':');
+                const char *serial_colon = strchr(selector->serial, ':');
                 if (!serial_colon) {
                     // But the requested serial has no ':', so only consider
                     // the IP part of the device serial. This allows to use
@@ -507,6 +507,10 @@ sc_adb_accept_device(const struct sc_adb_device *device,
             // Both emulators and TCP/IP devices are selected via -e
             return sc_adb_device_get_type(device->serial) !=
                     SC_ADB_DEVICE_TYPE_USB;
+        case SC_ADB_DEVICE_SELECT_TCPIP_PREFERRED:
+            // Handled by sc_adb_devices_select() because it needs the full list
+            assert(!"Preferred TCP/IP selection must use the full device list");
+            return false;
         default:
             assert(!"Missing SC_ADB_DEVICE_SELECT_* handling");
             break;
@@ -519,6 +523,10 @@ static size_t
 sc_adb_devices_select(struct sc_adb_device *devices, size_t len,
                       const struct sc_adb_device_selector *selector,
                       size_t *idx_out) {
+    if (selector->type == SC_ADB_DEVICE_SELECT_TCPIP_PREFERRED) {
+        return sc_adb_devices_select_tcpip_preferred(devices, len, idx_out);
+    }
+
     size_t count = 0;
     for (size_t i = 0; i < len; ++i) {
         struct sc_adb_device *device = &devices[i];
@@ -607,6 +615,9 @@ sc_adb_select_device(struct sc_intr *intr,
             case SC_ADB_DEVICE_SELECT_TCPIP:
                 LOGE("Could not find any ADB device over TCP/IP:");
                 break;
+            case SC_ADB_DEVICE_SELECT_TCPIP_PREFERRED:
+                LOGE("Could not find any ADB device for automatic Wi-Fi setup:");
+                break;
             default:
                 assert(!"Unexpected selector type");
                 break;
@@ -634,6 +645,10 @@ sc_adb_select_device(struct sc_intr *intr,
             case SC_ADB_DEVICE_SELECT_TCPIP:
                 LOGE("Multiple (%" SC_PRIsizet ") ADB devices over TCP/IP:",
                      sel_count);
+                break;
+            case SC_ADB_DEVICE_SELECT_TCPIP_PREFERRED:
+                LOGE("Multiple (%" SC_PRIsizet ") ADB devices available for "
+                     "automatic Wi-Fi setup:", sel_count);
                 break;
             default:
                 assert(!"Unexpected selector type");

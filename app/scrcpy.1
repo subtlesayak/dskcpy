@@ -158,6 +158,14 @@ If '@' is passed alone, then the rotation is locked to the initial device orient
 Default is 0.
 
 .TP
+.BI "\-\-connection " mode
+Select how to reach the Android device.
+
+Possible values are "usb", "wifi" and "ip:<address>[:port]". "usb" selects the single USB device. "wifi" reuses an existing TCP/IP device, or switches the single USB device to TCP/IP and reconnects it. "ip:<address>[:port]" connects directly to that address (default port 5555).
+
+The existing B-dR, B-eR and B--tcpipR options remain supported.
+
+.TP
 .BI "\-\-crop " width\fR:\fIheight\fR:\fIx\fR:\fIy
 Crop the device screen on the server.
 
@@ -385,6 +393,18 @@ Examples:
     \-\-new\-display=1920x1080/420
     \-\-new\-display         # main display size and density
     \-\-new\-display=/240    # main display size and 240 dpi
+
+.TP
+.B \-\-reverse\-display
+Experimental Windows-only mode: stream a physical Windows monitor to Android and send touch events on the Android surface back to Windows.
+
+The mode uses GPU desktop capture and a low-latency H.264 encoder. It mirrors a physical monitor; it does not create a Windows virtual display or implement Extend mode.
+
+.TP
+.BI "\-\-reverse\-display\-index " index
+Select the zero-based Windows monitor to stream in --reverse-display mode.
+
+Default is 0.
 
 .TP
 .B \-\-no\-audio

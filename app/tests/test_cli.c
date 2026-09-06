@@ -149,6 +149,101 @@ static void test_parse_shortcut_mods(void) {
     assert(!ok);
 }
 
+static void test_reverse_audio_option(void) {
+    struct scrcpy_cli_args args = {.opts = scrcpy_options_default};
+    char *enabled[] = {"scrcpy", "--reverse-display"};
+    assert(scrcpy_parse_args(&args, 2, enabled));
+    assert(args.opts.reverse_audio);
+    assert(!args.opts.audio); // Never open Android->desktop capture by accident.
+    args.opts = scrcpy_options_default;
+    char *disabled[] = {"scrcpy", "--no-audio", "--reverse-display"};
+    assert(scrcpy_parse_args(&args, 3, disabled));
+    assert(!args.opts.reverse_audio);
+    args.opts = scrcpy_options_default;
+    char *disabled_after[] = {"scrcpy", "--reverse-display", "--no-audio"};
+    assert(scrcpy_parse_args(&args, 3, disabled_after));
+    assert(!args.opts.reverse_audio);
+}
+
+static void test_connection_usb(void) {
+    struct scrcpy_cli_args args = {
+        .opts = scrcpy_options_default,
+    };
+    char *argv[] = {"scrcpy", "--connection=usb"};
+
+    bool ok = scrcpy_parse_args(&args, ARRAY_LEN(argv), argv);
+    assert(ok);
+    assert(args.opts.select_usb);
+    assert(!args.opts.select_tcpip);
+    assert(!args.opts.tcpip);
+}
+
+static void test_connection_wifi(void) {
+    struct scrcpy_cli_args args = {
+        .opts = scrcpy_options_default,
+    };
+    char *argv[] = {"scrcpy", "--connection=wifi"};
+
+    bool ok = scrcpy_parse_args(&args, ARRAY_LEN(argv), argv);
+    assert(ok);
+    assert(args.opts.tcpip);
+    assert(!args.opts.tcpip_dst);
+}
+
+static void test_connection_ip(void) {
+    struct scrcpy_cli_args args = {
+        .opts = scrcpy_options_default,
+    };
+    char *argv[] = {"scrcpy", "--connection=ip:192.168.1.10:5555"};
+
+    bool ok = scrcpy_parse_args(&args, ARRAY_LEN(argv), argv);
+    assert(ok);
+    assert(args.opts.tcpip);
+    assert(!strcmp(args.opts.tcpip_dst, "192.168.1.10:5555"));
+}
+
+static void test_connection_invalid(void) {
+    struct scrcpy_cli_args args = {
+        .opts = scrcpy_options_default,
+    };
+    char *argv[] = {"scrcpy", "--connection=bluetooth"};
+
+    bool ok = scrcpy_parse_args(&args, ARRAY_LEN(argv), argv);
+    assert(!ok);
+}
+
+static void test_connection_conflict(void) {
+    struct scrcpy_cli_args args = {
+        .opts = scrcpy_options_default,
+    };
+    char *argv[] = {"scrcpy", "--connection=usb", "--tcpip"};
+
+    bool ok = scrcpy_parse_args(&args, ARRAY_LEN(argv), argv);
+    assert(!ok);
+}
+
+static void test_reverse_socket(void) {
+    struct scrcpy_cli_args args = {.opts = scrcpy_options_default};
+    char *argv[] = {"scrcpy", "--reverse-display", "--reverse-socket=43210"};
+    bool ok = scrcpy_parse_args(&args, ARRAY_LEN(argv), argv);
+#if defined(_WIN32) || defined(HAVE_REVERSE_MACOS)
+    assert(ok);
+    assert(args.opts.reverse_socket == 43210);
+    assert(!args.opts.serial && !args.opts.tcpip && !args.opts.select_usb);
+#else
+    assert(!ok);
+#endif
+    struct scrcpy_cli_args invalid = {.opts = scrcpy_options_default};
+    char *zero[] = {"scrcpy", "--reverse-display", "--reverse-socket=0"};
+    assert(!scrcpy_parse_args(&invalid, ARRAY_LEN(zero), zero));
+    invalid.opts = scrcpy_options_default;
+    char *conflict[] = {"scrcpy", "--reverse-display", "--reverse-socket=1234", "--connection=wifi"};
+    assert(!scrcpy_parse_args(&invalid, ARRAY_LEN(conflict), conflict));
+    invalid.opts = scrcpy_options_default;
+    char *missing_mode[] = {"scrcpy", "--reverse-socket=1234"};
+    assert(!scrcpy_parse_args(&invalid, ARRAY_LEN(missing_mode), missing_mode));
+}
+
 int main(int argc, char *argv[]) {
     (void) argc;
     (void) argv;
@@ -158,5 +253,12 @@ int main(int argc, char *argv[]) {
     test_options();
     test_options2();
     test_parse_shortcut_mods();
+    test_connection_usb();
+    test_connection_wifi();
+    test_connection_ip();
+    test_connection_invalid();
+    test_connection_conflict();
+    test_reverse_socket();
+    test_reverse_audio_option();
     return 0;
 }

@@ -49,7 +49,9 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: scrcpy-server
-          path: release/work/build-server/server/scrcpy-server
+          path: |
+            release/work/build-server/server/scrcpy-server
+            release/work/build-server/server/reverse-display.apk
 
   test-build-scrcpy-server-without-gradle:
     runs-on: ubuntu-latest

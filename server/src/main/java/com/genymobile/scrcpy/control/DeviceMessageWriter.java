@@ -39,6 +39,29 @@ public class DeviceMessageWriter {
                 dos.writeShort(data.length);
                 dos.write(data);
                 break;
+            case DeviceMessage.TYPE_REVERSE_TOUCH:
+                dos.writeByte(msg.getAction());
+                dos.writeLong(msg.getPointerId());
+                dos.writeInt(msg.getX());
+                dos.writeInt(msg.getY());
+                dos.writeShort(msg.getScreenWidth());
+                dos.writeShort(msg.getScreenHeight());
+                float pressure = Math.max(0f, Math.min(1f, msg.getPressure()));
+                int pressureFixed = (int) (pressure * 0x1p16f);
+                if (pressureFixed >= 0xffff) {
+                    pressureFixed = 0xffff;
+                }
+                dos.writeShort(pressureFixed);
+                dos.writeInt(msg.getActionButton());
+                dos.writeInt(msg.getButtons());
+                break;
+            case DeviceMessage.TYPE_REVERSE_FRAME_ACK:
+            case DeviceMessage.TYPE_REVERSE_AUDIO_ACK:
+                dos.writeLong(msg.getFramePts());
+                break;
+            case DeviceMessage.TYPE_REVERSE_SYSTEM_ACTION:
+                dos.writeByte(msg.getSystemAction());
+                break;
             default:
                 throw new ControlProtocolException("Unknown event type: " + type);
         }

@@ -19,6 +19,10 @@
 
 #define SC_SERVER_PATH_DEFAULT PREFIX "/share/scrcpy/" SC_SERVER_FILENAME
 #define SC_DEVICE_SERVER_PATH "/data/local/tmp/scrcpy-server.jar"
+#define SC_REVERSE_DISPLAY_PACKAGE "com.genymobile.scrcpy"
+#define SC_REVERSE_DISPLAY_ACTIVITY \
+    SC_REVERSE_DISPLAY_PACKAGE "/.reverse.ReverseDisplayActivity"
+#define SC_REVERSE_DISPLAY_APK_ENV "SCRCPY_REVERSE_DISPLAY_APK"
 
 #define SC_ADB_PORT_DEFAULT 5555
 #define SC_SOCKET_NAME_PREFIX "scrcpy_"
@@ -67,6 +71,68 @@ push_server(struct sc_intr *intr, const char *serial) {
     bool ok = sc_adb_push(intr, serial, server_path, SC_DEVICE_SERVER_PATH, 0);
     free(server_path);
     return ok;
+}
+
+static bool
+install_reverse_display_app(struct sc_intr *intr, const char *serial) {
+    char *apk_path = sc_get_env(SC_REVERSE_DISPLAY_APK_ENV);
+    if (!apk_path) {
+#ifdef PORTABLE
+        apk_path = sc_file_get_local_path("reverse-display.apk");
+#else
+        apk_path = strdup(PREFIX "/share/scrcpy/reverse-display.apk");
+#endif
+    }
+    if (!apk_path) {
+        LOG_OOM();
+        return false;
+    }
+
+    if (!sc_file_is_regular(apk_path)) {
+        LOGE("Reverse display companion APK '%s' does not exist or is not a "
+             "regular file", apk_path);
+        free(apk_path);
+        return false;
+    }
+
+    LOGD("Installing reverse display companion: %s", apk_path);
+    bool ok = sc_adb_install(intr, serial, apk_path, 0);
+    free(apk_path);
+    return ok;
+}
+
+static bool
+run_adb_command(struct sc_intr *intr, const char *const cmd[],
+                const char *name) {
+    sc_pid pid = sc_adb_execute(cmd, 0);
+    if (pid == SC_PROCESS_NONE) {
+        LOGE("Could not execute \"%s\"", name);
+        return false;
+    }
+
+    if (intr && !sc_intr_set_process(intr, pid)) {
+        sc_process_terminate(pid);
+        sc_process_wait(pid, true);
+        return false;
+    }
+
+    sc_exit_code exit_code = sc_process_wait(pid, false);
+    if (intr) {
+        sc_intr_set_process(intr, SC_PROCESS_NONE);
+    }
+    sc_process_close(pid);
+
+    if (exit_code) {
+        if (exit_code != SC_EXIT_CODE_NONE) {
+            LOGE("\"%s\" returned with value %" SC_PRIexitcode, name,
+                 exit_code);
+        } else {
+            LOGE("\"%s\" exited unexpectedly", name);
+        }
+        return false;
+    }
+
+    return true;
 }
 
 static const char *
@@ -213,6 +279,44 @@ execute_server(struct sc_server *server,
     const char *serial = server->serial;
     assert(serial);
 
+    if (params->reverse_display) {
+        const char *const force_stop_cmd[] = {
+            sc_adb_get_executable(), "-s", serial, "shell", "am",
+            "force-stop", SC_REVERSE_DISPLAY_PACKAGE, NULL,
+        };
+        if (!run_adb_command(&server->intr, force_stop_cmd,
+                             "adb shell am force-stop")) {
+            return SC_PROCESS_NONE;
+        }
+
+        char scid[sizeof("00000000")];
+        int r = snprintf(scid, sizeof(scid), "%08x", (unsigned) params->scid);
+        assert(r == (int) sizeof(scid) - 1);
+        (void) r;
+
+        const char *const start_cmd[] = {
+            sc_adb_get_executable(), "-s", serial, "shell", "am", "start",
+            // Always create a fresh companion task. A Settings screen opened
+            // for wireless pairing may otherwise remain above its task root,
+            // and am start reports success without creating our socket owner.
+            "-W", "-f", "0x10008000", // NEW_TASK | CLEAR_TASK
+            "-n", SC_REVERSE_DISPLAY_ACTIVITY, "--es", "scid", scid,
+            NULL,
+        };
+        if (!run_adb_command(&server->intr, start_cmd,
+                             "adb shell am start")) {
+            return SC_PROCESS_NONE;
+        }
+
+        // Keep a child adb shell alive so the existing server lifecycle and
+        // process observer can stop the companion Activity with the session.
+        const char *const wait_cmd[] = {
+            sc_adb_get_executable(), "-s", serial, "shell", "sleep",
+            "2147483647", NULL,
+        };
+        return sc_adb_execute(wait_cmd, 0);
+    }
+
     const char *cmd[128];
     unsigned count = 0;
     cmd[count++] = sc_adb_get_executable();
@@ -271,6 +375,9 @@ execute_server(struct sc_server *server,
 
     if (!params->video) {
         ADD_PARAM("video=false");
+    }
+    if (params->reverse_display) {
+        ADD_PARAM("reverse_display=true");
     }
     if (params->video_bit_rate) {
         ADD_PARAM("video_bit_rate=%" PRIu32, params->video_bit_rate);
@@ -1009,6 +1116,12 @@ run_server(void *data) {
                 LOGI("Using ANDROID_SERIAL: %s", env_serial);
                 selector.type = SC_ADB_DEVICE_SELECT_SERIAL;
                 selector.serial = env_serial;
+            } else if (params->tcpip) {
+                // --connection=wifi reuses an existing TCP/IP transport when
+                // the same device is also still attached over USB. If none is
+                // connected yet, fall back to the single USB device and
+                // bootstrap TCP/IP as before.
+                selector.type = SC_ADB_DEVICE_SELECT_TCPIP_PREFERRED;
             } else {
                 selector.type = SC_ADB_DEVICE_SELECT_ALL;
             }
@@ -1052,7 +1165,9 @@ run_server(void *data) {
     assert(serial);
     LOGD("Device serial: %s", serial);
 
-    ok = push_server(&server->intr, serial);
+    ok = params->reverse_display
+        ? install_reverse_display_app(&server->intr, serial)
+        : push_server(&server->intr, serial);
     if (!ok) {
         goto error_connection_failed;
     }

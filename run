@@ -22,4 +22,5 @@ fi
 
 SCRCPY_ICON_DIR="app/data" \
 SCRCPY_SERVER_PATH="$BUILDDIR/server/scrcpy-server" \
+SCRCPY_REVERSE_DISPLAY_APK="$BUILDDIR/server/reverse-display.apk" \
 "$BUILDDIR/app/scrcpy" "$@"

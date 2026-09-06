@@ -1,6 +1,6 @@
 #!/bin/bash
 set -ex
-cd "$(dirname ${BASH_SOURCE[0]})"
+cd "$(dirname "${BASH_SOURCE[0]}")"
 . build_common
 cd .. # root project dir
 
@@ -29,6 +29,9 @@ mkdir -p "$ARCHIVE_DIR/$TARGET_DIRNAME"
 
 cp -r "$BUILD_DIR/dist/." "$ARCHIVE_DIR/$TARGET_DIRNAME/"
 cp "$WORK_DIR/build-server/server/scrcpy-server" "$ARCHIVE_DIR/$TARGET_DIRNAME/"
+if [[ "$1" == win* ]]; then
+    cp "$WORK_DIR/build-server/server/reverse-display.apk" "$ARCHIVE_DIR/$TARGET_DIRNAME/"
+fi
 
 mkdir -p "$OUTPUT_DIR"
 

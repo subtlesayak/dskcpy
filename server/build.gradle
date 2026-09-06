@@ -20,12 +20,16 @@ android {
         buildConfig = true
         aidl = true
     }
+    sourceSets.test.resources.srcDir 'src/main/assets'
     lint {
         disable 'UseRequiresApi'
     }
 }
 
 dependencies {
+    // Material 3 Views integrate with the existing Java/SurfaceView receiver,
+    // without moving video rendering onto a different UI toolkit.
+    implementation 'com.google.android.material:material:1.12.0'
     testImplementation 'junit:junit:4.13.2'
 }
 

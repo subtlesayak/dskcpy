@@ -29,6 +29,9 @@ src = [
     'src/packet_merger.c',
     'src/receiver.c',
     'src/recorder.c',
+    'src/reverse_display.c',
+    'src/reverse_audio.c',
+    'src/reverse_macos_helpers.c',
     'src/scrcpy.c',
     'src/screen.c',
     'src/sdl_hints.c',
@@ -75,6 +78,14 @@ feature_test_macros = [
 ]
 
 conf = configuration_data()
+reverse_macos = get_option('reverse_macos') and host_machine.system() == 'darwin'
+conf.set('HAVE_REVERSE_MACOS', reverse_macos)
+if reverse_macos
+    add_languages('objc', native: false)
+    src += 'src/reverse_display_macos.m'
+    add_project_arguments('-fobjc-arc', '-fblocks', '-std=gnu11', '-mmacosx-version-min=13.0', language: 'objc')
+    add_project_link_arguments('-mmacosx-version-min=13.0', language: ['c', 'objc'])
+endif
 
 if host_machine.system() == 'windows'
     windows = import('windows')
@@ -85,8 +96,8 @@ if host_machine.system() == 'windows'
         windows.compile_resources('scrcpy-windows.rc'),
     ]
     feature_test_macros += [
-        '-D_WIN32_WINNT=0x0600',
-        '-DWINVER=0x0600',
+        '-D_WIN32_WINNT=0x0602',
+        '-DWINVER=0x0602',
     ]
 else
     src += [
@@ -129,6 +140,12 @@ dependencies = [
     dependency('libswresample', static: static),
     dependency('sdl3', version: '>= 3.2.0', static: static),
 ]
+if reverse_macos
+    dependencies += dependency('appleframeworks', modules: [
+        'Cocoa', 'ScreenCaptureKit', 'VideoToolbox', 'CoreMedia', 'CoreVideo',
+        'CoreGraphics', 'ApplicationServices', 'CoreAudio', 'Carbon',
+    ])
+endif
 
 if v4l2_support
     dependencies += dependency('libavdevice', static: static)
@@ -141,6 +158,10 @@ endif
 if host_machine.system() == 'windows'
     dependencies += cc.find_library('mingw32')
     dependencies += cc.find_library('ws2_32')
+    dependencies += cc.find_library('d3d11')
+    dependencies += cc.find_library('dxgi')
+    dependencies += cc.find_library('user32')
+    dependencies += cc.find_library('ole32')
 endif
 
 check_functions = [
@@ -223,7 +244,12 @@ endif
 
 # do not build tests in release (assertions would not be executed at all)
 if get_option('buildtype') == 'debug'
+    # Driven by the Node pipe-telemetry regression; not a capture executable.
+    executable('log-pipe-fixture', ['tests/log_pipe_fixture.c', 'src/util/log.c', 'src/compat.c'],
+               include_directories: src_dir, dependencies: dependencies)
     tests = [
+        ['test_reverse_watchdog', ['tests/test_reverse_watchdog.c']],
+        ['test_reverse_macos_helpers', ['tests/test_reverse_macos_helpers.c', 'src/reverse_macos_helpers.c']],
         ['test_adb_parser', [
             'tests/test_adb_parser.c',
             'src/adb/adb_device.c',

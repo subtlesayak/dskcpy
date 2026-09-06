@@ -8,3 +8,16 @@ build/
 /x/
 local.properties
 /scrcpy-server
+/.tmp/
+/gui/dist/
+/gui/node_modules/
+
+# Local planning, design references, credentials and companion build copies.
+/.planning/
+/gui/design/
+/companion/
+.env
+.env.*
+!.env.example
+*.jks
+*.keystore

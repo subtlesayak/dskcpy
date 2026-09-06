@@ -23,6 +23,8 @@ import com.genymobile.scrcpy.video.ScreenCapture;
 import com.genymobile.scrcpy.video.SurfaceCapture;
 import com.genymobile.scrcpy.video.SurfaceEncoder;
 import com.genymobile.scrcpy.video.VideoSource;
+import com.genymobile.scrcpy.reverse.ReverseDisplay;
+import com.genymobile.scrcpy.reverse.ReverseDisplayWindow;
 
 import android.annotation.SuppressLint;
 import android.os.Build;
@@ -108,6 +110,11 @@ public final class Server {
                 connection.sendDeviceMeta(Device.getDeviceName());
             }
 
+            if (options.isReverseDisplay()) {
+                runReverseDisplay(connection);
+                return;
+            }
+
             Controller controller = null;
 
             if (control) {
@@ -191,6 +198,26 @@ public final class Server {
             }
 
             connection.close();
+        }
+    }
+
+    private static void runReverseDisplay(DesktopConnection connection) throws IOException {
+        ReverseDisplay reverseDisplay = new ReverseDisplay(connection);
+        ReverseDisplayWindow window = new ReverseDisplayWindow(reverseDisplay.getSender(), reverseDisplay);
+        try {
+            window.show();
+
+            Completion completion = new Completion(1);
+            reverseDisplay.start(completion::addCompleted);
+            Looper.loop();
+        } finally {
+            reverseDisplay.stop();
+            try {
+                reverseDisplay.join();
+            } catch (InterruptedException e) {
+                // The outer server cleanup still closes the connection.
+            }
+            window.close();
         }
     }
 

@@ -1,238 +1,259 @@
-> [!WARNING]
-> **This GitHub repo (<https://github.com/Genymobile/scrcpy>) is the only official
-source for the project. Do not download releases from random websites, even if
-their name contains `scrcpy`.**
+<!-- generated-by: gsd-doc-writer -->
+# dskcpy
 
-# scrcpy (v4.1)
+**Stream your desktop to Android. Control it with touch.**
 
-<img src="app/data/scrcpy.svg" width="128" height="128" alt="scrcpy" align="right" />
+dskcpy is an experimental fork of [scrcpy](https://github.com/Genymobile/scrcpy)
+that adds the reverse direction: Windows or macOS desktop video on your Android
+phone or tablet, with input sent back to the computer. Windows also forwards
+desktop audio. Use USB, a local wireless connection, or a private VPN network.
 
-_pronounced "**scr**een **c**o**py**"_
+[Quick start](#quick-start) · [Connections](#connection-options) ·
+[macOS setup](doc/macos-host.md) · [Documentation](#documentation)
 
-This application mirrors Android devices (video and audio) connected via USB or
-[TCP/IP](doc/connection.md#tcpip-wireless) and allows control using the
-computer's keyboard and mouse. It does not require _root_ access or an app
-installed on the device. It works on _Linux_, _Windows_, and _macOS_.
+> [!IMPORTANT]
+> This is **dskcpy**, not an official Genymobile release. Get this fork's source
+> from [subtlesayak/dskcpy](https://github.com/subtlesayak/dskcpy).
+> Standard scrcpy downloads do not include these desktop-to-Android features.
+> Reverse display installs a companion Android app and currently requires a
+> source build; there is no signed, ready-to-install dskcpy desktop release.
 
-[![Linux](https://img.shields.io/badge/Linux-download-orange?style=for-the-badge&logo=linux)](doc/linux.md)&nbsp;
-[![Windows](https://img.shields.io/badge/Windows-download-blue?style=for-the-badge&logo=windows)](doc/windows.md)&nbsp;
-[![macOS](https://img.shields.io/badge/macOS-download-brightgreen?style=for-the-badge&logo=apple)](doc/macos.md)&nbsp;
+## What it does
 
-![screenshot](assets/screenshot-debian-600.jpg)
+- **Desktop video:** low-buffering H.264 streaming with hardware encoding where
+  available, a visible cursor, and adjustable resolution, frame rate and bitrate.
+- **Touch control:** native multi-touch injection on Windows; click, drag and
+  two-finger scrolling on the experimental Mac host.
+- **Desktop audio on Android:** Windows system playback over USB, LAN or Internet
+  mode, with a separate phone-playback mute control.
+- **Flexible connections:** USB, paired ADB Wi-Fi, direct IP, and experimental
+  Tailscale-backed Internet sessions without ADB after app installation.
+- **Leave and return:** background the Android app and return to the same
+  session on Android 6+, while the sender pauses video and audio while away.
+- **Controls within reach:** volume tap/hold, mute, window actions, lock,
+  touch enable/disable, Stop, and hide/show controls. Hold an icon for its hint.
+- **Local browser dashboard:** Connect, Device, Performance and Activity views;
+  wireless pairing/discovery, encoder selection, logs and live decode-ack metrics.
+- **Bounded recovery:** optional, limited retries for USB/LAN sessions. Internet
+  sessions deliberately require a fresh secret after disconnection.
 
-It focuses on:
+The Android app uses Material 3 navigation and adapts its streaming controls to
+available letterbox space. No root access is required. The project is free and
+open source, and USB/LAN streaming does not require a dskcpy account.
 
- - **lightness**: native, displays only the device screen
- - **performance**: 30~120fps, depending on the device
- - **quality**: 1920×1080 or above
- - **low latency**: [35~70ms][lowlatency]
- - **low startup time**: ~1 second to display the first image
- - **non-intrusiveness**: nothing is left installed on the Android device
- - **user benefits**: no account, no ads, no internet required
- - **freedom**: free and open source software
+## Platform support
 
-[lowlatency]: https://github.com/Genymobile/scrcpy/pull/646
+| Host → receiver | Status |
+| --- | --- |
+| Windows → Android | Implemented: video, native touch and system audio. Physical-device testing covers USB and authenticated VPN sessions. |
+| macOS → Android | Experimental, opt-in source build. Wireless video has been reported working on an M3 Mac. Mouse/scroll controls are implemented; broader hardware testing remains incomplete. **No Mac audio forwarding yet.** |
+| Linux → Android | Reverse hosting is not implemented. |
+| Desktop → iPhone/iPad | No iOS receiver is implemented. |
+| Desktop → browser | The web app controls the native host; it is **not** a browser video receiver. |
 
-Its features include:
- - [audio forwarding](doc/audio.md) (Android 11+)
- - [recording](doc/recording.md)
- - [virtual display](doc/virtual-display.md)
- - mirroring with [Android device screen off](doc/device.md#turn-screen-off)
- - [copy-paste](doc/control.md#copy-paste) in both directions
- - [configurable quality](doc/video.md)
- - [camera mirroring](doc/camera.md) (Android 12+)
- - [mirroring as a webcam (V4L2)](doc/v4l2.md) (Linux-only)
- - physical [keyboard][hid-keyboard] and [mouse][hid-mouse] simulation (HID)
- - [gamepad](doc/gamepad.md) support
- - [OTG mode](doc/otg.md)
- - and more…
-
-[hid-keyboard]: doc/keyboard.md#physical-keyboard-simulation
-[hid-mouse]: doc/mouse.md#physical-mouse-simulation
+The original Android-to-computer scrcpy mode remains in the codebase. Its
+platform support and features are separate from dskcpy's reverse mode.
 
 ## Prerequisites
 
-The Android device requires at least API 21 (Android 5.0).
+- **Windows host:** Windows 10+ with Desktop Duplication and an available H.264
+  encoder. The sender tries supported hardware encoders before software fallback.
+- **Mac host:** Apple silicon, macOS 13+, and an opt-in build using ScreenCaptureKit
+  and VideoToolbox. Screen Recording and Accessibility permissions are needed
+  for capture and input respectively.
+- **Android receiver:** Android 5.0+ (API 21) with H.264 decoding. Background/return
+  session retention requires Android 6+. Use Android 11+ for USB-free ADB pairing.
+- **Dashboard:** Node.js 22.12+ and npm, plus the compiled native host.
+- **USB/LAN:** Android SDK platform-tools (`adb`) and authorized debugging access.
+- **Internet mode:** Tailscale on both devices, permitted peer connectivity, and
+  the companion already installed. This mode does not need USB debugging.
 
-[Audio forwarding](doc/audio.md) is supported for API >= 30 (Android 11+).
+## Get the source
 
-Make sure you [enabled USB debugging][enable-adb] on your device(s).
-
-[enable-adb]: https://developer.android.com/studio/debug/dev-options#enable
-
-On some devices (especially Xiaomi), you might get the following error:
-
+```bash
+git clone https://github.com/subtlesayak/dskcpy.git
+cd dskcpy
 ```
-Injecting input events requires the caller (or the source of the instrumentation, if any) to have the INJECT_EVENTS permission.
+
+Do not substitute an upstream `scrcpy` executable or an unrelated companion APK.
+Build the sender and companion from the same checkout. Android updates require
+the same signing key; do not uninstall an existing app just to bypass a signing
+error if you need to keep its settings.
+
+### Windows build
+
+Install the native dependencies described in [MSYS2 build setup](doc/build.md#in-msys2),
+Node.js, JDK 17+, and Android SDK platform 36/build-tools 36.0.0. Make Java and
+ADB available on `PATH`, and set `ANDROID_HOME` to your Android SDK directory.
+
+From an **MSYS2 MinGW64 terminal** in this checkout:
+
+```bash
+meson setup x-reverse --buildtype=debug
+meson compile -C x-reverse
+meson test -C x-reverse --print-errorlogs
 ```
 
-In that case, you need to enable [an additional option][control] `USB debugging
-(Security Settings)` (this is an item different from `USB debugging`) to control
-it using a keyboard and mouse. Rebooting the device is necessary once this
-option is set.
+The build produces `x-reverse/app/scrcpy.exe`,
+`x-reverse/server/scrcpy-server` and `x-reverse/server/reverse-display.apk`.
+The signed companion is required for reverse mode. Keep the MinGW runtime
+libraries available when launching the executable.
 
-[control]: https://github.com/Genymobile/scrcpy/issues/70#issuecomment-373286323
+### Mac build
 
-Note that USB debugging is not required to run scrcpy in [OTG mode](doc/otg.md).
+Follow the [Mac setup guide](doc/macos-host.md) for dependencies and permissions.
+From a **Git checkout**, build the companion first with JDK 17+ and Android SDK
+platform 36 configured, or use a complete source test bundle containing it:
 
+```bash
+./gradlew :server:assembleDebug
+bash tools/macos-build.sh
+bash tools/macos-start.sh
+```
 
-## Get the app
+If a source bundle already contains `companion/reverse-display.apk`, skip the
+Gradle command. The Mac script builds and tests the opt-in host and dashboard;
+an ordinary Homebrew scrcpy installation cannot replace this build.
 
- - [Linux](doc/linux.md)
- - [Windows](doc/windows.md) (read [how to run](doc/windows.md#run))
- - [macOS](doc/macos.md)
+## Quick start
 
+After building the Windows host:
 
-## Must-know tips
+1. On Android, enable USB debugging, connect a data-capable cable, unlock the
+   phone and approve the computer's debugging prompt.
+2. In a terminal, start the local dashboard:
 
- - [Reducing resolution](doc/video.md#size) may greatly improve performance
-   (`scrcpy -m1024`)
- - [_Right-click_](doc/mouse.md#mouse-bindings) triggers `BACK`
- - [_Middle-click_](doc/mouse.md#mouse-bindings) triggers `HOME`
- - <kbd>Alt</kbd>+<kbd>f</kbd> toggles [fullscreen](doc/window.md#fullscreen)
- - There are many other [shortcuts](doc/shortcuts.md)
+   ```bash
+   cd gui
+   npm ci
+   npm run build
+   npm start
+   ```
 
+3. Open [the dashboard](http://127.0.0.1:27183) **on the computer**, choose **USB**,
+   select the authorized phone if necessary, and click **Start streaming**.
+   The host installs and opens the companion for ADB-based connections.
+4. Touch the desktop on Android. Use **Stop session** to disconnect; leaving the
+   app temporarily is different from stopping it. On Mac, use the Mac launcher
+   above and follow the permission prompts before expecting video or input.
+
+The dashboard discovers the local Windows `x-reverse` build automatically.
+For another build location, configure `SCRCPY_GUI_BINARY` and the matching
+assets as described in the [dashboard guide](gui/README.md).
+
+## Connection options
+
+| Mode | Setup | Needs USB? |
+| --- | --- | --- |
+| **USB** | Enable USB debugging and authorize the computer. | Yes, while streaming. |
+| **Wi-Fi** | Pair using Android 11+ Wireless debugging, then select a discovered wireless device. | No, with wireless pairing. |
+| **Connect IP** | Enter the phone's reachable LAN IP and ADB **connection** port. | No, when wireless debugging is already paired/enabled. |
+| **Internet** | Select a reachable Tailscale Android peer and enter its temporary dskcpy session secret. | No, after companion installation. |
+
+**Wireless pairing:** choose **Wi-Fi → Pair a phone without USB**. Enter the
+address and six-digit code from Android's **Pair device with pairing code**
+dialog. After pairing, use the connection address on the main **Wireless
+debugging** screen. The pairing and connection ports are different, and ports
+can change. Both devices must be reachable on the LAN. Older Android versions
+need initial USB setup for the ADB TCP/IP workflow.
+
+**Mobile data or separate networks:** a carrier IP alone is not an Internet
+connection method. Use [Internet mode](doc/internet-mode.md) with Tailscale.
+Different accounts can connect through a permitted device share or tailnet
+invitation. No account enrollment or access-policy change is performed for you.
+
+The phone can generate a **12-word passphrase**, **26-character alphanumeric
+key**, or **3-word short passphrase**, with a copy button. The three-word option
+is substantially weaker; prefer the longer formats, especially with other users.
+Never post a session secret in an issue or screenshot.
 
 ## Usage examples
 
-There are a lot of options, [documented](#user-documentation) in separate pages.
-Here are just some common examples.
+The binary is still named `scrcpy`. Once your build and runtime assets are
+configured, the CLI can start reverse display without the dashboard:
 
- - Capture the screen in H.265 (better quality), limit the size to 1920, limit
-   the frame rate to 60fps, disable audio, and control the device by simulating
-   a physical keyboard:
+```bash
+# USB: a practical starting point for desktop text
+scrcpy --reverse-display --connection=usb --max-size=1920 --max-fps=60 --video-bit-rate=12M
 
-    ```bash
-    scrcpy --video-codec=h265 --max-size=1920 --max-fps=60 --no-audio --keyboard=uhid
-    scrcpy --video-codec=h265 -m1920 --max-fps=60 --no-audio -K  # short version
-    ```
+# An already-authorized wireless ADB device
+scrcpy --reverse-display --connection=wifi
 
- - Start VLC in a new virtual display (separate from the device display):
+# An already-authorized LAN endpoint (replace this example IP and port)
+scrcpy --reverse-display --connection=ip:192.168.1.20:5555
+```
 
-    ```bash
-    scrcpy --new-display=1920x1080 --start-app=org.videolan.vlc
-    ```
+Use `--no-audio` to disable Windows audio capture. Select a Windows monitor with
+`--reverse-display-index=1` (zero-based), or a supported host encoder with
+`--video-encoder=h264_nvenc`. On Mac, use Auto or `h264_videotoolbox`.
+Internet authentication is handled by the dashboard, not by putting secrets
+into a CLI command. See [reverse-display options](doc/reverse-display.md).
 
- - Start VLC in a new _flex_ display using H.265 with a bitrate of 16 Mbps,
-   while keeping the display active so it does not turn off:
+## Must-know tips
 
-    ```bash
-    scrcpy --new-display -x --keep-active --start-app=org.videolan.vlc --video-codec=h265 -b16M
-    ```
+- Start with **1920 / 60 FPS / 12 Mbps**, then tune for your connection and device.
+  Dashboard setting changes apply to the **next** stream: stop and restart.
+- Prefer USB when diagnosing latency. Hardware encoding and a stable local
+  network help; a VPN relay or congested link can add delay.
+- On Mac, use **two fingers to scroll**. Windows uses native touch injection.
+- Phone-playback mute and computer mute are separate. Windows playback is not
+  automatically silenced when audio is forwarded to Android.
+- **Performance is not a glass-to-glass benchmark.** The number measures the
+  host-to-decode acknowledgement round trip, not physical display scan-out.
+  On Mac it starts at encode submission and excludes capture wait.
+- If Mac video works but Performance stays on Connecting, rebuild and restart
+  the updated native host. A browser refresh cannot replace the old binary.
+- Open the dashboard on the **host computer**. It binds to localhost; entering
+  its URL on the phone will not open the computer's dashboard.
 
- - Record the device camera in H.265 at 1920x1080 (and microphone) to an MP4
-   file:
+## Limits and security
 
-    ```bash
-    scrcpy --video-source=camera --video-codec=h265 --camera-size=1920x1080 --record=file.mp4
-    ```
+This mirrors an existing desktop display. It does **not** add a virtual monitor
+or Windows Extend mode. Stylus pressure/Windows Ink, an iOS receiver, a browser
+media receiver, a packaged Tauri desktop wrapper and Mac audio are not implemented.
+There is no zero-latency or fixed-latency guarantee.
 
- - Capture the device front camera and expose it as a webcam on the computer (on
-   Linux):
+ADB grants powerful access to a device: authorize only trusted computers and
+never expose debugging ports to the public Internet. In Internet mode, Tailscale
+provides network encryption; dskcpy adds temporary-session authentication, not
+its own replacement for VPN encryption. This protocol is experimental and has
+not undergone an independent security audit. Read the
+[security boundary](doc/internet-mode.md#security-boundary-and-protocol).
 
-    ```bash
-    scrcpy --video-source=camera --camera-size=1920x1080 --camera-facing=front --v4l2-sink=/dev/video2 --no-playback
-    ```
+The dashboard does not upload logs or diagnostics automatically. Session secrets
+are not saved in dashboard settings or generated commands. Review logs before
+sharing them: remove keys, device identifiers, addresses, personal paths and
+private screen content.
 
- - Control the device without mirroring by simulating a physical keyboard and
-   mouse (USB debugging not required):
+## Documentation
 
-    ```bash
-    scrcpy --otg
-    ```
+- [Reverse display, desktop controls and Windows audio](doc/reverse-display.md)
+- [Dashboard setup, runtime configuration and reconnection](gui/README.md)
+- [Mac build, permissions and manual test checklist](doc/macos-host.md)
+- [Internet mode, shared devices and authentication](doc/internet-mode.md)
+- [Regression tests and physical-device validation notes](doc/reverse-display-validation.md)
+- [Native build reference](doc/build.md) — inherited scrcpy instructions; clone
+  this fork and use the reverse-mode setup above.
+- [Upstream Android-to-computer documentation](https://github.com/Genymobile/scrcpy#user-documentation)
 
- - Control the device using gamepads plugged into the computer:
+For development, the dashboard uses `npm test` and `npm run build` from `gui/`.
+Native tests run in a debug Meson build with `meson test -C x-reverse`.
+Android tests use `./gradlew :server:testDebugUnitTest`. A passing build or mock
+test does not establish physical Mac, audio, input or network performance.
 
-    ```bash
-    scrcpy --gamepad=uhid
-    scrcpy -G  # short version
-    ```
+Fixes and improvements are welcome through
+[pull requests to this fork](https://github.com/subtlesayak/dskcpy/pulls).
+Keep reverse-display bug reports separate from upstream scrcpy issues and include
+the host OS, connection mode, reproduction steps and sanitized diagnostics.
 
-## User documentation
+## Credits and license
 
-The application provides a lot of features and configuration options. They are
-documented in the following pages:
+Built on [scrcpy](https://github.com/Genymobile/scrcpy) by Genymobile, Romain
+Vimont and its contributors. dskcpy's README follows upstream's feature-first,
+quick-start structure; reverse-display changes belong to this fork.
 
- - [Connection](doc/connection.md)
- - [Video](doc/video.md)
- - [Audio](doc/audio.md)
- - [Control](doc/control.md)
- - [Keyboard](doc/keyboard.md)
- - [Mouse](doc/mouse.md)
- - [Gamepad](doc/gamepad.md)
- - [Device](doc/device.md)
- - [Window](doc/window.md)
- - [Recording](doc/recording.md)
- - [Virtual display](doc/virtual-display.md)
- - [Tunnels](doc/tunnels.md)
- - [OTG](doc/otg.md)
- - [Camera](doc/camera.md)
- - [Video4Linux](doc/v4l2.md)
- - [Shortcuts](doc/shortcuts.md)
+Licensed under [Apache License 2.0](LICENSE). Existing upstream copyright and
+license notices are retained. The passphrase vocabulary has its own
+[MIT license notice](server/src/main/assets/internet-words-LICENSE.txt).
 
-
-## Resources
-
- - [FAQ](FAQ.md)
- - [Translations][wiki] (not necessarily up to date)
- - [Build instructions](doc/build.md)
- - [Developers](doc/develop.md)
- - [Verify release signatures](doc/verify-release.md)
-
-[wiki]: https://github.com/Genymobile/scrcpy/wiki
-
-
-## Articles
-
-- [Introducing scrcpy][article-intro]
-- [Scrcpy now works wirelessly][article-tcpip]
-- [Scrcpy 2.0, with audio][article-scrcpy2]
-
-[article-intro]: https://blog.rom1v.com/2018/03/introducing-scrcpy/
-[article-tcpip]: https://www.genymotion.com/blog/open-source-project-scrcpy-now-works-wirelessly/
-[article-scrcpy2]: https://blog.rom1v.com/2023/03/scrcpy-2-0-with-audio/
-
-## Contact
-
-You can open an [issue] for bug reports, feature requests or general questions.
-
-For bug reports, please read the [FAQ](FAQ.md) first, you might find a solution
-to your problem immediately.
-
-[issue]: https://github.com/Genymobile/scrcpy/issues
-
-You can also use:
-
- - Reddit: [`r/scrcpy`](https://www.reddit.com/r/scrcpy)
- - BlueSky: [`@scrcpy.bsky.social`](https://bsky.app/profile/scrcpy.bsky.social)
- - Twitter: [`@scrcpy_app`](https://twitter.com/scrcpy_app)
-
-
-## Donate
-
-I'm [@rom1v](https://github.com/rom1v), the author and maintainer of _scrcpy_.
-
-If you appreciate this application, you can [support my open source
-work][donate]:
- - [GitHub Sponsors](https://github.com/sponsors/rom1v)
- - [Liberapay](https://liberapay.com/rom1v/)
- - [PayPal](https://paypal.me/rom2v)
-
-[donate]: https://blog.rom1v.com/about/#support-my-open-source-work
-
-## License
-
-    Copyright (C) 2018 Genymobile
-    Copyright (C) 2018-2026 Romain Vimont
-
-    Licensed under the Apache License, Version 2.0 (the "License");
-    you may not use this file except in compliance with the License.
-    You may obtain a copy of the License at
-
-        http://www.apache.org/licenses/LICENSE-2.0
-
-    Unless required by applicable law or agreed to in writing, software
-    distributed under the License is distributed on an "AS IS" BASIS,
-    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-    See the License for the specific language governing permissions and
-    limitations under the License.
+Copyright (C) 2018 Genymobile. Copyright (C) 2018–2026 Romain Vimont.

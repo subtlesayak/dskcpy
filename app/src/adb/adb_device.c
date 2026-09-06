@@ -26,6 +26,34 @@ sc_adb_devices_destroy(struct sc_vec_adb_devices *devices) {
     sc_vector_destroy(devices);
 }
 
+static size_t
+sc_adb_devices_select_type(struct sc_adb_device *devices, size_t len,
+                           bool select_usb, size_t *idx_out) {
+    size_t count = 0;
+    for (size_t i = 0; i < len; ++i) {
+        bool is_usb = sc_adb_device_get_type(devices[i].serial) ==
+                      SC_ADB_DEVICE_TYPE_USB;
+        devices[i].selected = is_usb == select_usb;
+        if (devices[i].selected) {
+            if (idx_out && !count) {
+                *idx_out = i;
+            }
+            ++count;
+        }
+    }
+    return count;
+}
+
+size_t
+sc_adb_devices_select_tcpip_preferred(struct sc_adb_device *devices,
+                                      size_t len, size_t *idx_out) {
+    size_t count = sc_adb_devices_select_type(devices, len, false, idx_out);
+    if (count) {
+        return count;
+    }
+    return sc_adb_devices_select_type(devices, len, true, idx_out);
+}
+
 enum sc_adb_device_type
 sc_adb_device_get_type(const char *serial) {
     // Starts with "emulator-"

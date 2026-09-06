@@ -5,6 +5,7 @@
 
 #include <stdbool.h>
 
+#include "device_msg.h"
 #include "uhid/uhid_output.h"
 #include "util/acksync.h"
 #include "util/net.h"
@@ -26,6 +27,17 @@ struct sc_receiver {
 
 struct sc_receiver_callbacks {
     void (*on_ended)(struct sc_receiver *receiver, bool error, void *userdata);
+    void (*on_reverse_touch)(struct sc_receiver *receiver,
+                             const struct sc_device_msg *msg,
+                             void *userdata);
+    void (*on_reverse_frame_ack)(struct sc_receiver *receiver,
+                                 const struct sc_device_msg *msg,
+                                 void *userdata);
+    void (*on_reverse_system_action)(struct sc_receiver *receiver,
+                                     const struct sc_device_msg *msg,
+                                     void *userdata);
+    void (*on_reverse_audio_ack)(struct sc_receiver *receiver,
+                                 const struct sc_device_msg *msg, void *userdata);
 };
 
 bool
