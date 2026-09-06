@@ -1,5 +1,6 @@
 #include <assert.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 #include "reverse_macos_audio.h"
 #include "reverse_audio_encoder.h"
@@ -20,8 +21,9 @@ static CMSampleBufferRef sample_buffer(bool planar, double rate, unsigned channe
     CMSampleTimingInfo timing = {.duration = CMTimeMake(1, (int32_t)rate),
         .presentationTimeStamp = CMTimeMake(0, (int32_t)rate), .decodeTimeStamp = kCMTimeInvalid};
     CMSampleBufferRef sample = NULL;
+    size_t sample_size = asbd.mBytesPerFrame;
     assert(CMSampleBufferCreate(kCFAllocatorDefault, NULL, false, NULL, NULL, format,
-        count, 1, &timing, 0, NULL, &sample) == noErr);
+        count, 1, &timing, 1, &sample_size, &sample) == noErr);
     unsigned buffers = planar ? channels : 1;
     AudioBufferList *list = calloc(1, offsetof(AudioBufferList, mBuffers) + buffers * sizeof(AudioBuffer));
     assert(list); list->mNumberBuffers = buffers;
@@ -46,7 +48,10 @@ int main(void) {
     for (unsigned planar = 0; planar <= 1; ++planar) {
         CMSampleBufferRef sample = sample_buffer(planar, 48000, 2, 1024);
         assert(CMSampleBufferDataIsReady(sample));
-        assert(sc_reverse_macos_audio_pcm(sample, pcm, &count) && count == 1024);
+        bool converted = sc_reverse_macos_audio_pcm(sample, pcm, &count);
+        if (!converted) fprintf(stderr, "Synthetic PCM conversion failed: planar=%u samples=%ld dataBytes=%zu\n",
+            planar, (long)CMSampleBufferGetNumSamples(sample), CMSampleBufferGetTotalSampleSize(sample));
+        assert(converted && count == 1024);
         for (size_t i = 0; i < count; ++i) assert(pcm[2*i] == 16384 && pcm[2*i+1] == -16384);
         CFRelease(sample);
     }

@@ -85,6 +85,7 @@ if reverse_macos
     add_languages('objc', native: false)
     src += ['src/reverse_display_macos.m', 'src/reverse_macos_audio.m']
     add_project_arguments('-fobjc-arc', '-fblocks', '-std=gnu11', '-mmacosx-version-min=13.0', language: 'objc')
+    add_project_arguments('-mmacosx-version-min=13.0', language: 'c')
     add_project_link_arguments('-mmacosx-version-min=13.0', language: ['c', 'objc'])
 endif
 
