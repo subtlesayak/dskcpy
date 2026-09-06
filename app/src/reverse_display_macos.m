@@ -428,6 +428,21 @@ static void mac_touch(struct sc_receiver *receiver, const struct sc_device_msg *
     }
 }
 
+static void mac_scroll(struct sc_receiver *receiver, const struct sc_device_msg *msg, void *context) {
+    (void)receiver;
+    SCMacState *owner = (__bridge SCMacState *)context;
+    struct mac_state *s = &owner->state;
+    if (atomic_load(&s->stopped) || atomic_load(&s->paused) || !AXIsProcessTrusted()) return;
+    double x, y;
+    if (!sc_reverse_macos_point(&msg->reverse_scroll.position, s->display_bounds.origin.x, s->display_bounds.origin.y,
+            s->display_bounds.size.width, s->display_bounds.size.height, &x, &y)) return;
+    mac_cancel_input(s);
+    mac_mouse(s, kCGEventMouseMoved, CGPointMake(x, y));
+    CGEventRef event = CGEventCreateScrollWheelEvent(NULL, kCGScrollEventUnitPixel, 2,
+        -msg->reverse_scroll.dy, -msg->reverse_scroll.dx);
+    if (event) { CGEventPost(kCGHIDEventTap, event); CFRelease(event); }
+}
+
 static void mac_shortcut(CGKeyCode key, CGEventFlags flags) {
     for (unsigned down = 1; ; --down) {
         CGEventRef event = CGEventCreateKeyboardEvent(NULL, key, down != 0);
@@ -612,7 +627,7 @@ sc_reverse_display_macos_run(sc_socket video_socket, sc_socket control_socket, c
             sc_write32be(header + 8, s->width); sc_write32be(header + 12, s->height);
             if (net_send_all(video_socket, header, sizeof(header)) != sizeof(header)) return SCRCPY_EXIT_FAILURE;
             s->start_us = av_gettime_relative();
-            static const struct sc_receiver_callbacks callbacks = {.on_ended = mac_ended, .on_reverse_touch = mac_touch,
+            static const struct sc_receiver_callbacks callbacks = {.on_ended = mac_ended, .on_reverse_touch = mac_touch, .on_reverse_scroll = mac_scroll,
                 .on_reverse_frame_ack = mac_ack, .on_reverse_system_action = mac_action, .on_reverse_audio_ack = mac_audio_ack};
             struct sc_receiver receiver;
             if (!sc_receiver_init(&receiver, control_socket, &callbacks, (__bridge void *)owner)) return SCRCPY_EXIT_FAILURE;

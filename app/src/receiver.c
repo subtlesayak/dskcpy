@@ -162,6 +162,11 @@ process_msg(struct sc_receiver *receiver, struct sc_device_msg *msg) {
                 LOGW("Received unexpected reverse touch message");
             }
             break;
+        case DEVICE_MSG_TYPE_REVERSE_SCROLL:
+            if (receiver->cbs->on_reverse_scroll) {
+                receiver->cbs->on_reverse_scroll(receiver, msg, receiver->cbs_userdata);
+            }
+            break;
         case DEVICE_MSG_TYPE_REVERSE_FRAME_ACK:
             if (receiver->cbs->on_reverse_frame_ack) {
                 receiver->cbs->on_reverse_frame_ack(receiver, msg,

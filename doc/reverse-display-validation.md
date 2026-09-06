@@ -438,3 +438,43 @@ and the Android audio wire protocol are unchanged.
 
 API references: Apple's [system-audio output](https://developer.apple.com/documentation/screencapturekit/scstreamoutputtype/audio)
 and [CoreMedia buffer-list sizing](https://developer.apple.com/documentation/coremedia/cmsamplebuffergetaudiobufferlistwithretainedblockbuffer(_:bufferlistsizeneededout:bufferlistout:bufferlistsize:blockbufferallocator:blockbuffermemoryallocator:flags:blockbufferout:)).
+
+## Browser recovery, input and Windows startup (2026-09-06)
+
+Browser reload/background recovery now retains the authenticated native session
+for a bounded grace period. Resume forces a fresh native IDR; stale decoder
+callbacks cannot acknowledge already-drained packets. The receiver requests
+landscape fullscreen, puts Volume and Window actions in expanding main-bar
+trays, reserves room for Show controls, and sends explicit scroll messages for
+one/two-finger swipes. Select-drag remains available as a separate preference.
+Android Edge private-HTTPS streaming and leave/return are user-reported working;
+this is not a completed physical transport or latency test matrix.
+
+Windows capture failures preserve the real DXGI error instead of falling through
+to a misleading missing-monitor message. ADB checks distinguish missing tools
+from tools that were found but could not run. The source-checkout Windows
+launcher checks prerequisites and safely reuses an existing dashboard. It does
+not elevate privileges, install software, start capture, or enable networking.
+
+Verification for this update:
+
+- Standard Node suite: 106 passed, six opt-in native cases skipped.
+- With Windows native loopback enabled: 111 passed, one capture-denied case
+  skipped. This includes disconnect, Stop, owner exit, stall cleanup and an
+  immediate real-IDR resume check. Captured frames were not saved or uploaded.
+- The capture-denied regression passed separately in a restricted Windows
+  environment. A normal desktop launch passed the local component checks.
+- Windows debug native rebuild and all 15 C test programs passed.
+- Dashboard TypeScript and production build passed.
+- Launcher tests cover duplicate/racing starts, occupied/unresponsive ports,
+  bounded health probes, missing dependencies/assets, paths with spaces,
+  environment preservation, diagnostic-only mode and owned-service cleanup.
+- Live Windows service startup through the launcher passed. A subsequent
+  `npm start` reused it without restarting it; `start-dskcpy.cmd --check` passed
+  all local component checks while leaving the service untouched.
+
+The latest macOS scroll handler requires Apple compilation and hardware testing.
+Physical Safari/iOS, phone scroll feel and orientation restrictions, full network
+mode coverage, long soaks and motion-to-photon measurements remain outstanding.
+No installer, signed desktop release, virtual monitor or Windows Ink driver is
+provided by this slice.

@@ -325,12 +325,57 @@ select { min-width: 0; height: 37px; padding-inline: 8px; color: var(--text); ba
 .readiness-checks [data-ready="true"] > span:first-child { color: #68dba1; }
 .readiness-checks [data-ready="false"] > span:first-child { color: #ffc875; }
 /* Receiver setup follows the existing panel/spacing system. */
-.browser-host-panel { margin-block-start: 24px; }
-.browser-host-panel > p { max-width: 80ch; line-height: 1.55; }
-.browser-actions, .browser-invitation { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-block-start: 20px; }
-.browser-invitation label { flex: 1 1 300px; display: grid; gap: 8px; }
-.browser-invitation input { min-width: 0; width: 100%; font: inherit; padding: 12px; border: 1px solid var(--border); border-radius: 8px; color: inherit; background: transparent; }
-.browser-invitation p { flex-basis: 100%; overflow-wrap: anywhere; }
+.browser-host-panel { margin-block-start: 24px; padding: 24px; container-type: inline-size; }
+.browser-host-panel .panel-header { align-items: flex-start; flex-wrap: wrap; }
+.browser-host-panel p { max-width: 72ch; line-height: 1.55; overflow-wrap: anywhere; }
+.browser-intro { margin: 12px 0 24px; color: var(--muted); font-size: 0.875rem; }
+.browser-mode-picker { min-inline-size: 0; margin: 0; padding: 0; border: 0; }
+.browser-mode-picker legend, .browser-step h3 { padding: 0; margin: 0 0 14px; font-size: 0.9rem; font-weight: 650; }
+.browser-step-number { display: inline-grid; place-items: center; min-inline-size: 26px; block-size: 26px; margin-inline-end: 9px; border-radius: 50%; background: var(--surface-3); color: var(--cyan); font-size: 0.8rem; vertical-align: middle; }
+.browser-mode-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.browser-mode { display: flex; align-items: center; gap: 12px; min-block-size: 72px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); cursor: pointer; }
+.browser-mode:last-child { grid-column: 1 / -1; }
+.browser-mode input { flex: 0 0 auto; inline-size: 16px; block-size: 16px; margin: 0; accent-color: var(--cyan); color-scheme: dark; }
+.browser-mode > svg { flex: 0 0 auto; color: var(--muted); }
+.browser-mode span { min-width: 0; display: grid; gap: 4px; }
+.browser-mode strong { font-size: 0.83rem; font-weight: 600; }
+.browser-mode small { color: var(--muted); font-size: 0.75rem; line-height: 1.4; }
+.browser-mode:has(:checked) { border-color: var(--cyan); background: var(--cyan-soft); }
+.browser-mode:has(:checked) > svg { color: var(--cyan); }
+.browser-mode:hover:not(:has(:disabled)) { border-color: var(--cyan); }
+.browser-mode:has(:focus-visible) { outline: 2px solid var(--cyan); outline-offset: 3px; }
+.browser-mode:has(:disabled) { cursor: default; }
+.browser-mode:has(:disabled:not(:checked)) { opacity: 0.65; }
+.browser-step { margin-block-start: 26px; }
+.browser-step > p { margin-block: 8px 0; font-size: 0.82rem; color: var(--muted); }
+.browser-actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-block-start: 16px; }
+.browser-create { width: auto; padding: 12px 20px; font-size: 0.85rem; }
+.browser-ready { display: flex; align-items: center; gap: 8px; color: var(--green) !important; }
+.browser-ready svg { flex-shrink: 0; }
+.browser-setup-needed { padding: 16px; border-inline-start: 3px solid var(--amber); border-radius: 4px; background: rgba(244,184,74,0.06); font-size: 0.82rem; }
+.browser-setup-needed strong { color: var(--amber); }
+.browser-setup-needed p { margin-block: 8px; color: var(--muted); }
+.browser-host-panel a:not(.secondary-button) { color: var(--cyan); text-underline-offset: 3px; }
+.browser-host-panel a:focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; }
+.browser-setup-needed a svg { vertical-align: -2px; }
+.browser-invitation { padding: 18px; border-radius: 8px; background: #091116; }
+.browser-invitation h3 { scroll-margin-block-start: 80px; }
+.browser-copy-field { margin-block-start: 16px; }
+.browser-copy-field label { display: block; margin-block-end: 8px; font-size: 0.8rem; font-weight: 600; }
+.browser-copy-field > div { display: flex; gap: 12px; }
+.browser-copy-field input { flex: 1; min-width: 0; width: 100%; min-height: 44px; font-size: 1rem; padding: 10px 12px; border: 1px solid var(--border); border-radius: 7px; color: var(--text); background: var(--surface-2); }
+.browser-copy-field button { flex-shrink: 0; min-height: 44px; }
+.browser-open { margin-block-start: 16px; min-height: 44px; }
+.browser-feedback:empty { display: none; }
+.browser-details { margin-block-start: 24px; }
 .browser-host-panel code { overflow-wrap: anywhere; }
-.browser-transport { display: grid; gap: 8px; max-width: 32rem; margin-block: 20px; }
-.browser-transport select { min-height: 48px; width: 100%; min-width: 0; background: var(--surface-2); color: inherit; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border); }
+@container (max-width: 34rem) {
+  .browser-mode-grid { grid-template-columns: minmax(0, 1fr); }
+  .browser-copy-field > div { flex-wrap: wrap; }
+  .browser-copy-field input { flex-basis: 100%; }
+  .browser-create { width: 100%; }
+}
+@media (max-width: 720px) { .browser-host-panel { padding: 18px; } }
+@media (forced-colors: active) {
+  .browser-mode:has(:checked), .browser-mode:has(:focus-visible) { outline: 2px solid Highlight; outline-offset: 2px; }
+}

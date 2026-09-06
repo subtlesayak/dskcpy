@@ -53,9 +53,54 @@ npm start
 
 Then open <http://127.0.0.1:27183>.
 
+### Windows double-click launcher
+
+After building the native host and dashboard, double-click `start-dskcpy.cmd`
+in the checkout root. It opens the local dashboard in your default browser.
+Keep its terminal open; Ctrl+C stops the service and its owned stream.
+Use your normal logged-in desktop session, not a restricted automation session
+or a Windows service. The launcher does not request administrator privileges.
+
+From the checkout root:
+
+```powershell
+# Check installed components only; no server, browser, capture or pairing.
+node gui/scripts/launch.mjs --check
+
+# Start/reuse the dashboard without opening a browser.
+node gui/scripts/launch.mjs --no-open
+```
+
+`npm start` uses the same launcher with `--no-open`. Repeated starts reuse a
+running dskcpy service, preserving its stream and settings. A different program
+or an older service without the health endpoint on the port produces a clear
+error; nothing is killed. Stop that older service manually when idle, or set
+`DISPLAY_BRIDGE_PORT` to another free port. The default is `27183`.
+
+Missing Node.js, npm dependencies or built dashboard files require setup before
+launch. Missing native/ADB components are listed separately and the dashboard
+can still open for diagnostics. `--check` exits unsuccessfully when the basic
+desktop-to-browser streaming components are unavailable; missing ADB/APK is
+reported separately because browser and Internet modes do not require them
+(except USB browser tunneling, which needs ADB). Readiness does not start capture
+or verify desktop permissions, phone authorization or network connectivity.
+
+Inherited `ADB`, `SCRCPY_*`, `ANDROID_HOME`, `ANDROID_SDK_ROOT`,
+`DISPLAY_BRIDGE_PORT` and `DSKCPY_VIEWER_*` configuration is preserved. An
+already-running service keeps its own environment: changing variables in a
+second terminal will not reconfigure it. Explorer double-clicks do not inherit
+variables set only in another PowerShell terminal; for custom HTTPS or SDK
+settings, launch from the terminal where you set those variables. No network
+listener, certificate, VPN policy, firewall rule or global PATH is configured
+automatically. This is a source-checkout launcher, not an installer or signed
+portable release.
+
 The service uses `SCRCPY_GUI_BINARY`, `SCRCPY_RUNTIME_DIR`, and `ADB` when set.
 Otherwise it looks for the local `x-reverse` build, a standard MSYS2 MinGW
-runtime on Windows, and `adb` via `ANDROID_HOME` or `PATH`.
+runtime on Windows, and `adb` via `ANDROID_HOME`, then `ANDROID_SDK_ROOT` when
+`ANDROID_HOME` is unset, or `PATH` when neither SDK variable is set. An explicit
+`ADB` path takes priority. A broken explicit path or SDK is reported, never
+silently replaced with a different installation.
 
 The dashboard checks the executable, loads `--help` to verify its runtime
 libraries and reverse-display support, and checks ADB and the companion APK

@@ -11,7 +11,7 @@ import path from 'node:path';
 import { WebSocket } from 'ws';
 import { createBrowserReceiver, receiverOrigin, isPrivateBind } from './browser.mjs';
 import { SrdParser, validBrowserInput, MAX_PACKET } from './browser-protocol.mjs';
-import { ack, avcCodec, avcParameters, touchPacket, takeDecodedTimestamps } from '../receiver/protocol.mjs';
+import { ack, avcCodec, avcParameters, touchPacket, scrollPacket, takeDecodedTimestamps, fitDisplay } from '../receiver/protocol.mjs';
 
 const header = Buffer.from('535244310000000100000280000001e0', 'hex');
 function packet(pts, flags, payload = Buffer.from([1, 2, 3])) {
@@ -30,13 +30,33 @@ async function fixture(t, options = {}) {
   }, ...options });
   t.after(async () => { native?.destroy(); await receiver.shutdown(); });
   const invitation = await receiver.invite();
-  const open = async (origin = invitation.url.slice(0, -1)) => {
-    const ws = new WebSocket(invitation.url.replace('http:', 'ws:') + 'stream', { origin });
+  const open = async (origin = invitation.url.slice(0, -1), cookie) => {
+    const ws = new WebSocket(invitation.url.replace('http:', 'ws:') + 'stream', { origin, headers: cookie ? { Cookie: cookie } : {} });
+    ws.received = [];
+    ws.on('upgrade', (response) => { ws.cookie = response.headers['set-cookie']?.[0]; });
+    ws.on('message', (data, binary) => ws.received.push({ data, binary }));
     ws.on('error', () => {});
     await once(ws, 'open');
     return ws;
   };
   return { receiver, invitation, open, native: () => native, calls: () => calls };
+}
+
+async function until(predicate) {
+  for (let i = 0; i < 200; i++) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  assert.fail('Expected session transition did not happen');
+}
+async function login(f) {
+  const ws = await f.open(); ws.send(f.invitation.key);
+  await until(() => ws.received.some((message) => message.binary));
+  return ws;
+}
+async function resumable(f, cookie, extra = {}) {
+  const response = await fetch(f.invitation.url + 'stream/session', { headers: { Cookie: cookie, ...extra } });
+  return (await response.json()).resumable;
 }
 
 test('receiver origin accepts explicit HTTPS origins, no paths or credentials; direct listeners stay private', () => {
@@ -62,6 +82,10 @@ test('SRD parser accepts arbitrarily fragmented media and zero-length unavailabl
 });
 
 test('browser codec/input helpers preserve native wire layout and reject privileged messages', () => {
+  assert.deepEqual(fitDisplay(1920, 1080, 390, 620), { width: 390, height: 219.375 });
+  const landscape = fitDisplay(1920, 1080, 820, 300);
+  assert.equal(landscape.height, 300); assert.ok(landscape.width < 820);
+  assert.deepEqual(fitDisplay(1920, 1080, 0, 300), { width: 0, height: 0 });
   const queuedAudio = [10000, 20000, 30000, 40000];
   assert.deepEqual(takeDecodedTimestamps(queuedAudio, 2), [10000, 20000]);
   assert.deepEqual(takeDecodedTimestamps(queuedAudio, 0), [30000, 40000]);
@@ -80,13 +104,136 @@ test('browser codec/input helpers preserve native wire layout and reject privile
   assert.equal(Buffer.from(ack(4, 1234)).readBigUInt64BE(1), 1234n);
 });
 
+test('resume cookie is HttpOnly, host-only, path-scoped and useless until authentication', async (t) => {
+  const f = await fixture(t);
+  const ws = await f.open();
+  assert.match(ws.cookie, /HttpOnly; SameSite=Strict; Path=\/stream; Max-Age=43200/);
+  assert.doesNotMatch(ws.cookie, /Domain=|Secure/);
+  const cookie = ws.cookie.split(';')[0];
+  assert.equal(await resumable(f, cookie), false);
+  ws.send(f.invitation.key); await until(() => f.calls() === 1);
+  assert.equal(await resumable(f, cookie), true);
+  assert.equal(await resumable(f, cookie, { Origin: 'https://evil.example' }), false);
+  assert.equal(await resumable(f, cookie, { 'Sec-Fetch-Site': 'cross-site' }), false);
+  await assert.rejects(f.open('https://evil.example', cookie), /403/);
+  await assert.rejects(f.open(f.invitation.url.slice(0, -1), 'dskcpy_resume=invalid'), /403/);
+  assert.ok(!JSON.stringify(f.receiver.status()).includes(cookie.split('=')[1]));
+  const ended = once(ws, 'close'); ws.close(4000); await ended;
+  await until(() => !f.receiver.status().connected);
+  assert.equal(await resumable(f, cookie), false);
+  await assert.rejects(f.open(undefined, cookie), /403/);
+});
+
+test('authenticated scrolling is forwarded, blocked while suspended and rejected when out of bounds', async (t) => {
+  const f = await fixture(t), ws = await login(f), inputs = [];
+  f.native().on('data', (chunk) => inputs.push(chunk));
+  const scroll = Buffer.from(scrollPacket(120, 90, 640, 480, -20, 40));
+  ws.send(scroll); await until(() => Buffer.concat(inputs).includes(scroll));
+  inputs.length = 0; ws.send('suspend');
+  await until(() => Buffer.concat(inputs).includes(Buffer.from([5, 7])));
+  inputs.length = 0; ws.send(scroll);
+  // A pong is ordered after the preceding message, avoiding an arbitrary sleep.
+  ws.ping(); await once(ws, 'pong');
+  assert.equal(Buffer.concat(inputs).includes(scroll), false);
+  ws.send('resume'); ws.send(scroll);
+  await until(() => Buffer.concat(inputs).includes(scroll));
+  const invalid = Buffer.from(scroll); invalid.writeInt32BE(121, 17);
+  const closed = once(ws, 'close'); ws.send(invalid); await closed;
+  assert.equal(f.receiver.status().connected, false);
+});
+
+test('page reload reuses capture, cancels contacts, drains ACKs and replays only codec configuration', async (t) => {
+  const f = await fixture(t);
+  const ws = await login(f), cookie = ws.cookie.split(';')[0];
+  const inputs = []; f.native().on('data', (chunk) => inputs.push(chunk));
+  const inline = Buffer.from([0, 0, 1, 0x67, 0x64, 0, 0x28, 0, 0, 1, 0x68, 42, 0, 0, 1, 0x65, 1, 2, 3]);
+  f.native().write(packet(42, 2, inline));
+  f.native().write(packet(0, 4, Buffer.from('OpusHead')));
+  await until(() => ws.received.length === 4);
+  ws.send(touchPacket(0, 0, 120, 90, 640, 480));
+  await until(() => inputs.length > 0);
+  const ended = once(ws, 'close'); ws.close(4001); await ended;
+  await until(() => Buffer.concat(inputs).includes(Buffer.from(ack(4, 42))));
+  assert.ok(Buffer.concat(inputs).includes(Buffer.from(touchPacket(3, 0, 120, 90, 640, 480))));
+  assert.equal(f.receiver.status().connected, true);
+  assert.equal(f.native().destroyed, false);
+  assert.equal(await resumable(f, cookie), true);
+  f.native().write(packet(43, 0)); // Detached media is discarded and acknowledged.
+  await until(() => Buffer.concat(inputs).includes(Buffer.from(ack(4, 43))));
+  const restored = await f.open(undefined, cookie);
+  await until(() => restored.received.length === 4);
+  assert.equal(f.calls(), 1);
+  assert.deepEqual(restored.received[1].data, header);
+  assert.deepEqual(restored.received[2].data, packet(0, 1, inline.subarray(0, 12)));
+  assert.equal(restored.received[3].data.readUInt32BE(12), 4);
+  restored.send('resume'); restored.send(Buffer.from([5, 8]));
+  await until(() => Buffer.concat(inputs).includes(Buffer.from([5, 8])));
+  f.native().write(packet(44, 2));
+  await until(() => restored.received.length === 5);
+  restored.send(ack(4, 44));
+  await until(() => Buffer.concat(inputs).includes(Buffer.from(ack(4, 44))));
+  const revoked = once(restored, 'close'); restored.send(ack(4, 42)); await revoked;
+  assert.equal(f.receiver.status().connected, false); // Old ACKs cannot survive a resume.
+});
+
+test('background pause, abrupt loss and replacement socket stay on one bounded native session', async (t) => {
+  const f = await fixture(t, { resumeMs: 500 });
+  const ws = await login(f), cookie = ws.cookie.split(';')[0];
+  const inputs = []; f.native().on('data', (chunk) => inputs.push(chunk));
+  ws.send('suspend');
+  await until(() => Buffer.concat(inputs).includes(Buffer.from([5, 7])));
+  const count = Buffer.concat(inputs).length;
+  ws.send(touchPacket(0, 1, 20, 20, 640, 480));
+  ws.send('resume'); ws.send(Buffer.from([5, 8]));
+  await until(() => Buffer.concat(inputs).length > count);
+  assert.equal(Buffer.concat(inputs).length, count + 2); // Hidden touch was not forwarded.
+  const replaced = once(ws, 'close');
+  const replacement = await f.open(undefined, cookie);
+  assert.equal((await replaced)[0], 4002); // Old page must not enter a reconnect loop.
+  await until(() => replacement.received.length >= 2);
+  assert.equal(f.calls(), 1);
+  replacement.send('resume'); replacement.send(Buffer.from([5, 8]));
+  replacement.terminate();
+  await until(() => replacement.readyState === WebSocket.CLOSED);
+  const restored = await f.open(undefined, cookie);
+  await until(() => restored.received.length >= 2);
+  assert.equal(f.calls(), 1);
+  restored.send('suspend');
+  await until(() => !f.receiver.status().connected);
+  assert.equal(await resumable(f, cookie), false);
+});
+
+test('desktop stop, detached viewer stop, expiry and native exit revoke resumption', async (t) => {
+  for (const cause of ['desktop', 'viewer', 'expiry', 'lifetime', 'native']) {
+    const f = await fixture(t, { resumeMs: 50, lifetimeMs: cause === 'lifetime' ? 50 : 43200000 });
+    const ws = await login(f), cookie = ws.cookie.split(';')[0];
+    if (cause === 'desktop') f.receiver.cancel();
+    if (cause === 'native') f.native().destroy();
+    if (cause === 'expiry' || cause === 'viewer') {
+      const ended = once(ws, 'close'); ws.close(4001); await ended;
+    }
+    if (cause === 'viewer') {
+      const denied = await fetch(f.invitation.url + 'stream/session', { method: 'POST', headers: { Cookie: cookie, Origin: 'https://evil.example' } });
+      assert.equal(denied.status, 403);
+      const stopped = await fetch(f.invitation.url + 'stream/session', { method: 'POST', headers: { Cookie: cookie, Origin: f.invitation.url.slice(0, -1) } });
+      assert.equal(stopped.status, 204);
+    }
+    await until(() => !f.receiver.status().connected);
+    assert.equal(await resumable(f, cookie), false);
+    await assert.rejects(f.open(undefined, cookie), /403/);
+  }
+});
+
 test('receiver serves only fixed assets, rejects Host rebinding, no control routes or key in URL', async (t) => {
   const f = await fixture(t);
   const response = await fetch(f.invitation.url);
   assert.equal(response.status, 200);
   assert.match(response.headers.get('content-security-policy'), /frame-ancestors 'none'/);
   assert.equal(response.headers.get('cache-control'), 'no-store');
-  assert.match(await response.text(), /Temporary session key/);
+  const html = await response.text();
+  assert.match(html, /<label for="session-key">Connection code<\/label>/);
+  assert.match(html, /Create link and code/);
+  assert.match(html, /prepared Android USB connection/);
   for (const route of ['api/status', 'api/stream/start', 'receiver.mjs?key=anything', '../server/service.mjs']) {
     assert.equal((await fetch(f.invitation.url + route)).status, 404);
   }

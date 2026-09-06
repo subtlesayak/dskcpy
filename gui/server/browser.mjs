@@ -4,8 +4,8 @@ import net from 'node:net';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
-import { WebSocketServer, WebSocket } from 'ws';
-import { SrdParser, validBrowserInput, MAX_PACKET } from './browser-protocol.mjs';
+import { WebSocketServer } from 'ws';
+import { createBrowserSession } from './browser-session.mjs';
 
 const assets = new Map([
   ['/', ['index.html', 'text/html; charset=utf-8']],
@@ -27,7 +27,8 @@ export function receiverOrigin(value) {
 // A separate, loopback-only surface: never serves controller APIs or logs.
 // Remote access is opt-in via a user-managed Tailscale Serve HTTPS proxy.
 export function createBrowserReceiver({ configuredPort = 27180, origin,
-  tls, onConnect, onChange = () => {}, invitationMs = 300000, authMs = 5000 } = {}) {
+  tls, onConnect, onChange = () => {}, invitationMs = 300000, authMs = 5000,
+  resumeMs = 120000, lifetimeMs = 12 * 60 * 60 * 1000 } = {}) {
   const remoteOrigin = receiverOrigin(origin);
   let port;
   let listening;
@@ -44,6 +45,18 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
   const allowedHost = (host) => localOrigins().some((v) => new URL(v).host === host)
     || Boolean(remoteOrigin && new URL(remoteOrigin).host === host);
   const allowedOrigin = (value) => localOrigins().includes(value) || Boolean(remoteOrigin && value === remoteOrigin);
+  const cookieName = () => `dskcpy_resume_${port}`;
+  function mayResume(req) {
+    if (!session?.token || req.headers.host !== new URL(session.origin).host) return false;
+    if (req.headers.origin && req.headers.origin !== session.origin) return false;
+    if (req.headers['sec-fetch-site'] === 'cross-site') return false;
+    const value = (req.headers.cookie || '').split(';').map((part) => part.trim())
+      .find((part) => part.startsWith(`${cookieName()}=`))?.slice(cookieName().length + 1);
+    if (!value || !/^[A-Za-z0-9_-]{43}$/.test(value)) return false;
+    const candidate = Buffer.from(value, 'base64url');
+    const accepted = candidate.length === session.token.length && timingSafeEqual(candidate, session.token);
+    candidate.fill(0); return accepted;
+  }
 
   function status() {
     return { waiting: Boolean(invitation), connected: Boolean(session),
@@ -69,6 +82,16 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
     res.setHeader('Content-Security-Policy', "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
     const asset = assets.get(req.url);
     if (!allowedHost(req.headers.host)) { res.writeHead(403).end(); return; }
+    if (req.url === '/stream/session' && req.method === 'GET') {
+      res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ resumable: mayResume(req) }));
+      return;
+    }
+    if (req.url === '/stream/session' && req.method === 'POST') {
+      if (!mayResume(req) || req.headers.origin !== session.origin) { res.writeHead(403).end(); return; }
+      cancel();
+      res.setHeader('Set-Cookie', `${cookieName()}=; HttpOnly; SameSite=Strict; Path=/stream; Max-Age=0${req.headers.origin.startsWith('https:') ? '; Secure' : ''}`);
+      res.writeHead(204).end(); return;
+    }
     if (!asset || req.method !== 'GET') { res.writeHead(404).end(); return; }
     try {
       const data = await readFile(fileURLToPath(new URL(`../receiver/${asset[0]}`, import.meta.url)));
@@ -80,17 +103,26 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
   server.headersTimeout = 10000;
   server.maxConnections = 32;
   const wss = new WebSocketServer({ noServer: true, maxPayload: 256, perMessageDeflate: false });
+  wss.on('headers', (headers, req) => {
+    if (!req.resumeToken) return;
+    // Provisional until the one-use code is accepted. Never exposed to JS,
+    // query strings, localStorage, sessionStorage, status or diagnostics.
+    headers.push(`Set-Cookie: ${cookieName()}=${req.resumeToken.toString('base64url')}; HttpOnly; SameSite=Strict; Path=/stream; Max-Age=${Math.floor(lifetimeMs / 1000)}${req.headers.origin.startsWith('https:') ? '; Secure' : ''}`);
+  });
   const upgrade = (req, socket, head) => {
+    const resume = mayResume(req);
     if (req.url !== '/stream' || !allowedHost(req.headers.host) || !allowedOrigin(req.headers.origin)
-        || !invitation || session || sockets.size >= 4 || failures >= 10) {
+        || (!resume && (!invitation || session || failures >= 10)) || sockets.size >= 4) {
       socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');
       return;
     }
+    if (!resume) req.resumeToken = randomBytes(32);
     wss.handleUpgrade(req, socket, head, (ws) => {
       sockets.add(ws);
       ws.on('error', () => {});
       const timer = setTimeout(() => ws.terminate(), authMs);
-      ws.on('close', () => { sockets.delete(ws); clearTimeout(timer); });
+      ws.on('close', () => { sockets.delete(ws); clearTimeout(timer); req.resumeToken?.fill(0); });
+      if (resume) { clearTimeout(timer); session.attach(ws); return; }
       ws.once('message', async (data, binary) => {
         clearTimeout(timer);
         const candidate = !binary && /^[A-Za-z0-9_-]{32}$/.test(data.toString())
@@ -106,76 +138,15 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
         invitation.fill(0); invitation = null;
         clearTimeout(expiryTimer); expiresAt = null;
         for (const other of sockets) if (other !== ws) other.terminate();
-        let native;
-        let closed = false;
-        let nativeTimer;
-        let width = 0, height = 0;
-        let rateAt = Date.now(), events = 0;
-        const video = new Set(), audio = new Set();
-        const listener = net.createServer((socket) => {
-          if (closed || native) { socket.destroy(); return; }
-          native = socket;
-          listener.close(); clearTimeout(nativeTimer);
-          socket.setNoDelay(true);
-          const parser = new SrdParser((packet, header) => {
-            if (closed) return;
-            if (header) { width = packet.readUInt32BE(8); height = packet.readUInt32BE(12); }
-            else {
-              const flags = packet.readUInt32BE(12);
-              const pending = flags === 8 ? audio : flags === 0 || flags === 2 ? video : null;
-              if (pending) {
-                pending.add(packet.readBigUInt64BE(4).toString());
-                if (pending.size > 8) { close(); return; }
-              }
-            }
-            if (ws.bufferedAmount > MAX_PACKET) { close(); return; }
-            socket.pause();
-            ws.send(packet, { binary: true }, (error) => { if (error) close(); else if (!closed) socket.resume(); });
-          });
-          socket.on('data', (chunk) => { try { parser.push(chunk); } catch { close(); } });
-          socket.on('error', close);
-          socket.on('close', close);
-        });
-        function close() {
-          if (closed) return;
-          closed = true;
-          clearTimeout(nativeTimer); clearInterval(pingTimer);
-          listener.close(); native?.destroy();
-          ws.close(1000, 'Session ended. Create a new key on the desktop.');
-          // A peer which stops reading cannot retain an orphaned socket.
-          const cleanup = setTimeout(() => ws.terminate(), 1000); cleanup.unref();
-          if (session?.close === close) session = null;
+        const token = Buffer.from(req.resumeToken);
+        const active = createBrowserSession({ socket: ws, onConnect, resumeMs, lifetimeMs, onClose: () => {
+          token.fill(0);
+          if (session === active) session = null;
           onChange();
-        }
-        let alive = true;
-        const pingTimer = setInterval(() => { if (!alive) close(); else { alive = false; ws.ping(); } }, 5000);
-        ws.on('pong', () => { alive = true; });
-        ws.on('close', close);
-        ws.on('message', (message, binaryInput) => {
-          if (Date.now() - rateAt >= 1000) { rateAt = Date.now(); events = 0; }
-          if (++events > 1000 || !binaryInput || !native || !validBrowserInput(message, width, height)
-              || native.writableLength > 65536) { close(); return; }
-          if ([4, 6].includes(message[0])) {
-            const pending = message[0] === 4 ? video : audio;
-            const pts = message.readBigUInt64BE(1);
-            if (!pending.has(pts.toString())) { close(); return; }
-            // Native ACKs are cumulative; a late older ACK is never forwarded.
-            for (const old of pending) if (BigInt(old) <= pts) pending.delete(old);
-          }
-          native.write(message);
-        });
-        session = { close };
+        } });
+        session = Object.assign(active, { token, origin: req.headers.origin });
         onChange();
-        try {
-          await new Promise((resolve, reject) => {
-            listener.once('error', reject);
-            listener.listen(0, '127.0.0.1', resolve);
-          });
-          if (closed) return;
-          nativeTimer = setTimeout(close, 10000);
-          ws.send(JSON.stringify({ type: 'authenticated' }));
-          await onConnect({ port: listener.address().port, close, get closed() { return closed; } });
-        } catch { close(); }
+        await active.start();
       });
     });
   };

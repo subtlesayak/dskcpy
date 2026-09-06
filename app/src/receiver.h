@@ -38,6 +38,8 @@ struct sc_receiver_callbacks {
                                      void *userdata);
     void (*on_reverse_audio_ack)(struct sc_receiver *receiver,
                                  const struct sc_device_msg *msg, void *userdata);
+    void (*on_reverse_scroll)(struct sc_receiver *receiver,
+                              const struct sc_device_msg *msg, void *userdata);
 };
 
 bool

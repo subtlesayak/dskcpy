@@ -50,7 +50,12 @@ export function validBrowserInput(data, width, height) {
   if (data.length === 9 && [4, 6].includes(data[0])) return true;
   // Close and Lock are deliberately not exposed by the experimental receiver.
   if (data.length === 2 && data[0] === 5) return [0, 1, 2, 3, 4, 7, 8, 9, 10, 11].includes(data[1]);
-  if (data.length !== 32 || data[0] !== 3 || ![0, 1, 2, 3].includes(data[1])) return false;
+  if (data.length === 21 && data[0] === 7) {
+    return data.readUInt16BE(9) === width && data.readUInt16BE(11) === height
+      && data.readUInt32BE(1) < width && data.readUInt32BE(5) < height
+      && Math.abs(data.readInt32BE(13)) <= 120 && Math.abs(data.readInt32BE(17)) <= 120;
+  }
+  if (data.length !== 32 || data[0] !== 3 || ![0, 1, 2, 3, 5, 6].includes(data[1])) return false;
   return data.readBigUInt64BE(2) < 16n
     && data.readUInt16BE(18) === width && data.readUInt16BE(20) === height
     && data.readUInt32BE(10) < width && data.readUInt32BE(14) < height

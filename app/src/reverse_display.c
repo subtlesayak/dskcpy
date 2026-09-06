@@ -530,7 +530,7 @@ reverse_capture_init(struct reverse_capture *capture,
         if (FAILED(hr)) {
             LOGE("Could not enumerate DXGI adapters: 0x%08lx",
                  (unsigned long) hr);
-            break;
+            return false;
         }
 
         for (UINT adapter_output_index = 0;; ++adapter_output_index) {
@@ -542,7 +542,8 @@ reverse_capture_init(struct reverse_capture *capture,
             if (FAILED(hr)) {
                 LOGE("Could not enumerate DXGI outputs: 0x%08lx",
                      (unsigned long) hr);
-                break;
+                release_dxgi_object((void **) &adapter);
+                return false;
             }
 
             if (output_index++ != selected_output) {
@@ -565,7 +566,8 @@ reverse_capture_init(struct reverse_capture *capture,
             if (FAILED(hr)) {
                 LOGE("Could not access DXGI output %u: 0x%08lx",
                      selected_output, (unsigned long) hr);
-                break;
+                release_dxgi_object((void **) &adapter);
+                return false;
             }
 
             hr = D3D11CreateDevice((IDXGIAdapter *) adapter,
@@ -579,7 +581,8 @@ reverse_capture_init(struct reverse_capture *capture,
                 release_dxgi_object((void **) &output1);
                 release_dxgi_object((void **) &capture->context);
                 release_dxgi_object((void **) &capture->device);
-                break;
+                release_dxgi_object((void **) &adapter);
+                return false;
             }
 
             hr = output1->lpVtbl->DuplicateOutput(output1,
@@ -587,11 +590,24 @@ reverse_capture_init(struct reverse_capture *capture,
                                                   &capture->duplication);
             release_dxgi_object((void **) &output1);
             if (FAILED(hr)) {
-                LOGE("Could not duplicate Windows monitor %u: 0x%08lx",
-                     selected_output, (unsigned long) hr);
+                if (hr == E_ACCESSDENIED) {
+                    LOGE("Windows denied desktop capture (0x%08lx). Unlock the "
+                         "computer and run dskcpy in your normal desktop session, "
+                         "outside a restricted environment", (unsigned long) hr);
+                } else if (hr == DXGI_ERROR_NOT_CURRENTLY_AVAILABLE) {
+                    LOGE("Windows has reached its simultaneous desktop capture "
+                         "limit. Close another screen recorder and reconnect");
+                } else if (hr == DXGI_ERROR_SESSION_DISCONNECTED) {
+                    LOGE("The Windows desktop session is disconnected. Sign "
+                         "back in on the computer and reconnect");
+                } else {
+                    LOGE("Could not duplicate Windows monitor %u: 0x%08lx",
+                         selected_output, (unsigned long) hr);
+                }
                 release_dxgi_object((void **) &capture->context);
                 release_dxgi_object((void **) &capture->device);
-                break;
+                release_dxgi_object((void **) &adapter);
+                return false;
             }
 
             found = true;
@@ -898,6 +914,7 @@ reverse_open_encoder(const struct scrcpy_options *options, int width, int height
                 av_opt_set(context->priv_data, "bf", "0", 0);
                 av_opt_set(context->priv_data, "rc-lookahead", "0", 0);
                 av_opt_set(context->priv_data, "repeat-headers", "1", 0);
+                av_opt_set(context->priv_data, "forced-idr", "1", 0);
             }
 
             int ret = avcodec_open2(context, codec, NULL);
@@ -1397,8 +1414,12 @@ reverse_capture_and_encode(struct reverse_display_state *state) {
             break;
         }
         have_frame = true;
-        // A new Android Surface needs a frame even if the desktop is unchanged.
-        atomic_store_explicit(&state->force_refresh, false, memory_order_release);
+        // A recreated Surface/WebCodecs decoder needs an independently decodable
+        // IDR, not just another delta frame from the retained desktop image.
+        // Consume atomically so a concurrent refresh request is not lost.
+        bool refresh = atomic_exchange_explicit(&state->force_refresh, false,
+                                                memory_order_acq_rel);
+        frame->pict_type = refresh ? AV_PICTURE_TYPE_I : AV_PICTURE_TYPE_NONE;
 
         // The timestamp is only used to preserve ordering on Android. Keep it
         // relative to this stream; host and device monotonic clocks have
@@ -1437,10 +1458,10 @@ reverse_find_touch(const struct reverse_display_state *state,
 }
 
 static bool
-reverse_map_touch(const struct reverse_display_state *state,
-                  const struct sc_device_msg *msg, LONG *x, LONG *y) {
-    int screen_width = msg->reverse_touch.position.screen_size.width;
-    int screen_height = msg->reverse_touch.position.screen_size.height;
+reverse_map_position(const struct reverse_display_state *state,
+                     const struct sc_position *position, LONG *x, LONG *y) {
+    int screen_width = position->screen_size.width;
+    int screen_height = position->screen_size.height;
     int desktop_width = atomic_load_explicit(&state->desktop_width,
                                              memory_order_acquire);
     int desktop_height = atomic_load_explicit(&state->desktop_height,
@@ -1457,11 +1478,11 @@ reverse_map_touch(const struct reverse_display_state *state,
     int64_t desktop_right = (int64_t) desktop_left + desktop_width - 1;
     int64_t desktop_bottom = (int64_t) desktop_top + desktop_height - 1;
     int64_t mapped_x = desktop_left
-                     + (int64_t) msg->reverse_touch.position.point.x
+                     + (int64_t) position->point.x
                        * (desktop_width - 1) / (screen_width - 1 > 0
                                                  ? screen_width - 1 : 1);
     int64_t mapped_y = desktop_top
-                     + (int64_t) msg->reverse_touch.position.point.y
+                     + (int64_t) position->point.y
                        * (desktop_height - 1) / (screen_height - 1 > 0
                                                   ? screen_height - 1 : 1);
     if (mapped_x < desktop_left) {
@@ -1713,7 +1734,7 @@ reverse_inject_touch(struct reverse_display_state *state,
                 reverse_cancel_touches(state);
             }
             LONG x, y;
-            if (!reverse_map_touch(state, msg, &x, &y)
+            if (!reverse_map_position(state, &msg->reverse_touch.position, &x, &y)
                     || !reverse_add_touch(state, pointer_id, x, y,
                                           reverse_touch_pressure(
                                               msg->reverse_touch.pressure))) {
@@ -1728,7 +1749,7 @@ reverse_inject_touch(struct reverse_display_state *state,
         case AMOTION_EVENT_ACTION_POINTER_DOWN:
         case AMOTION_EVENT_ACTION_MOVE: {
             LONG x, y;
-            if (!reverse_map_touch(state, msg, &x, &y)) {
+            if (!reverse_map_position(state, &msg->reverse_touch.position, &x, &y)) {
                 return;
             }
             if (index == REVERSE_DISPLAY_MAX_TOUCHES) {
@@ -1794,6 +1815,41 @@ reverse_receiver_on_touch(struct sc_receiver *receiver,
     if (!atomic_load_explicit(&state->stopped, memory_order_acquire)
             && !atomic_load_explicit(&state->video_paused, memory_order_acquire)) {
         reverse_inject_touch(state, msg);
+    }
+}
+
+static void
+reverse_receiver_on_scroll(struct sc_receiver *receiver,
+                           const struct sc_device_msg *msg, void *userdata) {
+    (void) receiver;
+    struct reverse_display_state *state = userdata;
+    if (atomic_load_explicit(&state->stopped, memory_order_acquire)
+            || atomic_load_explicit(&state->video_paused, memory_order_acquire)) {
+        return;
+    }
+    struct reverse_touch_contact point = {0};
+    if (!reverse_map_position(state, &msg->reverse_scroll.position, &point.x, &point.y)) {
+        return;
+    }
+    reverse_cancel_touches(state);
+    if (!reverse_send_mouse_event(&point, 0)) {
+        return;
+    }
+    INPUT events[2] = {0};
+    unsigned count = 0;
+    // 40 viewport pixels correspond to one wheel detent (120 units).
+    if (msg->reverse_scroll.dy) {
+        events[count].type = INPUT_MOUSE;
+        events[count].mi.dwFlags = MOUSEEVENTF_WHEEL;
+        events[count++].mi.mouseData = (DWORD) (-msg->reverse_scroll.dy * 3);
+    }
+    if (msg->reverse_scroll.dx) {
+        events[count].type = INPUT_MOUSE;
+        events[count].mi.dwFlags = MOUSEEVENTF_HWHEEL;
+        events[count++].mi.mouseData = (DWORD) (msg->reverse_scroll.dx * 3);
+    }
+    if (count && SendInput(count, events, sizeof(INPUT)) != count) {
+        LOGW("Could not inject desktop scroll: error %lu", (unsigned long) GetLastError());
     }
 }
 
@@ -2074,6 +2130,7 @@ sc_reverse_display_run(sc_socket video_socket, sc_socket control_socket,
     static const struct sc_receiver_callbacks receiver_cbs = {
         .on_ended = reverse_receiver_on_ended,
         .on_reverse_touch = reverse_receiver_on_touch,
+        .on_reverse_scroll = reverse_receiver_on_scroll,
         .on_reverse_frame_ack = reverse_receiver_on_frame_ack,
         .on_reverse_system_action = reverse_receiver_on_system_action,
         .on_reverse_audio_ack = reverse_receiver_on_audio_ack,

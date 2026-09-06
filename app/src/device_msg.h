@@ -22,6 +22,7 @@ enum sc_device_msg_type {
     DEVICE_MSG_TYPE_REVERSE_FRAME_ACK,
     DEVICE_MSG_TYPE_REVERSE_SYSTEM_ACTION,
     DEVICE_MSG_TYPE_REVERSE_AUDIO_ACK,
+    DEVICE_MSG_TYPE_REVERSE_SCROLL,
 };
 
 enum sc_reverse_system_action {
@@ -61,6 +62,12 @@ struct sc_device_msg {
             enum android_motionevent_buttons action_button;
             enum android_motionevent_buttons buttons;
         } reverse_touch;
+        struct {
+            struct sc_position position;
+            // Viewport pixels, positive right/down; bounded to +/-120.
+            int32_t dx;
+            int32_t dy;
+        } reverse_scroll;
         struct {
             int64_t pts;
         } reverse_frame_ack;

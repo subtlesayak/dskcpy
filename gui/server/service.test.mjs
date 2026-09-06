@@ -75,6 +75,16 @@ async function waitFor(predicate) {
   assert.fail('Expected state transition did not occur');
 }
 
+test('launcher health endpoint exposes only app identity and does not probe or start programs', async (t) => {
+  let probes = 0;
+  const f = await fixture(t, { readinessProbe: async () => { probes++; return ready; } });
+  const response = await f.request('/api/health');
+  assert.equal(response.code, 200);
+  assert.deepEqual(response.body, { app: 'dskcpy', apiVersion: 1 });
+  assert.equal(probes, 0);
+  assert.equal(f.children.length, 0);
+});
+
 test('Mac capability follows the binary probe and rejects incompatible encoders before spawn', async (t) => {
   const f = await fixture(t, { platform: 'darwin', readinessProbe: async () => ({ ...ready,
     checks: [...ready.checks, { id: 'capture', ready: true }] }) });
@@ -94,6 +104,11 @@ test('browser invitation reserves capture, key never enters status, Stop invalid
   const f = await fixture(t);
   const invite = await f.request('/api/browser/invite', { maxSize: 1280 });
   assert.equal(invite.code, 201); assert.equal(f.children.length, 0);
+  assert.equal(invite.body.status.browser.waiting, true);
+  assert.equal(invite.body.status.browser.url, invite.body.url);
+  assert.equal(invite.body.status.browser.expiresAt, invite.body.expiresAt);
+  assert.equal(invite.body.status.running, false);
+  assert.ok(!JSON.stringify(invite.body.status).includes(invite.body.key));
   assert.match(invite.body.key, /^[A-Za-z0-9_-]{32}$/);
   assert.ok(!JSON.stringify(f.publicState()).includes(invite.body.key));
   assert.equal((await f.request('/api/stream/start', { connection: 'usb' })).code, 400);
@@ -137,6 +152,46 @@ test('Stop during browser readiness cancels invitation creation without capture'
   await f.request('/api/stream/stop', {}); release(ready);
   assert.equal((await invite).code, 400);
   assert.equal(f.publicState().browser.waiting, false); assert.equal(f.children.length, 0);
+});
+
+test('browser reload keeps the native process and owned USB tunnel until explicit Stop', async (t) => {
+  let native, starts = 0, cookie;
+  const commands = [];
+  const f = await fixture(t, {
+    readinessProbe: async () => ({ ...ready, checks: [...ready.checks, { id: 'adb', ready: true }] }),
+    commandRunner: async (exe, args) => {
+      commands.push(args);
+      return { stdout: args[0] === 'devices' ? 'List of devices attached\ntest-usb device model:Test\n' : '' };
+    },
+    spawnProcess: (exe, args) => {
+      starts++;
+      native = net.connect(Number(args.find((arg) => arg.startsWith('--reverse-socket=')).split('=')[1]), '127.0.0.1');
+      native.on('error', () => {});
+      native.on('connect', () => native.write(Buffer.from('535244310000000100000280000001e0', 'hex')));
+      const child = fakeChild(); native.on('close', () => child.exit(2)); return child;
+    },
+  });
+  t.after(() => native?.destroy());
+  const { body } = await f.request('/api/browser/invite', { browserTransport: 'usb' });
+  const address = body.url.replace('http:', 'ws:') + 'stream';
+  const ws = new WebSocket(address, { origin: body.url.slice(0, -1) });
+  ws.on('upgrade', (response) => { cookie = response.headers['set-cookie'][0].split(';')[0]; });
+  ws.on('error', () => {}); t.after(() => ws.terminate());
+  await once(ws, 'open'); ws.send(body.key);
+  await waitFor(() => native && !native.connecting && f.publicState().running);
+  const away = once(ws, 'close'); ws.close(4001); await away;
+  assert.equal(f.publicState().running, true); assert.equal(f.publicState().browser.connected, true);
+  assert.ok(!commands.some((args) => args.includes('--remove')));
+  const restored = new WebSocket(address, { origin: body.url.slice(0, -1), headers: { Cookie: cookie } });
+  restored.on('error', () => {}); t.after(() => restored.terminate());
+  let authenticated = false;
+  restored.on('message', (data, binary) => { if (!binary) authenticated = JSON.parse(data).type === 'authenticated'; });
+  await waitFor(() => authenticated);
+  assert.equal(starts, 1);
+  assert.ok(!JSON.stringify(f.publicState()).includes(cookie.split('=')[1]));
+  await f.request('/api/stream/stop', {});
+  await waitFor(() => !f.publicState().running && commands.some((args) => args.includes('--remove')));
+  assert.equal(f.publicState().browser.connected, false);
 });
 
 test('USB browser mode owns one non-rebinding tunnel and removes only that tunnel', async (t) => {

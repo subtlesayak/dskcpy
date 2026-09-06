@@ -53,7 +53,7 @@ open source, and USB/LAN streaming does not require a dskcpy account.
 | macOS → Android | Experimental, opt-in source build. Wireless video has been reported working on an M3 Mac. Mouse/scroll controls and ScreenCaptureKit → Opus system audio are implemented. **Mac audio playback and broader hardware testing remain unverified.** |
 | Linux → Android | Reverse hosting is not implemented. |
 | Desktop → iPhone/iPad | No native iOS receiver. Experimental browser path exists; Safari/iOS compatibility is not yet verified. USB browser tunneling is Android-only. |
-| Desktop → browser | Experimental WebCodecs receiver. Windows NVENC video, audio enable/mute and pause/resume tested on localhost. Physical USB-browser and remote HTTPS/VPN tests remain pending. |
+| Desktop → browser | Experimental WebCodecs receiver. Windows NVENC video, audio enable/mute and pause/resume tested on localhost. Android Edge over private HTTPS is user-reported working, including leave/return. The complete physical USB/Wi-Fi/IP/VPN matrix remains pending. |
 
 The original Android-to-computer scrcpy mode remains in the codebase. Its
 platform support and features are separate from dskcpy's reverse mode.
@@ -125,25 +125,29 @@ After building the Windows host:
 
 1. On Android, enable USB debugging, connect a data-capable cable, unlock the
    phone and approve the computer's debugging prompt.
-2. In a terminal, start the local dashboard:
+2. Prepare the dashboard once, from the checkout folder in PowerShell:
 
-   ```bash
-   cd gui
-   npm ci
-   npm run build
-   npm start
+   ```powershell
+   npm.cmd ci --prefix gui
+   npm.cmd run build --prefix gui
    ```
 
-3. Open [the dashboard](http://127.0.0.1:27183) **on the computer**, choose **USB**,
+3. Double-click **`start-dskcpy.cmd`** in the checkout folder. Keep its terminal
+   open while using dskcpy. It checks local components, opens the dashboard and
+   reuses an already-running dashboard without interrupting its stream.
+4. In [the dashboard](http://127.0.0.1:27183) **on the computer**, choose **USB**,
    select the authorized phone if necessary, and click **Start streaming**.
    The host installs and opens the companion for ADB-based connections.
-4. Touch the desktop on Android. Use **Stop session** to disconnect; leaving the
+5. Touch the desktop on Android. Use **Stop session** to disconnect; leaving the
    app temporarily is different from stopping it. On Mac, use the Mac launcher
    above and follow the permission prompts before expecting video or input.
 
 The dashboard discovers the local Windows `x-reverse` build automatically.
 For another build location, configure `SCRCPY_GUI_BINARY` and the matching
 assets as described in the [dashboard guide](gui/README.md).
+For a check without starting a service or capture, run
+`node gui/scripts/launch.mjs --check`. The launcher does not install dependencies,
+enable network access or replace the source-build requirement.
 
 ## Connection options
 
@@ -213,8 +217,9 @@ into a CLI command. See [reverse-display options](doc/reverse-display.md).
 ## Limits and security
 
 This mirrors an existing desktop display. It does **not** add a virtual monitor
-or Windows Extend mode. Stylus pressure/Windows Ink, an iOS receiver, a browser
-media receiver and a packaged Tauri desktop wrapper are not implemented.
+or Windows Extend mode. Stylus pressure/Windows Ink, a native iOS receiver and a
+packaged Tauri desktop wrapper are not implemented. Browser receiving is
+experimental; Safari/iOS still needs physical-device verification.
 There is no zero-latency or fixed-latency guarantee.
 
 ADB grants powerful access to a device: authorize only trusted computers and

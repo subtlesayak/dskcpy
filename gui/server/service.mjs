@@ -407,7 +407,9 @@ export function createControlService({
       if (attempt.signal.aborted || !browserReceiver.status().waiting) {
         browserReceiver.cancel(); throw new Error('Connection cancelled or invitation expired.');
       }
-      return invitation; // The key is returned once, never put in state or logs.
+      // Include public status so the UI can reveal the link immediately even if
+      // event delivery is delayed. The one-use key remains outside status/logs.
+      return { ...invitation, status: publicState() };
     } finally { if (browserPreparation === attempt) browserPreparation = null; }
   }
 
@@ -660,6 +662,11 @@ export function createControlService({
       }
       if (request.method === 'POST' && url.pathname === '/api/wireless/discover') {
         writeJson(response, 200, await discoverWirelessDevices());
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/api/health') {
+        // Startup identity only: no process probes, paths, devices or session data.
+        writeJson(response, 200, { app: 'dskcpy', apiVersion: 1 });
         return;
       }
       if (request.method === 'GET' && url.pathname === '/api/status') {

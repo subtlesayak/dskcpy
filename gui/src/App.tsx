@@ -760,7 +760,7 @@ export default function App() {
           </section>
         </div>
 
-        {activeSection === 'connection' && <BrowserHostPanel status={status} config={effectiveConfig} online={serviceOnline} />}
+        {activeSection === 'connection' && <BrowserHostPanel status={status} config={effectiveConfig} online={serviceOnline} onStatus={setStatus} />}
 
         <section className="panel activity-panel" id="activity" aria-labelledby="activity-title" hidden={activeSection !== 'activity'}>
           <div className="panel-header">

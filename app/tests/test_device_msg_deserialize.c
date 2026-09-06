@@ -152,6 +152,26 @@ static void test_deserialize_reverse_system_action(void) {
     assert(sc_device_msg_deserialize(resume, 1, &msg) == 0);
 }
 
+static void test_deserialize_reverse_scroll(void) {
+    uint8_t input[] = {7, 0, 0, 0, 123, 0, 0, 1, 200,
+                       0x04, 0x38, 0x09, 0x60,
+                       0xff, 0xff, 0xff, 0xd8, 0, 0, 0, 80};
+    struct sc_device_msg msg;
+    for (size_t n = 0; n < sizeof(input); ++n) {
+        assert(sc_device_msg_deserialize(input, n, &msg) == 0);
+    }
+    assert(sc_device_msg_deserialize(input, sizeof(input), &msg) == 21);
+    assert(msg.type == DEVICE_MSG_TYPE_REVERSE_SCROLL);
+    assert(msg.reverse_scroll.position.point.x == 123);
+    assert(msg.reverse_scroll.position.point.y == 456);
+    assert(msg.reverse_scroll.position.screen_size.width == 1080);
+    assert(msg.reverse_scroll.position.screen_size.height == 2400);
+    assert(msg.reverse_scroll.dx == -40);
+    assert(msg.reverse_scroll.dy == 80);
+    input[20] = 121;
+    assert(sc_device_msg_deserialize(input, sizeof(input), &msg) == -1);
+}
+
 int main(int argc, char *argv[]) {
     (void) argc;
     (void) argv;
@@ -163,5 +183,6 @@ int main(int argc, char *argv[]) {
     test_deserialize_reverse_touch();
     test_deserialize_reverse_frame_ack();
     test_deserialize_reverse_system_action();
+    test_deserialize_reverse_scroll();
     return 0;
 }

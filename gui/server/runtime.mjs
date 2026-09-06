@@ -37,8 +37,11 @@ export function resolveRuntime(repoDir, inputEnv = process.env, platform = proce
   env.SCRCPY_SERVER_PATH = asset(env.SCRCPY_SERVER_PATH, 'scrcpy-server');
   env.SCRCPY_REVERSE_DISPLAY_APK = asset(env.SCRCPY_REVERSE_DISPLAY_APK, 'reverse-display.apk');
   env.SCRCPY_ICON_DIR = env.SCRCPY_ICON_DIR || (executable === local ? path.join(repoDir, 'app/data') : binaryDir);
-  const adbName = env.ADB || (env.ANDROID_HOME
-    ? path.join(env.ANDROID_HOME, 'platform-tools', platform === 'win32' ? 'adb.exe' : 'adb') : 'adb');
+  // Explicit configuration remains authoritative; a broken override must not
+  // silently select a different SDK or debugging installation.
+  const sdk = env.ANDROID_HOME || env.ANDROID_SDK_ROOT;
+  const adbName = env.ADB || (sdk
+    ? path.join(sdk, 'platform-tools', platform === 'win32' ? 'adb.exe' : 'adb') : 'adb');
   const adb = resolveExecutable(adbName, env, repoDir, platform);
   env.ADB = adb || adbName;
   env.SCRCPY_GUI_CONTROL = 'stdin-v1';
@@ -84,7 +87,9 @@ export async function inspectReadiness(runtime, runCommand) {
       adbReady = true;
     } catch { /* ADB readiness is separate from Internet transport. */ }
   }
-  add('adb', 'Android connection tool', adbReady, adbReady ? 'ADB loads successfully.' : 'Install or configure Android platform-tools (ADB).');
+  add('adb', 'Android connection tool', adbReady, adbReady ? 'ADB loads successfully.'
+    : adb ? 'ADB was found but could not start. Check its permissions, user directory and runtime dependencies.'
+    : 'Install or configure Android platform-tools (ADB).');
   const base = ['binary', 'runtime', 'capture'];
   const transports = Object.fromEntries(['usb', 'wifi', 'ip', 'internet', 'browser'].map((connection) => {
     // Internet mode uses no ADB/server/APK on the desktop. The phone app is installed separately.

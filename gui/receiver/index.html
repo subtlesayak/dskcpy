@@ -13,38 +13,54 @@
     <section id="join-panel" aria-labelledby="join-title">
       <p class="eyebrow">Your desktop, here</p>
       <h1 id="join-title">Connect to a desktop</h1>
-      <p>On the computer, open Connect → Browser receiver and create a session key. No Android app or USB cable is needed.</p>
+      <p>On the computer, open Connect → Browser receiver and select Create link and code. Paste that code below to start watching.</p>
       <form id="join-form">
-        <label for="session-key">Temporary session key</label>
+        <label for="session-key">Connection code</label>
         <input id="session-key" name="session-key" type="password" autocomplete="off" autocapitalize="none" spellcheck="false" maxlength="32" required aria-describedby="key-help error">
         <p id="key-help">One use. Expires after five minutes. Never saved in this browser.</p>
+        <p class="subtle">After connecting, this browser can resume for up to two minutes away. Disconnect ends access.</p>
         <button id="join" type="submit">Connect</button>
       </form>
       <p id="capability">Checking browser video support…</p>
-      <p class="subtle">Use a trusted HTTPS receiver address on another device. The localhost address works only on this computer. Safari/iPhone support requires device testing.</p>
+      <p class="subtle">No dskcpy app needed. On a phone, use the link from the computer’s selected connection mode. A localhost link works only on that computer or through a prepared Android USB connection. Safari/iPhone still needs device testing.</p>
     </section>
     <p id="error" role="alert"></p>
     <section id="stream-panel" hidden aria-label="Remote desktop">
       <div id="stage"><canvas id="display" aria-label="Streamed desktop. Touch to control; desktop keyboard forwarding is not yet supported."></canvas></div>
+      <div id="control-dock">
+      <p id="orientation-help" class="subtle" role="status" hidden></p>
+      <section id="volume-controls" class="quick-controls" aria-label="Computer volume" hidden>
+        <p>Computer volume <span class="subtle">Hold to repeat</span></p>
+        <button id="volume-down" type="button" title="Lower computer volume. Hold to repeat.">Volume −</button>
+        <button id="volume-up" type="button" title="Raise computer volume. Hold to repeat.">Volume +</button>
+      </section>
+      <section id="window-controls" class="quick-controls" aria-label="Computer window" hidden>
+        <p>Active window</p>
+        <button id="minimize" type="button">Minimize window</button>
+        <button id="maximize" type="button">Maximize / restore</button>
+      </section>
       <div id="toolbar" aria-label="Stream controls">
         <button id="touch" type="button" aria-pressed="true">Touch on</button>
-        <button id="pause" type="button" aria-pressed="false">Pause video</button>
-        <button id="audio" type="button" aria-pressed="false">Enable audio</button>
-        <button id="fullscreen" type="button">Full screen</button>
-        <button id="more" type="button" aria-expanded="false" aria-controls="more-controls">More controls</button>
-        <button id="disconnect" type="button">Disconnect</button>
+        <button id="pause" type="button" aria-label="Pause video" aria-pressed="false">Pause</button>
+        <button id="audio" type="button" aria-label="Audio off" aria-pressed="false">Audio off</button>
+        <button id="volume" type="button" aria-expanded="false" aria-controls="volume-controls">Volume<span class="disclosure-caret" aria-hidden="true">⌃</span></button>
+        <button id="window" type="button" aria-expanded="false" aria-controls="window-controls">Window<span class="disclosure-caret" aria-hidden="true">⌃</span></button>
+        <button id="fullscreen" type="button" title="Open full screen in landscape">Full screen</button>
+        <button id="more" type="button" aria-expanded="false" aria-controls="more-controls">More<span class="disclosure-caret" aria-hidden="true">⌃</span></button>
+        <button id="hide-controls" type="button">Hide controls</button>
       </div>
       <div id="more-controls" hidden>
-        <p>Computer controls</p>
-        <div class="controls">
-          <button id="volume-down" type="button" title="Lower computer volume. Hold to repeat.">Volume −</button>
-          <button id="volume-up" type="button" title="Raise computer volume. Hold to repeat.">Volume +</button>
-          <button id="minimize" type="button">Minimize window</button>
-          <button id="maximize" type="button">Maximize / restore</button>
-        </div>
+        <p>Session details</p>
+        <button id="drag-mode" type="button" aria-pressed="false">Drag: scroll</button>
+        <p class="subtle">Tap to click. One or two fingers scroll. Switch to Drag: select for text selection or dragging items; two fingers still scroll.</p>
         <p class="subtle">Touch controls the computer. Disable it to view only. Close and Lock are not available in this experimental receiver.</p>
+        <p id="stats" class="subtle">Waiting for the first decoded frame…</p>
+        <button id="disconnect" type="button">Disconnect</button>
       </div>
-      <p id="stats" class="subtle">Waiting for the first decoded frame…</p>
+      </div>
+      <button id="show-controls" type="button" aria-label="Show controls" title="Show controls" hidden>
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+      </button>
     </section>
   </main>
 </body>

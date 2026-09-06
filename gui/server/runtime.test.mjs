@@ -84,3 +84,29 @@ test('Mac readiness requires the compiled opt-in marker, not just upstream rever
   status = await inspectReadiness(runtime, probe);
   assert.equal(status.transports.internet.ready, false);
 });
+
+test('ADB readiness distinguishes a missing installation from a found executable that cannot start', async (t) => {
+  const { dir, binary } = await files(t);
+  const runtime = resolveRuntime(dir, { SCRCPY_GUI_BINARY: binary, ADB: binary });
+  const failed = await inspectReadiness(runtime, async () => { throw new Error('private user-directory failure'); });
+  const adb = failed.checks.find((check) => check.id === 'adb');
+  assert.equal(adb.ready, false);
+  assert.match(adb.message, /found but could not start/);
+  assert.ok(!adb.message.includes('private user-directory failure'));
+  const missing = resolveRuntime(dir, { SCRCPY_GUI_BINARY: binary, ADB: path.join(dir, 'missing-adb.exe') });
+  const absent = await inspectReadiness(missing, async () => ({ stdout: '' }));
+  assert.match(absent.checks.find((check) => check.id === 'adb').message, /Install or configure/);
+});
+
+test('ADB SDK discovery supports SDK_ROOT while keeping explicit ADB and ANDROID_HOME authoritative', async (t) => {
+  const { dir } = await files(t);
+  const sdk = path.join(dir, 'SDK with spaces');
+  const adb = path.join(sdk, 'platform-tools', process.platform === 'win32' ? 'adb.exe' : 'adb');
+  await mkdir(path.dirname(adb), { recursive: true });
+  await writeFile(adb, 'fixture'); await chmod(adb, 0o755);
+  assert.equal(resolveRuntime(dir, { ANDROID_SDK_ROOT: sdk }).adb, adb);
+  assert.equal(resolveRuntime(dir, { ANDROID_HOME: sdk, ANDROID_SDK_ROOT: '/missing' }).adb, adb);
+  assert.equal(resolveRuntime(dir, { ANDROID_HOME: '/missing', ANDROID_SDK_ROOT: sdk }).adb, null);
+  assert.equal(resolveRuntime(dir, { ADB: '/missing-adb', ANDROID_HOME: sdk }).adb, null);
+  assert.equal(resolveRuntime(dir, { PATH: path.dirname(adb) }).adb, adb);
+});

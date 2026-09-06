@@ -2,7 +2,8 @@
 
 This checklist records remaining implementation and verification work. It is
 not a claim that untested platforms are supported. Physical Mac verification is
-paused while the Mac is unavailable; the browser receiver is the current slice.
+paused while the Mac is unavailable; current work covers browser reliability
+and source-checkout startup. These are not signed desktop releases.
 
 ## 1. Mac hosting completion — hardware verification pending
 
@@ -29,6 +30,10 @@ paused while the Mac is unavailable; the browser receiver is the current slice.
 - [x] Implement WebCodecs video/audio, input return, bounded queues and pause/resume.
 - [x] Add USB reverse-tunnel, Wi-Fi/direct-IP HTTPS and private VPN connection setup.
 - [x] Verify real Windows NVENC video and browser audio lifecycle on localhost.
+- [x] Retain authenticated browser sessions across bounded background/reload gaps;
+  force an immediate native keyframe when decoding resumes.
+- [x] Add compact Volume/Window trays, non-overlapping show-controls placement,
+  fullscreen landscape requests and explicit swipe scrolling.
 - [ ] Verify physical USB Android-browser and Wi-Fi/direct-IP/VPN end-to-end paths.
 - [ ] Test Safari/iOS codec, gesture, audio and background restrictions.
 - [ ] Define any native iOS receiver only after browser receiver constraints are tested.
@@ -40,6 +45,8 @@ no public listener, relay deployment or new account permission is implied.
 
 ## 4. Distribution and advanced input
 
+- [x] Windows source-checkout launcher with component checks, ADB SDK discovery,
+  safe existing-dashboard reuse and a diagnostic-only mode.
 - [ ] Reproducible desktop release builds, stable Android signing and upgrade tests.
 - [ ] macOS app packaging, signing/notarization and permission identity.
 - [ ] Optional desktop wrapper and control profiles.

@@ -94,6 +94,21 @@ sc_device_msg_deserialize(const uint8_t *buf, size_t len,
 
             return 32;
         }
+        case DEVICE_MSG_TYPE_REVERSE_SCROLL:
+            if (len < 21) {
+                return 0;
+            }
+            msg->reverse_scroll.position.point.x = (int32_t) sc_read32be(&buf[1]);
+            msg->reverse_scroll.position.point.y = (int32_t) sc_read32be(&buf[5]);
+            msg->reverse_scroll.position.screen_size.width = sc_read16be(&buf[9]);
+            msg->reverse_scroll.position.screen_size.height = sc_read16be(&buf[11]);
+            msg->reverse_scroll.dx = (int32_t) sc_read32be(&buf[13]);
+            msg->reverse_scroll.dy = (int32_t) sc_read32be(&buf[17]);
+            if (msg->reverse_scroll.dx < -120 || msg->reverse_scroll.dx > 120
+                    || msg->reverse_scroll.dy < -120 || msg->reverse_scroll.dy > 120) {
+                return -1;
+            }
+            return 21;
         case DEVICE_MSG_TYPE_REVERSE_FRAME_ACK:
         case DEVICE_MSG_TYPE_REVERSE_AUDIO_ACK:
             if (len < 9) {
