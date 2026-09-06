@@ -36,6 +36,9 @@ jobs:
         shell: msys2 {0}
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
       - uses: msys2/setup-msys2@v2
         with:
           msystem: MINGW64
@@ -54,10 +57,35 @@ jobs:
         run: |
           meson compile -C .tmp/ci-native
           meson test -C .tmp/ci-native --print-errorlogs
+      - name: Verify live native log delivery to the dashboard
+        shell: pwsh
+        env:
+          SCRCPY_LOG_PIPE_TEST_BINARY: .tmp/ci-native/app/log-pipe-fixture.exe
+        run: node --test gui/server/telemetry.test.mjs
+
+  native-macos:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install native build dependencies
+        run: brew install ffmpeg sdl3 meson ninja pkgconf
+      - name: Compile the experimental Mac host and run native tests
+        run: |
+          meson setup build-macos --buildtype=debug -Dcompile_server=false -Dreverse_macos=true -Dusb=false
+          meson compile -C build-macos
+          meson test -C build-macos --print-errorlogs
+      - name: Verify native capabilities and live dashboard telemetry
+        run: |
+          build-macos/app/scrcpy --help | grep -F 'ScreenCaptureKit/VideoToolbox'
+          node --test gui/server/macos-build.test.mjs gui/server/telemetry.test.mjs
 
   android-packaging:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         buildtype: [debug, release]
     steps:
@@ -66,6 +94,9 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+      - uses: android-actions/setup-android@v4
+        with:
+          log-accepted-android-sdk-licenses: false
       - name: Install build tools
         run: |
           python -m pip install meson ninja
