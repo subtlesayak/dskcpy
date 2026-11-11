@@ -5,7 +5,8 @@ rootProject.file('dskcpy.properties').withInputStream { identity.load(it) }
 def artifactVersion = identity.getProperty('DSKCPY_VERSION')
 def protocolVersion = identity.getProperty('SCRCPY_PROTOCOL_VERSION')
 def artifactCode = identity.getProperty('DSKCPY_ANDROID_VERSION_CODE').toInteger()
-if (!(artifactVersion ==~ /[0-9A-Za-z.+-]+/) || !(protocolVersion ==~ /[0-9.]+/) || artifactCode <= 50001) {
+if (!(artifactVersion ==~ /[0-9A-Za-z.+-]+/) || !(protocolVersion ==~ /[0-9.]+/)
+        || artifactCode <= 50001 || artifactCode > 2100000000 || identity.getProperty('REVERSE_PROTOCOL_VERSION') != '1') {
     throw new GradleException('Invalid dskcpy identity or non-monotonic Android version code')
 }
 

@@ -20,6 +20,8 @@ two seconds while PCM is processed. Capture-queue overflow is counted across
 encoder epochs. Counters contain no device names or identifiers; encoder counts
 restart on encoder recreation. These counts localize source-side loss, not
 receiver underflows or end-to-end playback quality.
+Converted PCM above the existing 4,800-frame worker bound is counted separately
+as `resampler_trim_frames` across encoder epochs; the bound remains unchanged.
 
 Pending physical gate: use a quiet harmless test sound with one identified
 native/receiver artifact; verify audible playback, mute, route/device changes,

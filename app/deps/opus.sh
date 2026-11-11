@@ -17,5 +17,5 @@ if [[ ! -f Makefile ]]; then
     "$SOURCES_DIR/opus-$VERSION/configure" --prefix="$INSTALL_DIR/$DIRNAME" \
         --enable-static --disable-shared --disable-doc --disable-extra-programs
 fi
-make -j
+make -j"${DSKCPY_BUILD_JOBS:-2}"
 make install

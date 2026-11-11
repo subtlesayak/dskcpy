@@ -58,7 +58,7 @@ target. A separate Apple-silicon **macOS 13.0 deployment target** builds the
 experimental host, GUI and browser receiver:
 
 ```sh
-brew install cmake meson ninja pkgconf wget nasm node
+brew install cmake meson ninja pkgconf nasm node
 bash release/build_macos_host.sh release/work/host-arm64
 release/work/host-arm64/Start-dskcpy-host.command --check
 ```

@@ -430,7 +430,7 @@ static int mac_audio_thread(void *context) {
         static const struct sc_reverse_audio_callbacks cbs = {.stopped = mac_audio_stopped,
             .enabled = mac_audio_enabled, .acked_pts = mac_audio_acked, .send = mac_audio_send};
         struct sc_reverse_audio_encoder *encoder = NULL;
-        uint64_t sequence = 0;
+        uint64_t sequence = 0, resampler_trim_frames = 0;
         bool unavailable = false;
         unsigned retries = 0;
         int64_t retry_at = 0, report_at = 0;
@@ -479,6 +479,7 @@ static int mac_audio_thread(void *context) {
                     if (current != sequence + 1 || converter.generation != format_generation)
                         sc_reverse_audio_encoder_discard_partial(encoder);
                     size_t offset = frames > SC_REVERSE_AUDIO_MAX_CHUNK ? frames - SC_REVERSE_AUDIO_MAX_CHUNK : 0;
+                    resampler_trim_frames += offset;
                     frames -= offset;
                     ok = sc_reverse_audio_encoder_feed(encoder, pcm + offset * 2, frames, received, &audio_clock);
                     if (av_gettime_relative() >= report_at) {
@@ -487,10 +488,10 @@ static int mac_audio_thread(void *context) {
                         sc_mutex_lock(&s->mutex);
                         uint64_t dropped = s->audio_queue_drops;
                         sc_mutex_unlock(&s->mutex);
-                        LOGI("Mac audio counters (current encoder): packets=%llu stale_frames=%llu window_frames=%llu catchup_frames=%llu capture_queue_drops=%llu",
+                        LOGI("Mac audio counters (current encoder): packets=%llu stale_frames=%llu window_frames=%llu catchup_frames=%llu capture_queue_drops=%llu resampler_trim_frames=%llu",
                             (unsigned long long)stats.packets, (unsigned long long)stats.stale_frames,
                             (unsigned long long)stats.window_frames, (unsigned long long)stats.catchup_frames,
-                            (unsigned long long)dropped);
+                            (unsigned long long)dropped, (unsigned long long)resampler_trim_frames);
                         report_at = av_gettime_relative() + 2000000;
                     }
                 }

@@ -84,5 +84,9 @@ else
     cmake "$SOURCES_DIR/$PROJECT_DIR" "${conf[@]}"
 fi
 
-cmake --build . -j
+if [[ "${DSKCPY_MAC_HOST_BUILD:-0}" == 1 ]]; then
+    cmake --build . --parallel "${DSKCPY_BUILD_JOBS:-2}"
+else
+    cmake --build . -j
+fi
 cmake --install .

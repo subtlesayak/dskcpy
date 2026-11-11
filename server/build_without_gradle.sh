@@ -14,7 +14,7 @@ set -e
 SCRCPY_DEBUG=false
 SERVER_DIR=$(cd "$(dirname "$0")" && pwd)
 # Read data, never source the properties file as shell code.
-property() { sed -n "s/^$1=//p" "$SERVER_DIR/../dskcpy.properties"; }
+property() { sed -n "s/^$1=//p" "$SERVER_DIR/../dskcpy.properties" | tr -d '\r'; }
 DSKCPY_VERSION=$(property DSKCPY_VERSION)
 SCRCPY_PROTOCOL_VERSION=$(property SCRCPY_PROTOCOL_VERSION)
 [[ "$DSKCPY_VERSION" =~ ^[0-9A-Za-z.+-]+$ && "$SCRCPY_PROTOCOL_VERSION" =~ ^[0-9.]+$ ]] || {

@@ -87,6 +87,11 @@ jobs:
           npm ci --prefix gui --ignore-scripts
           build-macos/app/scrcpy --help | grep -F 'ScreenCaptureKit/VideoToolbox'
           node --test gui/server/macos-build.test.mjs gui/server/telemetry.test.mjs
+      - name: Gate native regressions with address and undefined-behavior sanitizers
+        run: |
+          meson setup build-macos-sanitized --buildtype=debug -Dcompile_server=false -Dreverse_macos=true -Dusb=false -Db_sanitize=address,undefined
+          meson compile -C build-macos-sanitized -j 2
+          meson test -C build-macos-sanitized --print-errorlogs
 
   macos-host-candidate:
     runs-on: macos-15
@@ -96,7 +101,7 @@ jobs:
         with:
           node-version: '24'
       - name: Install source-build tools
-        run: brew install cmake meson ninja pkgconf wget nasm
+        run: brew install cmake meson ninja pkgconf nasm
       - name: Build and verify the separate unsigned Mac hosting candidate
         run: bash release/build_macos_host.sh release/work/host-arm64
       - name: Check packaged browser/dashboard runtime without starting capture

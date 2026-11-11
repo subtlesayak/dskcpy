@@ -159,5 +159,9 @@ if [[ "${DSKCPY_MAC_HOST_BUILD:-0}" == 1 ]] && ! grep -q '^#define CONFIG_LIBOPU
     exit 1
 fi
 
-make -j
+if [[ "${DSKCPY_MAC_HOST_BUILD:-0}" == 1 ]]; then
+    make -j"${DSKCPY_BUILD_JOBS:-2}"
+else
+    make -j
+fi
 make install
