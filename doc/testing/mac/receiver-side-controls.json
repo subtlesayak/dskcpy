@@ -14,9 +14,10 @@
   },
   "physical": {
     "prior_private_browser_baseline": "User confirmed visible video 20s and Calculator 123 from phone taps; audio stutters",
-    "usb": "Edge Android 17 first failed after 5s without output; software fallback unsupported; bounded flush plus fresh IDR now stays connected with fresh decode ACKs for over 60s",
-    "usb_picture_and_keyboard": "Awaiting human observation and phone keyboard 456 check",
-    "audio": "Unresolved; no pass claimed for current USB candidate"
+    "usb": "Edge on Android 17 initially stalled at 5s without output; software H.264 unavailable. Bounded flush plus fresh IDR now stays connected with fresh decode ACKs; user confirms picture stays visible for 20 seconds.",
+    "usb_picture_and_keyboard": "PASS: user confirms video remains visible for 20 seconds and phone keyboard input; controlled 789 typing independently read in Mac Calculator accessibility state. USB stream left running.",
+    "audio": "Unresolved; no pass claimed for current USB candidate",
+    "ui_observations": "Real phone screenshots reveal excessive typing-panel/right-rail space and landscape soft-keyboard occlusion. Additional responsive layout work is required; synthetic viewport checks did not reproduce the physical keyboard overlay."
   },
   "limitations": [
     "Flushing stalled platform decoders may reduce FPS and increase IDR traffic; not a 60fps qualification",
