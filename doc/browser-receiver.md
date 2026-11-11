@@ -1,57 +1,73 @@
 # Browser receiving (experimental)
 
-dskcpy can send native desktop H.264 video and Opus audio to a browser using
-WebRTC. Signaling and authenticated input use the existing WebSocket connection.
-The WebCodecs/WebSocket media path remains available for older clients and the
-Android USB browser tunnel. This receiver is separate from the localhost dashboard.
-No APK is needed for this receiver. Native iOS software is not included.
+View a Windows/Mac desktop in a receiving browser, with optional audio and
+input. No companion APK is installed. The native host still captures the desktop;
+a webpage alone cannot capture it or inject operating-system input.
+
+[Start](#start) · [Connection choice](#choose-a-connection) ·
+[Private VPN](#mac-browser-sharing-over-an-existing-private-vpn) ·
+[Controls](#controls-and-lifecycle) ·
+[Mac window/typing](#mac-window-sharing-and-desktop-keyboard) ·
+[Troubleshooting](../FAQ.md)
+
+| Page | Open it where? | Purpose |
+| --- | --- | --- |
+| Dashboard, normally `http://127.0.0.1:27183` | On the host computer | Choose capture/connection settings and create invitations. Keep it private. |
+| Generated receiver link, receiver port normally `27180` | On the receiving device, or a local preview tab | Authenticate, play media and return permitted input. Remote links use trusted HTTPS. |
+
+WebRTC carries H.264/Opus media; authenticated WebSocket signaling carries
+control. WebCodecs/WebSocket playback remains available for Android USB tunnels.
+Chrome and Edge are the initial targets; Safari/iPhone/iPad needs physical
+qualification. USB browser tunneling is Android-only.
 
 ## Start
 
-Build the native host, then update and start the dashboard:
+1. Build and launch the host using [Windows setup](windows-host.md) or
+   [Mac setup](macos-host.md). Use that platform's configured launcher/terminal;
+   bare `npm start` does not automatically select a Mac build.
+2. Open the dashboard **on the computer**. Under **Browser receiver**, choose
+   **This computer** for preview or **USB cable** for an authorized Android device.
+   Set up trusted HTTPS/private media before choosing a remote mode below.
+3. Select **Create link and code**. On a separate receiving device, scan the QR
+   with its camera and open the link. For local preview, open **Receiver link**,
+   paste **Connection code**, and select **Connect**.
+4. Confirm readable video. Enable playback when the browser asks, and use a
+   harmless input target. Select **Disconnect** in the receiver or
+   **Stop browser stream** in the dashboard to end sharing.
 
-```sh
-npm ci --prefix gui
-npm run build --prefix gui
-npm start --prefix gui
-```
+For USB, connect a data-capable cable, enable debugging, unlock Android and
+approve the host first. The generated localhost address works **on that connected
+Android device** through its owned ADB reverse tunnel; keep the cable connected.
 
-Open the displayed control address on the computer. Under **Connect → Browser
-receiver**, choose how to connect, then **Create link and code**. On a phone,
-scan the displayed QR with the camera and open its link to connect automatically.
-You can also open **Receiver link**, paste **Connection code**, and select
-**Connect**. Local computer tests use the manual fields.
-The code (session key) expires after five minutes and permits one connection.
-The QR is generated locally and includes the code in a URL fragment. The receiver
-removes the fragment from the current history entry before authentication;
-fragments are not sent in HTTP requests. The ordinary receiver link contains no
-code. No code is written to application logs, browser storage or saved settings.
-QR links use a dedicated `/join` page so an older open root receiver tab loads
-the current connection handler. Update and restart the desktop service before
-creating these links; an older service does not serve this route.
-Reopening a QR in an existing receiver tab also clears the fragment and connects;
-it leaves an already connected viewer running. Malformed invitations are cleared
-without attempting authentication.
-Treat the QR like the code: anyone who scans it can view and control this computer.
-Capture starts only after authentication.
-The approved browser can reconnect automatically after a refresh or a brief
-absence (up to two minutes). Disconnect, desktop Stop, host shutdown, or expiry
-requires a fresh code.
+The invitation expires after five minutes and permits one connection. Its QR
+credential is in a URL fragment, removed from the current history entry before
+authentication; the ordinary receiver link is code-free. QR invitations use a
+`/join` page so a reused tab loads the current handler. Capture starts only
+after authentication. Treat the QR/code as access to the shared desktop.
 
-| Mode | Connection and requirements |
+An authenticated browser can resume after refresh or a brief absence, up to two
+minutes. Explicit Disconnect, desktop Stop, host shutdown or expiry requires a
+fresh invitation. Correct a failed host start before creating another code.
+
+## Choose a connection
+
+| Dashboard choice | Requirements |
 | --- | --- |
-| Local test | Open the receiver on the host computer. Loopback HTTP needs no certificate. |
-| USB | Android browser, USB debugging authorized, and ADB on the host. A temporary `adb reverse` tunnel carries the browser connection over USB. Open the displayed **localhost** address on the Android device. No Wi-Fi or APK is required. |
-| Wi-Fi | Both devices on a reachable LAN. Use a trusted HTTPS hostname or IP address configured below. No ADB, USB, or pairing is used. |
-| Direct IP | Connect to the configured HTTPS IP address, including its port. The certificate must cover that IP and be trusted by the receiving device. Plain HTTP is not a supported fallback. |
-| Internet / VPN | Use a reachable private VPN and trusted HTTPS receiver address, for example Tailscale Serve. No ADB is used. Carrier NAT/public mobile IP alone is not enough. |
+| **This computer** | Loopback preview, no certificate. Keyboard forwarding is omitted to prevent synthetic input feeding back into its own field. |
+| **USB cable** | Android browser, authorized USB debugging, ADB and an available owned reverse tunnel. No Wi-Fi or APK. |
+| **Same Wi-Fi** | Reachable LAN, trusted HTTPS receiver origin and explicitly selected private WebRTC media interface; no ADB pairing. |
+| **Direct IP** | Trusted HTTPS for the exact private address/port plus private media reachability. Plain HTTP is not a remote fallback. |
+| **Internet / VPN** | Authorized private peer access, trusted HTTPS and private WebRTC UDP reachability. A carrier/public mobile IP alone is insufficient. |
 
-These modes change how the browser reaches the receiver and never bypass
-authentication. USB browser tunneling is Android-specific;
-it is **not iPhone USB support**. Safari/iPhone/iPad media, gestures and background
-behavior still require physical-device testing. Modern browsers use native WebRTC
-playback without requiring WebCodecs. A browser lacking both playback paths gets
-a visible capability message.
+Remote setup has two parts: `DSKCPY_VIEWER_ORIGIN` identifies the trusted HTTPS
+receiver, and `DSKCPY_VIEWER_RTC_BIND` selects this host's reachable private IPv4
+media interface. A working HTTPS page alone does not establish media reachability.
+Configure these in the terminal that starts the service. Finish any active
+stream before restarting an existing service with changed settings.
+
+Native Android Internet mode is a different flow: the **phone app** generates
+its secret. A browser invitation is generated on the **host computer**.
+See [native Internet setup](internet-mode.md) for the former.
 
 ## Mac browser sharing over an existing private VPN
 
@@ -61,6 +77,10 @@ IPv4 interface for media, and verifies a trusted HTTPS Serve route on port 8443
 forwarding only to the receiver on loopback port 27180. It does not change accounts,
 create shares, install Tailscale or modify Serve. Use
 `bash tools/macos-browser-start.sh --check` for a read-only readiness check.
+
+If a dashboard is already running, end its stream and stop that service before
+switching launchers. The Node launcher can reuse an existing service, which keeps
+its old environment and will not pick up this launcher's private browser settings.
 
 The receiving device needs access through the same authorized tailnet or an
 accepted machine share. With different accounts, share the Mac to the recipient
@@ -105,6 +125,8 @@ different accounts require explicit sharing/invitation and access rules.
 
    ```powershell
    $env:DSKCPY_VIEWER_ORIGIN = 'https://desktop.example.ts.net'
+   $env:DSKCPY_VIEWER_RTC_BIND = '100.64.0.10' # Replace with this host's private VPN IPv4.
+   # Keep Windows native/runtime settings from windows-host.md in this terminal.
    npm start --prefix gui
    ```
 
@@ -125,11 +147,16 @@ serve HTTPS directly with an **already provisioned** certificate/key:
 ```powershell
 $env:DSKCPY_VIEWER_ORIGIN = 'https://192.168.1.20:27181'
 $env:DSKCPY_VIEWER_TLS_BIND = '192.168.1.20'
+$env:DSKCPY_VIEWER_RTC_BIND = '192.168.1.20'
 $env:DSKCPY_VIEWER_TLS_PORT = '27181'
 $env:DSKCPY_VIEWER_TLS_CERT = 'D:\Certificates\receiver-cert.pem'
 $env:DSKCPY_VIEWER_TLS_KEY = 'D:\Certificates\receiver-key.pem'
 npm start --prefix gui
 ```
+
+Keep the Windows native/runtime settings from [Windows setup](windows-host.md)
+in the same PowerShell terminal. On Mac, use equivalent `export NAME=value`
+settings and the configured native-only Node launcher from [Mac setup](macos-host.md#browser-only-build-without-an-apk).
 
 Addresses and certificate paths above are examples. Use the host's actual private
 address and your own certificate. Direct TLS starts only when a remote browser
@@ -244,9 +271,20 @@ meson compile -C build-macos-features
 meson test -C build-macos-features --print-errorlogs
 ```
 
-When your current session can stop, launch the existing Mac browser script with
-`SCRCPY_GUI_BINARY` pointing to that candidate's `app/scrcpy`. The script preserves
-the configured private route. Window selection is also available through
+When your current session can stop, use the Node launcher in the terminal with
+its existing private HTTPS/media settings:
+
+```sh
+export SCRCPY_GUI_BINARY="$PWD/build-macos-features/app/scrcpy"
+export SCRCPY_ICON_DIR="$PWD/app/data"
+# Remote mode also needs your existing DSKCPY_VIEWER_ORIGIN and DSKCPY_VIEWER_RTC_BIND.
+node gui/scripts/launch.mjs
+```
+
+`tools/macos-browser-start.sh` always selects `build-macos/app/scrcpy`; it does
+not preserve a `SCRCPY_GUI_BINARY` override for this alternate directory.
+
+Window selection is also available through
 `--list-reverse-windows` and `--reverse-display --reverse-window=<id>`; IDs are
 ephemeral local choices, not remembered identities.
 
@@ -326,4 +364,4 @@ at least 480 ticks per packet, including packets dropped during an in-flight sen
 native enqueue/ACK timestamps are not audio sampling timestamps. Larger mute or
 route-change gaps remain gaps. Automated burst/wraparound regressions pass, but
 audible device audio and route recovery still require physical qualification.
-See `doc/testing/mac/browser-audio-clock.json`.
+See the [audio-clock qualification record](testing/mac/browser-audio-clock.json).

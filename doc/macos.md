@@ -1,10 +1,18 @@
 # On macOS
 
+> [!NOTE]
+> This retained page describes upstream-style **Android-to-computer** use.
+> Use [Mac host setup](macos-host.md) to stream a Mac desktop.
+> Upstream releases and package-manager installs do not include dskcpy hosting.
+> Versioned 4.1 download links below are historical pins, not current-release claims;
+> use [upstream releases](https://github.com/Genymobile/scrcpy/releases/latest)
+> if you want current upstream scrcpy.
+
 ## Install
 
-### From the official release
+### Historical upstream 4.1 release
 
-Download a static build of the [latest release]:
+The retained upstream 4.1 static builds are:
 
  - [`scrcpy-macos-aarch64-v4.1.tar.gz`][direct-macos-aarch64] (aarch64)  
    <sub>SHA-256: `20fd47c9014dd5e0fa77091f3cb7adbda8445a360c4584aeaa0150b5b3988ff3`</sub>
@@ -47,7 +55,7 @@ _See [build.md](build.md) to build and install the app manually._
 
 ## Run
 
-_Make sure that your device meets the [prerequisites](/README.md#prerequisites)._
+_Make sure that your device meets the [prerequisites](https://github.com/Genymobile/scrcpy#prerequisites)._
 
 Once installed, run from a terminal:
 
@@ -64,4 +72,4 @@ scrcpy --no-audio --record=file.mkv
 Documentation for command line arguments is available:
  - `man scrcpy`
  - `scrcpy --help`
- - on [github](/README.md)
+ - on [github](https://github.com/Genymobile/scrcpy)
