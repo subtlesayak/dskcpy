@@ -1,4 +1,101 @@
-# Frequently Asked Questions
+# Frequently asked questions
+
+This first section covers **dskcpy desktop hosting**. The
+[inherited Android-to-computer FAQ](#inherited-android-to-computer-faq) follows
+below. Start with [Windows setup](doc/windows-host.md), [Mac setup](doc/macos-host.md)
+or [browser receiving](doc/browser-receiver.md) for the receiver you intend to use.
+
+## Which program should I install?
+
+dskcpy currently requires a source build. Upstream scrcpy downloads and
+`brew install scrcpy` do not include this fork's desktop-hosting features.
+The native binary is still named `scrcpy`, so confirm the dashboard selects
+your build of this fork. Build the native host, dashboard and companion from
+matching source. The browser receiver does not install a companion APK.
+
+## Why does the dashboard address fail on my phone?
+
+The dashboard at `http://127.0.0.1:27183` controls the host **on that computer**.
+In **Browser receiver**, create an invitation and open its generated receiver
+address on the phone. Android USB mode uses an ADB reverse tunnel; remote modes
+need trusted HTTPS and private network reachability. See the
+[browser connection guide](doc/browser-receiver.md#choose-a-connection).
+
+## What do I check when a stream will not start?
+
+| Symptom | Next step |
+| --- | --- |
+| Streaming program missing | Build this fork and select its native executable; see the platform setup guide. |
+| Windows runtime libraries fail to load | Set `SCRCPY_RUNTIME_DIR` to the UCRT64 `bin` used to build it. Do not mix runtime families. |
+| Android device absent or unauthorized | Enable debugging, use a data cable, unlock the phone and approve its prompt. Check `adb devices -l`. |
+| Companion APK missing | Build/copy the matching APK for the Android app receiver. Browser-only receiving needs no APK. |
+| Android update rejected | Check signing compatibility. Preserve the installed app and its data while resolving a key mismatch. |
+| Mac video denied or blank | Check Screen Recording for the launching process; end the session and restart that app if macOS requires it. |
+| Mac video works but input does not | Enable Accessibility for that host/launcher. Selected-window mode is intentionally view-only. |
+| QR returns to code entry | Check the host's Activity error. Correct capture/connection issues, then create a fresh invitation. |
+| Receiver cannot reach a secure link | Check certificate trust, private peer access, HTTPS routing and private media reachability. Do not bypass certificate validation. |
+
+## Are native Internet secrets and browser codes interchangeable?
+
+No. In [native Android Internet mode](doc/internet-mode.md), the phone app
+creates a temporary secret and the desktop connects to the reachable phone.
+For [browser receiving](doc/browser-receiver.md), the computer creates the
+invitation and the receiving browser connects to the computer. VPN reachability
+must permit the appropriate direction. Sharing one peer does not automatically
+establish the opposite direction.
+
+## Why is Mac or browser audio silent or choppy?
+
+Enable playback on the receiving device and check its media volume. Browsers
+may require a tap to allow audio. Mac window mode has audio off; full-desktop
+capture needs Screen & System Audio Recording permission. Use a quiet,
+non-protected clip and compare each transport separately.
+
+Mac sustained audio stutter remains under investigation. An encoder log,
+transport ACK or successful retry does not close it. Source fixes and automated
+results are recorded in [Mac testing](doc/testing/mac/README.md); audible
+candidate testing remains separate. Receiver mute does not mute the computer.
+
+## Why is the Mac keyboard button missing?
+
+It requires a native host advertising browser keyboard support, a full-desktop
+Mac session, and a separate receiver. **This computer** preview and selected
+window mode omit forwarding. Windows browser typing is not implemented.
+Rebuild the host and dashboard from the same revision. The
+[typing guide](doc/browser-receiver.md#mac-window-sharing-and-desktop-keyboard)
+explains focus, permissions, IME and reserved-shortcut limits.
+
+## Does leaving the app end the session?
+
+Leaving and stopping are different. Android 6+ can retain a session across
+background/return. Browser sessions can resume across a bounded absence or
+reload, currently up to two minutes. Explicit Stop/Disconnect ends sharing;
+Internet or browser reconnection then needs a fresh secret/invitation.
+Process death and network loss are not guaranteed seamless recovery.
+
+## Is the displayed latency physical touch-to-display latency?
+
+No. Native decode-ACK RTT and WebRTC send completion measure different software
+boundaries. They do not measure physical touch, display scan-out or glass-to-glass
+latency. See [measurement limits](doc/browser-receiver.md#latency-and-validation-boundaries).
+
+## How do I update or report a failure safely?
+
+Finish the active session before replacing its native binary or restarting its
+service. Preserve local changes and working artifacts. An existing service keeps
+its startup environment; a second launcher or browser refresh does not reconfigure it.
+
+Report the host OS, receiver type, source revision, connection mode, reproduction
+steps and first useful Activity/build error to
+[this fork](https://github.com/subtlesayak/dskcpy/issues). Remove secrets, device
+identifiers, network addresses, personal paths and private desktop content.
+
+## Inherited Android-to-computer FAQ
+
+The following retained guidance is for the original scrcpy direction:
+**Android screen → computer**. Commands, upstream issue links and Android input
+permissions in this section do not describe dskcpy desktop hosting. Browser
+and native Internet receiving can operate without desktop ADB where documented.
 
 [Read in another language](#translations)
 

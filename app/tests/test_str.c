@@ -172,6 +172,28 @@ static void test_utf8_truncate(void) {
     assert(count == 7); // no more chars
 }
 
+static void test_utf8_boundaries(void) {
+    const char *text = "A\xc3\xa9\xe6\x97\xa5\xf0\x9f\x91\x8b";
+    const size_t cuts[] = {0, 1, 1, 3, 3, 3, 6, 6, 6, 6, 10, 10};
+    for (size_t limit = 0; limit < sizeof(cuts) / sizeof(*cuts); ++limit) {
+        assert(sc_str_utf8_truncation_index(text, limit) == cuts[limit]);
+    }
+    assert(sc_str_utf8_truncation_index("", 0) == 0);
+    assert(sc_str_utf8_truncation_index(text, SIZE_MAX) == 10);
+    // Leading continuation bytes have no usable cut before the requested
+    // boundary. A heap buffer makes any pre-buffer access visible to ASan.
+    char *malformed = malloc(4);
+    assert(malformed);
+    memcpy(malformed, "\x80\x81\xbf", 4);
+    for (size_t limit = 0; limit < 3; ++limit) {
+        assert(sc_str_utf8_truncation_index(malformed, limit) == 0);
+    }
+    // Preserve the existing full-string behavior: this helper is not a UTF-8
+    // validator and does not rewrite strings that fit without truncation.
+    assert(sc_str_utf8_truncation_index(malformed, 3) == 3);
+    free(malformed);
+}
+
 static void test_parse_integer(void) {
     long value;
     bool ok = sc_str_parse_integer("1234", &value);
@@ -390,6 +412,7 @@ int main(int argc, char *argv[]) {
     test_join_truncated_after_sep();
     test_concat();
     test_utf8_truncate();
+    test_utf8_boundaries();
     test_parse_integer();
     test_parse_integers();
     test_parse_integer_with_suffix();

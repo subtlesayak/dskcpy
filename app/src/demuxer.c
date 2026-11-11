@@ -11,6 +11,9 @@
 
 #define SC_PACKET_HEADER_SIZE 12
 
+// A wire length is untrusted. Bound it before FFmpeg allocation or body I/O.
+#define SC_DEMUXER_PACKET_LIMIT (UINT32_C(64) * 1024 * 1024)
+
 #define SC_PACKET_FLAG_CONFIG    (UINT64_C(1) << 62)
 #define SC_PACKET_FLAG_KEY_FRAME (UINT64_C(1) << 61)
 
@@ -143,8 +146,9 @@ sc_demuxer_recv_packet(struct sc_demuxer *demuxer, const uint8_t *header,
     assert(!sc_demuxer_is_session(header));
     uint64_t pts_flags = sc_read64be(header);
     uint32_t len = sc_read32be(&header[8]);
-    if (!len) {
-        LOGE("Invalid packet length: 0");
+    if (len == 0 || len > SC_DEMUXER_PACKET_LIMIT) {
+        LOGE("Rejected media packet length %" PRIu32 " (allowed 1..%" PRIu32 ")",
+             len, SC_DEMUXER_PACKET_LIMIT);
         return false;
     }
 

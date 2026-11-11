@@ -36,6 +36,7 @@ export function createRtcMedia({ bind = '127.0.0.1', configuration,
   const packetizer = new H264Packetizer({ payloadType: 96, ssrc: video.ssrc,
     maxPayloadSize: 1100, inputFormat: 'annexb' });
   let sequence = randomInt(65536), closed = false, answering = false;
+  let lastAudioSample;
   let connected = false, waitingKey = true, sendingVideo = false, sendingAudio = false, dropped = 0;
   let lastKeyRequest = -Infinity;
   function requestKey() {
@@ -90,11 +91,20 @@ export function createRtcMedia({ bind = '127.0.0.1', configuration,
     } finally { sendingVideo = false; }
   }
   async function sound(payload, pts) {
-    if (closed || !connected || sendingAudio) return false;
+    if (closed || !connected) return false;
+    // Native PTS identifies ACKs and enqueue time; several 10 ms Opus packets
+    // can share a callback and differ by only one microsecond. RTP must still
+    // advance by 480 samples per packet. Preserve real gaps (mute/route changes)
+    // and advance even for a dropped in-flight packet, without buffering audio.
+    const observed = BigInt(pts) * 48000n / 1000000n;
+    const sample = lastAudioSample === undefined || observed > lastAudioSample + 480n
+      ? observed : lastAudioSample + 480n;
+    lastAudioSample = sample;
+    if (sendingAudio) return false;
     sendingAudio = true;
     try {
       await audio.sendRtp(new RtpPacket(new RtpHeader({ payloadType: 111,
-        sequenceNumber: sequence++ & 0xffff, timestamp: rtpTimestamp(pts, 48000),
+        sequenceNumber: sequence++ & 0xffff, timestamp: Number(sample & 0xffffffffn),
         ssrc: audio.ssrc, marker: false }), payload));
       return true;
     } finally { sendingAudio = false; }

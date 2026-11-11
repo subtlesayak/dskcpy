@@ -106,3 +106,38 @@ test('loss feedback during an in-flight IDR requires a later IDR; bitrate feedba
     await media.close();
   }
 });
+
+
+test('burst Opus packets advance a 10 ms sample clock, preserving gaps and RTP wraparound', async (t) => {
+  let peer;
+  const media = createRtcMedia({ configuration,
+    peerFactory: (options) => (peer = new RTCPeerConnection(options)) });
+  t.after(() => media.close());
+  const packets = [], sender = peer.getSenders()[1];
+  sender.sendRtp = async (packet) => { packets.push(packet); };
+  peer.connectionStateChange.execute('connected');
+  const base = 89478480000n; // Just before the 32-bit RTP clock wraps.
+  for (const offset of [0n, 1n, 2n, 3n, 1000000n])
+    assert.equal(await media.sound(Buffer.from([0xf0, 0xff, 0xfe]), base + offset), true);
+  const start = base * 48000n / 1000000n;
+  assert.deepEqual(packets.map((p) => p.header.timestamp),
+    [start, start + 480n, start + 960n, start + 1440n, start + 48000n].map((v) => Number(v & 0xffffffffn)));
+  assert.deepEqual(packets.slice(1).map((p, i) => (p.header.sequenceNumber - packets[i].header.sequenceNumber) & 0xffff), [1,1,1,1]);
+});
+
+test('a dropped concurrent audio packet leaves a sample-clock gap without retaining a queue', async (t) => {
+  let peer, finish;
+  const media = createRtcMedia({ configuration,
+    peerFactory: (options) => (peer = new RTCPeerConnection(options)) });
+  t.after(() => media.close());
+  const packets = [], sender = peer.getSenders()[1];
+  sender.sendRtp = (packet) => { packets.push(packet); return new Promise((resolve) => { finish = resolve; }); };
+  peer.connectionStateChange.execute('connected');
+  const first = media.sound(Buffer.from([0xf0, 0xff, 0xfe]), 1000000n);
+  assert.equal(await media.sound(Buffer.from([0xf0, 0xff, 0xfe]), 1000001n), false);
+  finish(); await first;
+  sender.sendRtp = async (packet) => { packets.push(packet); };
+  assert.equal(await media.sound(Buffer.from([0xf0, 0xff, 0xfe]), 1000002n), true);
+  assert.deepEqual(packets.map((p) => p.header.timestamp), [48000, 48960]);
+  assert.equal((packets[1].header.sequenceNumber - packets[0].header.sequenceNumber) & 0xffff, 1);
+});

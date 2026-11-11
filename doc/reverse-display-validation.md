@@ -432,7 +432,7 @@ Automated evidence for the audio slice:
 
 This does **not** verify audible Mac-to-phone playback, mute/resume timing on a
 physical device, Safari/iOS receiving or motion-to-photon latency. Follow the
-[Mac audio checklist](macos-host.md#testing-mac-desktop-audio) before treating the
+[Mac audio checklist](macos-host.md#audio-and-recovery-checks) before treating the
 audio path as hardware-validated. Windows' existing WASAPI capture implementation
 and the Android audio wire protocol are unchanged.
 
