@@ -1,5 +1,9 @@
 # Mac host hardware testing
 
+For the November browser candidate and merged upgrades, see
+[Current project status and verification](../../project-status.md). This page
+retains the earlier Android-app receiver and privately transferred snapshot history.
+
 The physical results below were observed on 20–21 October 2026 using privately
 transferred source snapshots. They do not qualify every browser/device. The Mac
 source fixes were subsequently applied to this repository and built/tested on

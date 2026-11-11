@@ -11,6 +11,9 @@ reverse direction. The original Android-to-computer mode remains available.
 [Mac setup](doc/macos-host.md) · [Browser receiving](doc/browser-receiver.md) ·
 [Troubleshooting](FAQ.md) · [Documentation](#documentation)
 
+[Current project status and verification](doc/project-status.md) records merged
+upgrades, pending receiver work and the exact scope of physical-device results.
+
 For source/artifact identity, Android upgrade checks and the separate unsigned
 Mac hosting candidate, see [Build identity and compatible upgrades](doc/artifact-upgrades.md).
 
@@ -19,7 +22,8 @@ Mac hosting candidate, see [Build identity and compatible upgrades](doc/artifact
 > It currently requires a source build; there is no signed, ready-to-install
 > dskcpy desktop release. Upstream scrcpy downloads and package-manager installs
 > do not include dskcpy's desktop-hosting features. Mac hosting and browser
-> receiving are experimental; sustained Mac audio and device qualification remain open.
+> receiving are experimental; longer-session audio, transport and device
+> qualification remain open.
 
 ## What it does
 
@@ -203,7 +207,7 @@ and private desktop content. Read the [Internet security boundary](doc/internet-
 | Connect the native Android app over a VPN | [Internet mode](doc/internet-mode.md) |
 | Resolve setup or streaming failures | [FAQ](FAQ.md) |
 | Build the inherited Android-to-computer mode | [Native build reference](doc/build.md) |
-| Check remaining work and actual evidence | [Roadmap](doc/roadmap.md), [validation notes](doc/reverse-display-validation.md) |
+| Check current progress and actual evidence | [Project status](doc/project-status.md), [roadmap](doc/roadmap.md), [validation notes](doc/reverse-display-validation.md) |
 
 Development checks are `npm test --prefix gui`, `npm run build --prefix gui`,
 `meson test -C <debug-build-directory>`, and `./gradlew :server:testDebugUnitTest`
