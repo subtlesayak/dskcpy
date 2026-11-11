@@ -185,14 +185,15 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
     socket.on('data', (chunk) => { try { parser.push(chunk); } catch { close(); } });
     socket.on('error', close); socket.on('close', close);
   });
-  function close() {
+  function close(reason) {
     if (closed) return;
     closed = true;
     stopRtc();
     clearTimeout(nativeTimer); clearTimeout(awayTimer); clearTimeout(lifetimeTimer); clearInterval(pingTimer);
     releaseTouches(); listener.close(); native?.destroy();
     const target = peer; peer = null;
-    target?.close(1000, 'Session ended. Create a new code on the computer.');
+    target?.close(reason === 'capture-permission' ? 1008 : 1000,
+      reason === 'capture-permission' ? 'capture-permission' : 'Session ended. Create a new code on the computer.');
     if (target) setTimeout(() => target.terminate(), 1000).unref();
     onClose();
   }

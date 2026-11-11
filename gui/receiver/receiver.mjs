@@ -31,9 +31,7 @@ let resumeAllowed = true;
 let audioGeneration = 0, fullscreenAttempt = 0, playbackAttempt = 0;
 const mediaAcks = createMediaAcknowledger(send);
 const controlTrays = [
-  { trigger: 'volume', panel: 'volume-controls', first: 'volume-down' },
-  { trigger: 'window', panel: 'window-controls', first: 'minimize' },
-  { trigger: 'more', panel: 'more-controls' },
+  { trigger: 'more', panel: 'more-controls', first: 'pause' },
 ];
 let openControlTray = null;
 let selectDrag = false, touchGesture = null;
@@ -42,13 +40,23 @@ const keyboardInput = createBrowserKeyboard({ field: $('keyboard-input'), send,
   onError: (message) => { $('error').textContent = message; } });
 function hideKeyboard() {
   keyboardOpen = false; keyboardInput.setEnabled(false);
+  document.body.classList.remove('keyboard-open');
   $('keyboard-controls').hidden = true; $('keyboard').setAttribute('aria-expanded', 'false');
 }
 $('keyboard').addEventListener('click', () => {
   if (!keyboardSupported || viewOnly || paused || document.hidden || !touchEnabled) return;
+  setControlTray();
   keyboardOpen = !keyboardOpen; $('keyboard-controls').hidden = !keyboardOpen;
-  $('keyboard').setAttribute('aria-expanded', String(keyboardOpen)); keyboardInput.setEnabled(keyboardOpen);
+  document.body.classList.toggle('keyboard-open', keyboardOpen);
+  $('keyboard').setAttribute('aria-expanded', String(keyboardOpen));
+  fitCanvas();
+  // Mobile browsers accept focus only after the typing panel is visible,
+  // and while this original button gesture is still on the call stack.
+  keyboardInput.setEnabled(keyboardOpen);
 });
+$('close-keyboard').addEventListener('click', () => { hideKeyboard(); fitCanvas(); $('keyboard').focus(); });
+$('close-options').addEventListener('click', () => setControlTray(null, true));
+for (const id of ['volume', 'window']) $(id).addEventListener('toggle', () => releaseTouches());
 
 function send(bytes) {
   if (!authenticated || !header || ws?.readyState !== WebSocket.OPEN) return false;
@@ -188,7 +196,9 @@ function connect(key = null, requestedMode = preferredMode) {
       retryTimer = setTimeout(resumeSession, 250);
     } else {
       sessionExpected = false;
-      fail(event.code === 4002 ? 'The stream moved to another browser tab. Continue there.' : 'The session ended. Create a new link and code on the computer.');
+      fail(event.code === 1008 && event.reason === 'capture-permission'
+        ? 'On the Mac, allow Screen & System Audio Recording for Terminal/dskcpy, then restart dskcpy and scan a fresh QR.'
+        : event.code === 4002 ? 'The stream moved to another browser tab. Continue there.' : 'The session ended. Create a new link and code on the computer.');
     }
   });
   socket.addEventListener('message', (event) => {
@@ -284,6 +294,7 @@ function connect(key = null, requestedMode = preferredMode) {
 
   function createVideoDecoder() {
     video ||= createVideoReceiver({ suspended: paused || document.hidden,
+      onRecovery: (message) => { if (mine === generation) $('status').textContent = message; },
       onError: (message) => { if (mine === generation) fail(message); },
       onKeyframe: () => { if (mine === generation) action(8); },
       onAck: (timestamp) => { if (mine === generation) mediaAcks.acknowledge(4, timestamp); },
@@ -522,6 +533,7 @@ $('fullscreen').addEventListener('click', async () => {
     if (mine === generation && attempt === fullscreenAttempt && document.fullscreenElement && innerHeight > innerWidth) {
       $('orientation-help').textContent = 'This browser could not rotate automatically. Turn your phone sideways for landscape.';
       $('orientation-help').hidden = false;
+      fitCanvas();
     }
   }
 });
@@ -530,6 +542,7 @@ function unlockOrientation() {
 }
 function setControlTray(name = null, focus = false) {
   releaseTouches();
+  if (name) hideKeyboard();
   const previous = openControlTray;
   openControlTray = name;
   for (const tray of controlTrays) {
@@ -558,6 +571,7 @@ $('hide-controls').addEventListener('click', () => setControlsVisible(false));
 $('show-controls').addEventListener('click', () => setControlsVisible(true));
 function fitCanvas() {
   releaseTouches(false); // Soft-keyboard viewport changes must not cancel typing or composition.
+  $('control-panels').hidden = !(keyboardOpen || openControlTray || !$('orientation-help').hidden);
   const panel = $('stream-panel'), padding = getComputedStyle(panel);
   const fullHeight = panel.clientHeight - parseFloat(padding.paddingTop) - parseFloat(padding.paddingBottom);
   const fullWidth = panel.clientWidth - parseFloat(padding.paddingLeft) - parseFloat(padding.paddingRight);
@@ -567,8 +581,22 @@ function fitCanvas() {
   const size = fitDisplay(canvas.width, canvas.height, bounds.width, bounds.height);
   canvas.style.width = `${size.width}px`; canvas.style.height = `${size.height}px`;
   rtcDisplay.style.width = `${size.width}px`; rtcDisplay.style.height = `${size.height}px`;
+  const controls = $('primary-controls'), hint = $('rail-scroll-hint');
+  hint.hidden = true;
+  hint.hidden = !(controls.scrollHeight > controls.clientHeight + 1);
 }
 new ResizeObserver(fitCanvas).observe($('stage'));
+// Mobile browsers can resize only the visual viewport when the soft keyboard
+// opens. Fit the receiver to the visible area without releasing paired keys.
+const visualViewport = window.visualViewport;
+function fitVisualViewport() {
+  if (visualViewport?.height > 0) document.documentElement?.style?.setProperty?.('--receiver-height', `${visualViewport.height}px`);
+  fitCanvas();
+  if (keyboardOpen) $('keyboard-input').scrollIntoView?.({ block: 'nearest' });
+}
+visualViewport?.addEventListener('resize', fitVisualViewport);
+visualViewport?.addEventListener('scroll', fitVisualViewport);
+if (visualViewport) fitVisualViewport();
 document.addEventListener('fullscreenchange', () => {
   if (!document.fullscreenElement) { fullscreenAttempt++; unlockOrientation(); $('orientation-help').hidden = true; }
   $('fullscreen').textContent = document.fullscreenElement ? 'Exit full screen' : 'Full screen';
@@ -576,6 +604,7 @@ document.addEventListener('fullscreenchange', () => {
 });
 document.addEventListener('keydown', (event) => { if (event.key === 'Escape') {
   releaseTouches();
+  if (keyboardOpen) { hideKeyboard(); fitCanvas(); $('keyboard').focus(); }
   if (openControlTray) setControlTray(null, true);
   if (document.body.classList.contains('controls-hidden')) setControlsVisible(true);
 } });

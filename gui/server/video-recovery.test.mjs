@@ -26,13 +26,14 @@ function fixture(t) {
   const video = createVideoReceiver({ Decoder,
     onFrame: (frame) => frames.push(frame.timestamp), onAck: (pts) => acks.push(pts),
     onError: (error) => errors.push(error), onKeyframe: () => requests++,
-    setTimer: (fn) => { timers.set(++timerId, fn); return timerId; },
+    setTimer: (fn, delay) => { fn.delay = delay; timers.set(++timerId, fn); return timerId; },
     clearTimer: (id) => timers.delete(id),
   });
   t.after(() => video.close());
   return { video, decoders, probes, acks, frames, errors, timers,
     support(fn) { support = fn; }, get requests() { return requests; },
     expire() { const fn = timers.values().next().value; assert.ok(fn); fn(); },
+    expireAfter(delay) { const entry = [...timers].find(([,fn]) => fn.delay === delay); assert.ok(entry); timers.delete(entry[0]); entry[1](); },
   };
 }
 
@@ -152,6 +153,68 @@ test('malformed-data errors fail without attempting software fallback', async (t
   const h = fixture(t); h.video.configure(config); await settle();
   h.decoders[0].error('DataError'); await settle();
   assert.equal(h.probes.length, 1); assert.equal(h.errors.length, 1);
+});
+
+test('a decoder accepting input without output gets one bounded software retry', async (t) => {
+  const h = fixture(t); h.video.configure(config); await settle();
+  const hardware = h.decoders[0];
+  h.video.decode(chunk(1)); h.video.decode(chunk(2, 'delta'));
+  h.expire(); await settle();
+  assert.equal(hardware.state, 'closed');
+  assert.deepEqual(h.acks, [1, 2]);
+  assert.equal(h.probes[1].hardwareAcceleration, 'prefer-software');
+  assert.equal(h.requests, 2); assert.equal(h.errors.length, 0);
+  hardware.output(1); assert.deepEqual(h.frames, []);
+  h.video.decode(chunk(3, 'delta'));
+  assert.equal(h.decoders[1].chunks.length, 0);
+  h.video.decode(chunk(4)); h.decoders[1].output(4);
+  assert.deepEqual(h.frames, [4]); assert.equal(h.timers.size, 0);
+});
+
+test('silent software stalls terminate instead of retrying indefinitely', async (t) => {
+  const h = fixture(t); h.video.configure(config); await settle();
+  h.video.decode(chunk(1)); h.expire(); await settle();
+  h.video.decode(chunk(2)); h.expire(); await settle();
+  assert.equal(h.decoders.length, 2); assert.equal(h.errors.length, 1);
+  assert.deepEqual(h.acks, [1, 2]); assert.equal(h.timers.size, 0);
+});
+
+test('buffered two-frame output is drained without acknowledging undecoded frames or admitting deltas after flush', async (t) => {
+  const h = fixture(t); h.video.configure(config); await settle();
+  const decoder = h.decoders[0]; let finish, flushes = 0;
+  decoder.flush = () => { flushes++; return new Promise((resolve) => { finish = resolve; }); };
+  h.video.decode(chunk(1)); h.video.decode(chunk(2, 'delta'));
+  assert.deepEqual(h.acks, []);
+  h.expireAfter(100); assert.equal(flushes, 1);
+  h.video.decode(chunk(3)); assert.deepEqual(h.acks, [3]);
+  decoder.output(1); decoder.output(2);
+  assert.deepEqual(h.frames, [1, 2]);
+  finish(); await settle(); assert.equal(h.requests, 2);
+  h.video.decode(chunk(4, 'delta'));
+  assert.deepEqual(decoder.chunks.map((x) => x.timestamp), [1, 2]);
+  h.video.decode(chunk(5)); decoder.output(5);
+  assert.deepEqual(h.frames, [1, 2, 5]); assert.equal(h.timers.size, 0);
+  assert.equal(h.probes.length, 1); assert.equal(h.errors.length, 0);
+});
+
+test('a late flush cannot request frames after suspension, replacement or disconnect', async (t) => {
+  for (const action of ['suspend', 'configure', 'close']) {
+    const h = fixture(t); h.video.configure(config); await settle(); let finish;
+    h.decoders[0].flush = () => new Promise((resolve) => { finish = resolve; });
+    h.video.decode(chunk(1)); h.expireAfter(100);
+    action === 'configure' ? h.video.configure(config) : h.video[action]();
+    await settle(); const requests = h.requests;
+    finish(); await settle();
+    assert.equal(h.requests, requests); assert.equal(h.errors.length, 0);
+  }
+});
+
+test('a hung drain remains bounded even after it emits its pending frames', async (t) => {
+  const h = fixture(t); h.video.configure(config); await settle();
+  h.decoders[0].flush = () => new Promise(() => {});
+  h.video.decode(chunk(1)); h.expireAfter(100); h.decoders[0].output(1);
+  h.expireAfter(5000);
+  assert.match(h.errors[0], /timed out/); assert.equal(h.timers.size, 0);
 });
 
 test('missing output is bounded even when the browser reports an empty decode queue', async (t) => {

@@ -1,0 +1,40 @@
+{
+  "checked_at": "2026-11-11T10:48:00.019912+00:00",
+  "base_commit": "49d6b3a96328b3abc97240337cd214fd06427637",
+  "native_sha256": "b083ecfd69cf350e7cf831b767c1ebf36640c5e728ac79579f1fcc4c73331955",
+  "scope": "Right receiver rail, accessible typing/options panels, automatic authorized Android USB browser opening, bounded WebCodecs output drain",
+  "checks": {
+    "backend": {
+      "passed": 171,
+      "failed": 0,
+      "optional_skips": 7
+    },
+    "production_build": "TypeScript/Vite passed",
+    "rendered": "Synthetic color-pattern video; 320x640 and 844x390 layout, focus, right-side hidden-control gutter and fullscreen controls checked"
+  },
+  "physical": {
+    "prior_private_browser_baseline": "User confirmed visible video 20s and Calculator 123 from phone taps; audio stutters",
+    "usb": "Edge Android 17 first failed after 5s without output; software fallback unsupported; bounded flush plus fresh IDR now stays connected with fresh decode ACKs for over 60s",
+    "usb_picture_and_keyboard": "Awaiting human observation and phone keyboard 456 check",
+    "audio": "Unresolved; no pass claimed for current USB candidate"
+  },
+  "limitations": [
+    "Flushing stalled platform decoders may reduce FPS and increase IDR traffic; not a 60fps qualification",
+    "ACK timing is not physical input-to-display latency",
+    "No Safari/iOS test, VoiceOver pass, keyboard layout/IME qualification or universal compatibility claim",
+    "Native candidate predates later native utility fixes merged separately; binary unchanged",
+    "WebRTC audio-clock fix merged to master is not yet in this isolated runtime"
+  ],
+  "source_sha256": {
+    "gui/receiver/index.html": "4c60c67dde95d8b172659e235e13c4f77e3b4ee0569284b08a454250a7daa7df",
+    "gui/receiver/receiver.css": "39d6d033a5d82238ab65db5458d0a44e6af50b10bb62f76fea83593ed48c2547",
+    "gui/receiver/receiver.mjs": "50ed9fedb20c0068c6e86c6b23377f53fc133a2df151ee07be8657f5fb3a8b15",
+    "gui/receiver/video.mjs": "cc25e3fc28b96c5c7f772e5a9f51cab8e7c4a3a6f6c882a472542fde968295e7",
+    "gui/scripts/launch.mjs": "79e2340b25c4e19ffb767bff208515bf1b1b45958c67f20e885c64593f189a5e",
+    "gui/server/browser-session.mjs": "1011f96e0f26ed472b68ff7dbd7ee1f4de1cb5d9b6bc97489dcdfe813c6e65ce",
+    "gui/server/service.mjs": "796f80207666de0c840567aaff530493cd10f61012e2c2ca7bd33907746ff473",
+    "gui/src/BrowserHostPanel.tsx": "2085e4eaf05800cf9e1a9d918dac88e26c166d116c3baea1b20f2f5667ecd672",
+    "tools/macos-usb-browser-start.sh": "d0bc038cb42a047aa678034c8eb843143c6b0d56e0ef9c97f229a8d9bc39e732"
+  },
+  "standards_reference": "https://www.w3.org/TR/webcodecs/#dom-videodecoder-flush"
+}

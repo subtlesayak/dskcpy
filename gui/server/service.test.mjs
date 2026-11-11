@@ -92,6 +92,21 @@ test('Mac encode-submission telemetry updates the live dashboard', async (t) => 
   assert.equal(f.publicState().latencyMs, 12.5);
 });
 
+test('native capture denial reaches the authenticated browser as a fixed recovery category', async (t) => {
+  const f = await fixture(t, { platform: 'darwin' });
+  const { body } = await f.request('/api/browser/invite', {});
+  const ws = new WebSocket(body.url.replace('http:', 'ws:') + 'stream', { origin: body.url.slice(0, -1) });
+  ws.on('error', () => {}); t.after(() => ws.terminate());
+  await once(ws, 'open'); ws.send(body.key);
+  await waitFor(() => f.children.length === 1);
+  const closed = once(ws, 'close');
+  f.children[0].child.stderr.write('ERROR: Allow Screen Recording for the launching Terminal/dskcpy; PRIVATE_DIAGNOSTIC\n');
+  f.children[0].child.exit(1);
+  const [code, reason] = await closed;
+  assert.equal(code, 1008); assert.equal(reason.toString(), 'capture-permission');
+  assert.equal(f.publicState().running, false);
+});
+
 test('Mac browser launch selects compatible video and reports send RTT without decode latency', async (t) => {
   const f = await fixture(t, { platform: 'darwin' });
   const { body } = await f.request('/api/browser/invite', {});
@@ -232,11 +247,54 @@ test('USB browser mode owns one non-rebinding tunnel and removes only that tunne
   assert.deepEqual(reverse.slice(0, 4), ['-s', 'test-usb', 'reverse', '--no-rebind']);
   assert.equal(reverse[4], reverse[5]);
   assert.equal(Number(reverse[4].slice(4)), Number(new URL(result.body.url).port));
+  assert.equal(result.body.openedOnPhone, true);
+  const open = commands.find(args => args.includes('android.intent.action.VIEW'));
+  assert.deepEqual(open.slice(0, 5), ['-s', 'test-usb', 'shell', 'am', 'start']);
+  const join = new URL(open.at(-1));
+  assert.equal(join.hostname, '127.0.0.1'); assert.equal(join.pathname, '/join');
+  assert.equal(join.hash, `#connect=${result.body.key}`);
+  assert.ok(!JSON.stringify(f.publicState()).includes(result.body.key));
   assert.equal(f.children.length, 0);
   await f.request('/api/stream/stop', {});
   await waitFor(() => commands.some((args) => args.includes('--remove')));
   assert.deepEqual(commands.find((args) => args.includes('--remove')), ['-s', 'test-usb', 'reverse', '--remove', reverse[4]]);
   assert.ok(!commands.flat().includes('--remove-all'));
+});
+
+test('USB phone may authenticate before its browser-launch command returns', async (t) => {
+  let ws, f;
+  f = await fixture(t, {
+    readinessProbe: async () => ({ ...ready, checks: [...ready.checks, { id: 'adb', ready: true }] }),
+    commandRunner: async (_exe, args) => {
+      if (args[0] === 'devices') return { stdout: 'List of devices attached\ntest-usb device model:Test\n' };
+      if (args.includes('android.intent.action.VIEW')) {
+        const join = new URL(args.at(-1));
+        ws = new WebSocket(new URL('/stream', join).href.replace('http:', 'ws:'), { origin: join.origin });
+        ws.on('error', () => {}); await once(ws, 'open'); ws.send(join.hash.slice('#connect='.length));
+        await waitFor(() => f.children.length === 1);
+      }
+      return { stdout: '' };
+    },
+  });
+  t.after(() => ws?.terminate());
+  const response = await f.request('/api/browser/invite', { browserTransport: 'usb' });
+  assert.equal(response.code, 201); assert.equal(response.body.openedOnPhone, true);
+  assert.equal(response.body.status.browser.connected, true);
+  assert.equal(f.publicState().running, true);
+});
+
+test('USB browser launch failure keeps manual fallback without leaking its raw diagnostics', async (t) => {
+  const f = await fixture(t, {
+    readinessProbe: async () => ({ ...ready, checks: [...ready.checks, { id: 'adb', ready: true }] }),
+    commandRunner: async (_exe, args) => {
+      if (args.includes('android.intent.action.VIEW')) throw new Error('PRIVATE_ADB_DIAGNOSTIC');
+      return { stdout: 'List of devices attached\ntest-usb device model:Test\n' };
+    },
+  });
+  const response = await f.request('/api/browser/invite', { browserTransport: 'usb' });
+  assert.equal(response.code, 201); assert.equal(response.body.openedOnPhone, false);
+  assert.equal(f.publicState().browser.waiting, true);
+  assert.ok(!JSON.stringify(response.body).includes('PRIVATE_ADB_DIAGNOSTIC'));
 });
 
 test('USB tunnel creation failure never overwrites an existing mapping or leaks an invitation', async (t) => {

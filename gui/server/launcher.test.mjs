@@ -41,6 +41,12 @@ test('running dashboard is reused without readiness probes, spawn, stop or envir
   assert.deepEqual(f.calls, ['http://127.0.0.1:27183']);
 });
 
+test('explicit no-reuse mode refuses an existing configuration without stopping it', async () => {
+  const f = fixture({ args: ['--no-reuse'], probe: async () => 'dskcpy' });
+  await assert.rejects(launch(f.options), /Stop its Terminal launcher/);
+  assert.deepEqual(f.calls, []);
+});
+
 test('occupied or unresponsive port never starts or stops anything', async () => {
   const f = fixture({ probe: async () => 'occupied' });
   await assert.rejects(launch(f.options), /Nothing was stopped/);

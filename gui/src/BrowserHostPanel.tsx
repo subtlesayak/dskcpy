@@ -39,7 +39,7 @@ export default function BrowserHostPanel({ status, config, online, onStatus }: {
   const remote = ['wifi', 'ip', 'internet'].includes(mode);
   const needsSetup = remote && !browser?.remoteAvailable;
   const qr = useMemo(() => {
-    if (!key || !url || mode === 'local' || browser?.connected) return null;
+    if (!key || !url || ['local', 'usb'].includes(mode) || browser?.connected) return null;
     try {
       const modules = QRCode.create(browserJoinUrl(url, key), { errorCorrectionLevel: 'M' }).modules;
       let path = '';
@@ -101,7 +101,10 @@ export default function BrowserHostPanel({ status, config, online, onStatus }: {
       keyTimer.current = setTimeout(() => {
         setKey(''); setCopied(''); setMessage('The connection code expired. Create a new link and code to try again.');
       }, Math.max(0, Date.parse(result.expiresAt) - Date.now()));
-      setMessage('Link and code ready. Follow step 3 to start streaming.');
+      setMessage(mode === 'usb' ? result.openedOnPhone
+        ? 'Receiver opened on the USB phone. Choose a browser there if Android asks.'
+        : 'Android could not open the receiver automatically. Use Manual USB connection below.'
+        : 'Link and code ready. Follow step 3 to start streaming.');
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not create a link. Try again.'); }
     finally { setBusy(false); }
   }
@@ -119,6 +122,20 @@ export default function BrowserHostPanel({ status, config, online, onStatus }: {
       setMessage(kind === 'link' ? 'Link copied. Open it on the device where you want to watch.' : 'Code copied. Paste it into the receiver page, then select Connect.');
     } catch { setMessage(`Copy is unavailable. Select the ${kind} in its field and copy it manually.`); }
   }
+
+  const invitationFields = <>
+      <div className="browser-copy-field">
+        <label htmlFor="browser-link">Receiver link</label>
+        <div><input id="browser-link" value={url} readOnly spellCheck={false} autoComplete="off" />
+          <button className="secondary-button" type="button" onClick={() => copy(url, 'link')}><Copy size={16} aria-hidden="true" />{copied === 'link' ? 'Link copied' : 'Copy link'}</button></div>
+      </div>
+      <div className="browser-copy-field">
+        <label htmlFor="browser-code">Connection code</label>
+        <div><input id="browser-code" value={key} readOnly autoComplete="off" spellCheck={false} aria-describedby="browser-code-help" />
+          <button className="secondary-button" type="button" onClick={() => copy(key, 'code')}><Copy size={16} aria-hidden="true" />{copied === 'code' ? 'Code copied' : 'Copy code'}</button></div>
+      </div>
+      <p id="browser-code-help" className="action-note">One use · expires five minutes after creation. Share only with someone you trust: this code lets them view and control your computer.</p>
+  </>;
 
   return <section className="panel browser-host-panel" aria-labelledby="browser-title">
     <div className="panel-header">
@@ -158,7 +175,7 @@ export default function BrowserHostPanel({ status, config, online, onStatus }: {
     </fieldset>}
 
     <div className="browser-step">
-      <h3><span className="browser-step-number" aria-hidden="true">2</span>{active ? 'Connection prepared' : 'Create a link and code'}</h3>
+      <h3><span className="browser-step-number" aria-hidden="true">2</span>{active ? 'Connection prepared' : mode === 'usb' ? 'Open the receiver on your phone' : 'Create a link and code'}</h3>
       {mode === 'local' ? <p>Try it in another browser tab on this computer. This link will not work on a phone unless you choose USB cable.</p>
         : mode === 'usb' ? <p>Connect your Android phone by USB. Enable USB debugging and allow this computer on the phone. No dskcpy app is needed.</p>
           : needsSetup ? <div className="browser-setup-needed">
@@ -175,16 +192,16 @@ export default function BrowserHostPanel({ status, config, online, onStatus }: {
           <button ref={createButton} className="stream-button browser-create" type="button" disabled={busy || Boolean(blockedReason)}
             aria-busy={busy} aria-describedby="browser-create-hint" onClick={invite}>
             {busy ? <RefreshCw size={18} className="spinning" aria-hidden="true" /> : <Link2 size={18} aria-hidden="true" />}
-            {busy ? 'Creating link…' : 'Create link and code'}
+            {busy ? mode === 'usb' ? 'Opening phone…' : 'Creating link…' : mode === 'usb' ? 'Open on phone' : 'Create link and code'}
           </button>
         </div>
-        <p id="browser-create-hint" className="action-note">{blockedReason || 'Your screen is shared after someone scans the invitation or enters its code in the receiver.'}</p>
+        <p id="browser-create-hint" className="action-note">{blockedReason || (mode === 'usb' ? 'Opens the authorized USB phone’s browser and connects automatically. No QR or code entry.' : 'Your screen is shared after someone scans the invitation or enters its code in the receiver.')}</p>
       </> : <p className="browser-ready"><Check size={16} aria-hidden="true" />{browser?.connected ? 'Your browser is connected.' : 'Link created. Your screen is not being shared yet.'}</p>}
     </div>
 
     {key && browser?.waiting && <div className="browser-step browser-invitation">
-      <h3 ref={invitationHeading} tabIndex={-1}><span className="browser-step-number" aria-hidden="true">3</span>{mode === 'local' ? 'Open the link in another tab' : 'Scan to connect'}</h3>
-      <p>{mode === 'usb' ? 'Scan the QR with the connected Android phone’s camera and open it in Chrome or Edge. Keep the USB cable connected.'
+      <h3 ref={invitationHeading} tabIndex={-1}><span className="browser-step-number" aria-hidden="true">3</span>{mode === 'usb' ? 'Continue on the phone' : mode === 'local' ? 'Open the link in another tab' : 'Scan to connect'}</h3>
+      <p>{mode === 'usb' ? 'The receiver opens through the USB cable. Choose Chrome or Edge if Android asks, and keep the phone unlocked. No scanning or code entry is needed.'
         : mode === 'local' ? 'Open the receiver below, paste the connection code, then select Connect.'
           : 'Point your phone’s camera at the QR code and open the link. It connects using this one-use invitation. Keep Tailscale connected for Internet / VPN.'}</p>
       {qr && <div className="browser-qr">
@@ -193,17 +210,7 @@ export default function BrowserHostPanel({ status, config, online, onStatus }: {
         </svg>
         <p>Scan with your phone’s camera. No copying needed.<br /><span className="action-note">Anyone with this invitation can view and control your screen. It expires after five minutes or its first use.</span></p>
       </div>}
-      <div className="browser-copy-field">
-        <label htmlFor="browser-link">Receiver link</label>
-        <div><input id="browser-link" value={url} readOnly spellCheck={false} autoComplete="off" />
-          <button className="secondary-button" type="button" onClick={() => copy(url, 'link')}><Copy size={16} aria-hidden="true" />{copied === 'link' ? 'Link copied' : 'Copy link'}</button></div>
-      </div>
-      <div className="browser-copy-field">
-        <label htmlFor="browser-code">Connection code</label>
-        <div><input id="browser-code" value={key} readOnly autoComplete="off" spellCheck={false} aria-describedby="browser-code-help" />
-          <button className="secondary-button" type="button" onClick={() => copy(key, 'code')}><Copy size={16} aria-hidden="true" />{copied === 'code' ? 'Code copied' : 'Copy code'}</button></div>
-      </div>
-      <p id="browser-code-help" className="action-note">One use · expires five minutes after creation. Share only with someone you trust: this code lets them view and control your computer.</p>
+      {mode === 'usb' ? <details className="wireless-setup"><summary>Manual USB connection</summary>{invitationFields}</details> : invitationFields}
       {mode === 'local' && <a className="secondary-button browser-open" href={url} target="_blank" rel="noreferrer"><ExternalLink size={16} aria-hidden="true" />Open browser receiver</a>}
     </div>}
     {browser?.waiting && !key && <p className="inline-error">A link is waiting, but its code is no longer available here. Cancel this link and create a new one.</p>}

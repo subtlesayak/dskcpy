@@ -12,7 +12,7 @@ const parameters = new Uint8Array([0, 0, 1, 0x67, 0x64, 0, 0x28, 0, 0, 1, 0x68, 
 
 // Deterministic lifecycle tests against the actual receiver script. These model
 // delayed browser callbacks; rendered/device QA is separate from this harness.
-function receiver(t, { portrait = false, lockFails = false, webRtc = false, webCodecs = true, qrKey = '', keyboard = false, viewOnly = false } = {}) {
+function receiver(t, { portrait = false, lockFails = false, webRtc = false, webCodecs = true, qrKey = '', keyboard = false, viewOnly = false, visualHeight = 0 } = {}) {
   const timers = new Set(), sockets = [], decoders = [], orientation = [];
   let resize;
   const locationState = { protocol: 'https:', host: 'receiver.test', pathname: qrKey ? '/join' : '/', search: '', hash: qrKey ? `#connect=${qrKey}` : '' };
@@ -30,7 +30,10 @@ function receiver(t, { portrait = false, lockFails = false, webRtc = false, webC
     requestSubmit() { return this.emit('submit'); }
     setAttribute(name, value) { this.attrs.set(name, value); }
     removeAttribute(name) { this.attrs.delete(name); }
-    focus() { document.activeElement = this; }
+    focus() {
+      if (this === $('keyboard-input') && $('control-panels').hidden) return;
+      document.activeElement = this;
+    }
     setPointerCapture() {}
     getBoundingClientRect() { return { left: 0, top: 0, width: 800, height: 500 }; }
     getContext() { return { drawImage() {}, clearRect() {} }; }
@@ -40,7 +43,9 @@ function receiver(t, { portrait = false, lockFails = false, webRtc = false, webC
   }
   const elements = new Map();
   const $ = (id) => { if (!elements.has(id)) elements.set(id, new Target()); return elements.get(id); };
-  const document = new Target(); document.body = new Target(); document.getElementById = $;
+  const cssVariables = new Map();
+  const document = new Target(); document.body = new Target(); document.documentElement = new Target();
+  document.documentElement.style.setProperty = (key, value) => cssVariables.set(key, value); document.getElementById = $;
   document.exitFullscreen = async () => { document.fullscreenElement = null; document.emit('fullscreenchange'); };
   class Socket extends Target {
     static OPEN = 1; readyState = 1; sent = [];
@@ -59,6 +64,7 @@ function receiver(t, { portrait = false, lockFails = false, webRtc = false, webC
     output(timestamp) { this.decodeQueueSize = Math.max(0, this.decodeQueueSize - 1); this.callbacks.output({ timestamp, close() {} }); }
   }
   const window = new Target(); window.isSecureContext = true;
+  if (visualHeight) { window.visualViewport = new Target(); window.visualViewport.height = visualHeight; }
   if (webCodecs) { window.VideoDecoder = Decoder; window.EncodedVideoChunk = true; }
   if (webRtc) window.RTCPeerConnection = true;
   window.history = { replaceState(_state, _title, url) { locationState.hash = ''; historyChanges.push(url); } };
@@ -89,7 +95,7 @@ function receiver(t, { portrait = false, lockFails = false, webRtc = false, webC
     new Uint8Array(bytes, 16).set(payload); socket.emit('message', { data: bytes });
   }
   media(0, 1, parameters);
-  return { $, document, window, socket, sockets, locationState, decoders, media, orientation, historyChanges, reflow: () => resize() };
+  return { $, document, window, socket, sockets, locationState, decoders, media, orientation, historyChanges, cssVariables, reflow: () => resize() };
 }
 
 test('suspension drains queued frames and ignores stale decoder callbacks after resume', async (t) => {
@@ -158,38 +164,35 @@ test('show-controls reserves a separate row only when neither letterbox margin f
   assert.equal(protocol.needsControlsRow(1920, 1080, 820, 460), true);
 });
 
-test('main-bar Volume and Window disclose one tray at a time and Escape restores focus', (t) => {
+test('Options groups secondary actions and Close/Escape restore focus to the right rail', (t) => {
   const h = receiver(t);
-  h.$('volume').emit('click');
-  assert.equal(h.$('volume-controls').hidden, false);
-  assert.equal(h.$('volume').attrs.get('aria-expanded'), 'true');
-  assert.equal(h.document.activeElement, h.$('volume-down'));
+  h.$('more').emit('click');
+  assert.equal(h.$('more-controls').hidden, false);
+  assert.equal(h.document.activeElement, h.$('pause'));
   h.$('volume-down').emit('click'); h.$('volume-up').emit('click');
-  h.$('window').emit('click');
-  assert.equal(h.$('volume-controls').hidden, true);
-  assert.equal(h.$('window-controls').hidden, false);
   h.$('minimize').emit('click'); h.$('maximize').emit('click');
-  assert.deepEqual(h.socket.sent.filter((data) => Buffer.isBuffer(data) && data[0] === 5).slice(-4).map((data) => data[1]), [0, 1, 3, 4]);
-  h.document.emit('keydown', { key: 'Escape' });
-  assert.equal(h.$('window-controls').hidden, true);
-  assert.equal(h.document.activeElement, h.$('window'));
-  h.$('volume').emit('click'); h.$('hide-controls').emit('click');
-  assert.equal(h.$('volume-controls').hidden, true);
+  assert.deepEqual(h.socket.sent.filter(data => Buffer.isBuffer(data) && data[0] === 5).slice(-4).map(data => data[1]), [0, 1, 3, 4]);
+  h.$('close-options').emit('click');
+  assert.equal(h.$('more-controls').hidden, true);
+  assert.equal(h.document.activeElement, h.$('more'));
+  h.$('more').emit('click'); h.document.emit('keydown', { key: 'Escape' });
+  assert.equal(h.$('more-controls').hidden, true);
+  assert.equal(h.document.activeElement, h.$('more'));
+  h.$('more').emit('click'); h.$('hide-controls').emit('click');
+  assert.equal(h.$('more-controls').hidden, true);
   h.$('show-controls').emit('click');
-  assert.equal(h.$('volume').attrs.get('aria-expanded'), 'false');
-  h.$('more').emit('click'); assert.equal(h.$('more-controls').hidden, false);
-  h.$('window').emit('click'); assert.equal(h.$('more-controls').hidden, true);
-  h.$('disconnect').emit('click'); assert.equal(h.$('window-controls').hidden, true);
+  assert.equal(h.$('more').attrs.get('aria-expanded'), 'false');
+  h.$('disconnect').emit('click');
 });
 
-test('closing a Volume tray stops hold-to-repeat', async (t) => {
-  const h = receiver(t); h.$('volume').emit('click');
+test('closing a native volume disclosure stops hold-to-repeat', async (t) => {
+  const h = receiver(t); h.$('more').emit('click');
   h.$('volume-up').emit('pointerdown', { button: 0, pointerId: 10 });
-  await new Promise((resolve) => setTimeout(resolve, 590));
-  const count = () => h.socket.sent.filter((data) => Buffer.isBuffer(data) && data[0] === 5 && data[1] === 1).length;
+  await new Promise(resolve => setTimeout(resolve, 590));
+  const count = () => h.socket.sent.filter(data => Buffer.isBuffer(data) && data[0] === 5 && data[1] === 1).length;
   assert.ok(count() >= 2);
-  h.$('window').emit('click'); const stopped = count();
-  await new Promise((resolve) => setTimeout(resolve, 180));
+  h.$('volume').emit('toggle'); const stopped = count();
+  await new Promise(resolve => setTimeout(resolve, 180));
   assert.equal(count(), stopped); h.$('disconnect').emit('click');
 });
 
@@ -415,4 +418,43 @@ test('soft-keyboard viewport reflow preserves pending physical key pairing', (t)
   assert.deepEqual(keys.map((p) => p[1]), [0, 1]);
   h.$('hide-controls').emit('click'); assert.equal(h.$('keyboard-controls').hidden, true);
   h.$('disconnect').emit('click');
+});
+
+test('keyboard and Options panels are exclusive; close restores the keyboard trigger', (t) => {
+  const h = receiver(t, { keyboard: true });
+  h.$('keyboard').emit('click');
+  assert.equal(h.$('keyboard-controls').hidden, false);
+  assert.equal(h.$('control-panels').hidden, false);
+  assert.equal(h.document.activeElement, h.$('keyboard-input'));
+  h.$('more').emit('click');
+  assert.equal(h.$('keyboard-controls').hidden, true);
+  assert.equal(h.$('more-controls').hidden, false);
+  h.$('keyboard').emit('click');
+  assert.equal(h.$('more-controls').hidden, true);
+  assert.equal(h.$('keyboard-controls').hidden, false);
+  h.$('close-keyboard').emit('click');
+  assert.equal(h.$('keyboard-controls').hidden, true);
+  assert.equal(h.document.activeElement, h.$('keyboard'));
+  h.$('disconnect').emit('click');
+});
+
+test('a shrinking visual viewport keeps typing fitted without breaking paired key releases', (t) => {
+  const h = receiver(t, { keyboard: true, visualHeight: 600 });
+  h.$('keyboard').emit('click');
+  h.$('keyboard-input').emit('keydown', { code: 'ControlLeft', key: 'Control', ctrlKey: true });
+  h.window.visualViewport.height = 240; h.window.visualViewport.emit('resize');
+  assert.equal(h.cssVariables.get('--receiver-height'), '240px');
+  h.$('keyboard-input').emit('keyup', { code: 'ControlLeft', key: 'Control' });
+  const keys = h.socket.sent.filter(data => Buffer.isBuffer(data) && data[0] === 8);
+  assert.deepEqual(keys.map(data => [data[1], data.readUInt16BE(2)]), [[0, 224], [1, 224]]);
+  assert.equal(h.$('keyboard-controls').hidden, false);
+  h.$('disconnect').emit('click');
+});
+
+test('host capture denial explains the Mac recovery action instead of requesting another code alone', (t) => {
+  const h = receiver(t);
+  h.socket.readyState = 3; h.socket.emit('close', { code: 1008, reason: 'capture-permission' });
+  assert.match(h.$('error').textContent, /allow Screen & System Audio Recording/);
+  assert.match(h.$('error').textContent, /restart dskcpy/);
+  assert.match(h.$('status').textContent, /^Disconnected/);
 });
