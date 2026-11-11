@@ -2,15 +2,46 @@ import net from 'node:net';
 import { WebSocket } from 'ws';
 import { SrdParser, validBrowserInput, MAX_PACKET } from './browser-protocol.mjs';
 import { ack, avcParameters, touchPacket } from '../receiver/protocol.mjs';
+import { createRtcMedia } from './browser-rtc.mjs';
 
 // Keep the native transport alive across a bounded browser suspension. Never
 // retain video frames: only the wire header and codec parameter sets are replayed.
-export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lifetimeMs }) {
+export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lifetimeMs,
+  mediaMode = 'webcodecs', rtcBind, onChange = () => {} }) {
   let native, peer, closed = false, ready = false, nativeTimer, awayTimer;
   let wireHeader, videoConfig, audioConfig, width = 0, height = 0;
   let suspended = false, alive = true, rateAt = Date.now(), events = 0;
   const video = new Set(), audio = new Set(), touches = new Map();
+  let rtc, rtcGeneration = 0, negotiating = false;
+  let rtcCleanup = Promise.resolve();
+  const nativeAcks = new Map();
   const command = (value) => native?.write(Buffer.from([5, value]));
+  function acknowledgeNative(type, pts) {
+    if (closed || !native || BigInt(pts) <= (nativeAcks.get(type) ?? -1n)) return;
+    nativeAcks.set(type, BigInt(pts)); native.write(ack(type, pts));
+  }
+  function stopRtc() {
+    rtcGeneration++; negotiating = false;
+    const previous = rtc; rtc = null;
+    if (previous) rtcCleanup = Promise.all([rtcCleanup, previous.close()]).then(() => {}).catch(() => {});
+  }
+  async function negotiateRtc() {
+    if (closed || mediaMode !== 'webrtc' || !videoConfig || !peer || rtc || negotiating) return;
+    negotiating = true;
+    const target = peer, mine = ++rtcGeneration;
+    try {
+      const active = createRtcMedia({ bind: rtcBind, configuration: videoConfig.subarray(16),
+        onKeyframe: () => { if (!closed && rtcGeneration === mine && !suspended) command(8); },
+        onFailure: () => { if (!closed && rtcGeneration === mine) close(); },
+        onConnected: () => { if (!closed && rtcGeneration === mine) onChange(); } });
+      rtc = active;
+      const offer = await active.offer();
+      if (!closed && target === peer && rtcGeneration === mine && offer) {
+        target.send(JSON.stringify({ type: 'rtc-offer', description: offer }));
+      }
+    } catch { if (!closed && rtcGeneration === mine) close(); }
+    finally { if (rtcGeneration === mine) negotiating = false; }
+  }
   function releaseTouches() {
     for (const [id, point] of touches) native?.write(touchPacket(3, id, point.x, point.y, width, height));
     touches.clear();
@@ -26,6 +57,7 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
   function detach(ws, replaced = false) {
     if (closed || peer !== ws) return;
     peer = null;
+    stopRtc();
     suspend(); drain(video, 4); drain(audio, 6);
     native?.resume();
     if (replaced) {
@@ -45,10 +77,11 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
   }
   function announce() {
     if (!ready || !peer) return;
-    peer.send(JSON.stringify({ type: 'authenticated' }));
+    peer.send(JSON.stringify({ type: 'authenticated', mediaMode }));
     if (wireHeader) forward(wireHeader);
-    if (videoConfig) forward(videoConfig);
+    if (videoConfig && mediaMode === 'webcodecs') forward(videoConfig);
     if (audioConfig) forward(audioConfig);
+    void negotiateRtc();
     // The receiver explicitly resumes after receiving the header. This avoids
     // waking capture if a restored page is still in the background.
   }
@@ -70,6 +103,14 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
         if (message.toString() === 'suspend') { suspend(); return; }
         if (message.toString() === 'resume') {
           suspended = false; clearTimeout(awayTimer); return;
+        }
+        if (mediaMode === 'webrtc' && rtc && message.length <= 32768) {
+          try {
+            const signal = JSON.parse(message.toString());
+            if (signal.type !== 'rtc-answer') { close(); return; }
+            void rtc.answer(signal.description).catch(close);
+          } catch { close(); }
+          return;
         }
         close(); return;
       }
@@ -114,6 +155,20 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
           }
         }
         if (flags === 4 || flags === 16) audioConfig = packet;
+        if (mediaMode === 'webrtc') {
+          void negotiateRtc();
+          const pts = packet.readBigUInt64BE(4);
+          if ([0, 2].includes(flags)) {
+            if (!rtc || suspended || !peer) acknowledgeNative(4, pts);
+            else void rtc.frame(packet.subarray(16), pts, flags === 2)
+              .then(() => acknowledgeNative(4, pts)).catch(close);
+          } else if (flags === 8) {
+            if (!rtc || suspended || !peer) acknowledgeNative(6, pts);
+            else void rtc.sound(packet.subarray(16), pts)
+              .then(() => acknowledgeNative(6, pts)).catch(close);
+          } else if ([4, 16].includes(flags)) forward(packet);
+          return;
+        }
         const pending = flags === 8 ? audio : flags === 0 || flags === 2 ? video : null;
         if (pending) {
           const pts = packet.readBigUInt64BE(4);
@@ -130,6 +185,7 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
   function close() {
     if (closed) return;
     closed = true;
+    stopRtc();
     clearTimeout(nativeTimer); clearTimeout(awayTimer); clearTimeout(lifetimeTimer); clearInterval(pingTimer);
     releaseTouches(); listener.close(); native?.destroy();
     const target = peer; peer = null;
@@ -154,5 +210,5 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
       await onConnect({ port: listener.address().port, close, get closed() { return closed; } });
     } catch { close(); }
   }
-  return { start, attach, close };
+  return { start, attach, close, mediaMode, get cleanup() { return rtcCleanup; } };
 }

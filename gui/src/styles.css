@@ -360,6 +360,9 @@ select { min-width: 0; height: 37px; padding-inline: 8px; color: var(--text); ba
 .browser-setup-needed a svg { vertical-align: -2px; }
 .browser-invitation { padding: 18px; border-radius: 8px; background: #091116; }
 .browser-invitation h3 { scroll-margin-block-start: 80px; }
+.browser-qr { display: flex; flex-wrap: wrap; gap: 24px; align-items: center; margin-block: 20px; }
+.browser-qr > svg { flex: 0 1 280px; inline-size: 280px; max-inline-size: 100%; block-size: auto; border-radius: 8px; background: white; }
+.browser-qr > p { flex: 1 1 220px; margin: 0; }
 .browser-copy-field { margin-block-start: 16px; }
 .browser-copy-field label { display: block; margin-block-end: 8px; font-size: 0.8rem; font-weight: 600; }
 .browser-copy-field > div { display: flex; gap: 12px; }

@@ -50,6 +50,7 @@ export function createControlService({
   let browserUsbCleanupPending = Promise.resolve();
   const browserReceiver = createBrowserReceiver({ configuredPort: browserPort,
     origin: environment.DSKCPY_VIEWER_ORIGIN,
+    rtcBind: environment.DSKCPY_VIEWER_RTC_BIND || '127.0.0.1',
     tls: environment.DSKCPY_VIEWER_TLS_CERT && environment.DSKCPY_VIEWER_TLS_KEY ? {
       cert: environment.DSKCPY_VIEWER_TLS_CERT, key: environment.DSKCPY_VIEWER_TLS_KEY,
       bind: environment.DSKCPY_VIEWER_TLS_BIND, port: Number(environment.DSKCPY_VIEWER_TLS_PORT || 27181),
@@ -178,7 +179,10 @@ export function createControlService({
   }
 
   function appendLog(source, message) {
-    const clean = message.replace(/\x1b\[[0-9;]*m/g, '').trimEnd();
+    let clean = message.replace(/\x1b\[[0-9;]*m/g, '').trimEnd();
+    const rtcMedia = browserReceiver.status().mediaMode === 'webrtc';
+    if (rtcMedia) clean = clean.replace(/(?:capture-to-decode|encode-submission-to-decode) round-trip:/g,
+      'encode-submission-to-WebRTC-send round-trip:');
     if (!clean) {
       return;
     }
@@ -199,7 +203,7 @@ export function createControlService({
       state.encoder = encoder[1];
     }
     const latency = clean.match(/(?:capture-to-decode|encode-submission-to-decode) round-trip: ([0-9.]+) ms/);
-    if (latency) {
+    if (latency && !rtcMedia) {
       state.latencyMs = Number(latency[1]);
       state.reconnecting = false;
     }
@@ -474,7 +478,9 @@ export function createControlService({
       state.command = formatCommand(path.basename(runtime.executable), args);
       appendLog('gui', 'Starting ' + state.command);
       const child = spawnProcess(runtime.executable, args, {
-        cwd: repoDir, env: runtime.env, windowsHide: true, shell: false,
+        cwd: repoDir, env: browserBridge && platform === 'darwin'
+          ? { ...runtime.env, DSKCPY_MAC_BROWSER_COMPAT: '1' } : runtime.env,
+        windowsHide: true, shell: false,
         stdio: ['pipe', 'pipe', 'pipe'],
       });
       streamProcess = child;

@@ -13,7 +13,7 @@
     <section id="join-panel" aria-labelledby="join-title">
       <p class="eyebrow">Your desktop, here</p>
       <h1 id="join-title">Connect to a desktop</h1>
-      <p>On the computer, open Connect → Browser receiver and select Create link and code. Paste that code below to start watching.</p>
+      <p>On the computer, open Connect → Browser receiver and select Create link and code. Scan its QR with your phone’s camera, or paste the code below to connect.</p>
       <form id="join-form">
         <label for="session-key">Connection code</label>
         <input id="session-key" name="session-key" type="password" autocomplete="off" autocapitalize="none" spellcheck="false" maxlength="32" required aria-describedby="key-help error">
@@ -26,7 +26,7 @@
     </section>
     <p id="error" role="alert"></p>
     <section id="stream-panel" hidden aria-label="Remote desktop">
-      <div id="stage"><canvas id="display" aria-label="Streamed desktop. Touch to control; desktop keyboard forwarding is not yet supported."></canvas></div>
+      <div id="stage"><video id="rtc-display" autoplay playsinline muted hidden aria-label="Streamed desktop video"></video><canvas id="display" aria-label="Streamed desktop. Touch to control; desktop keyboard forwarding is not yet supported."></canvas></div>
       <div id="control-dock">
       <p id="orientation-help" class="subtle" role="status" hidden></p>
       <section id="volume-controls" class="quick-controls" aria-label="Computer volume" hidden>
