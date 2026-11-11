@@ -26,7 +26,10 @@ const context = canvas.getContext('2d', { alpha: false, desynchronized: true });
 let ws, video, audio, audioContext, videoConfig, configBytes, audioConfig;
 let authenticated = false, header = false, closing = false, paused = false, muted = true, touchEnabled = true;
 let frames = 0, statsAt = 0, nextAudio = 0, repeatTimer, repeatInterval;
-const sources = new Set();
+// Allow one preserved 100ms capture chunk plus bounded network/decoder jitter.
+// A larger discontinuity still resynchronizes instead of accumulating audio.
+const audioStartLead = .02, audioMaximumLead = .16, audioMaximumSources = 24;
+const sources = new Map(); // BufferSource -> scheduled end on the audio clock.
 const pointers = new Map();
 const pendingAudioAcks = [];
 let generation = 0;
@@ -68,7 +71,7 @@ function send(bytes) {
 }
 function action(value) { send(new Uint8Array([5, value])); }
 function stopAudio() {
-  for (const source of sources) { try { source.stop(); } catch { /* Already ended. */ } }
+  for (const source of sources.keys()) { try { source.stop(); } catch { /* Already ended. */ } }
   sources.clear(); nextAudio = 0;
 }
 function drainAudioAcks(all = false) {
@@ -333,15 +336,24 @@ function configureAudio() {
       try {
         if (mine !== generation || epoch !== audioGeneration) return;
         if (!muted && !paused && !document.hidden && audioContext?.state === 'running') {
-          if (nextAudio > audioContext.currentTime + .08 || sources.size >= 8) stopAudio();
+          const now = audioContext.currentTime;
+          // onended is dispatched on the main thread and may arrive late;
+          // completed sound must not consume the bounded future-source budget.
+          for (const [source, end] of sources) if (end <= now) sources.delete(source);
+          const duration = data.numberOfFrames / data.sampleRate;
+          if (!Number.isFinite(duration) || duration <= 0 || duration > audioMaximumLead - audioStartLead) return;
+          if (nextAudio + duration > now + audioMaximumLead || sources.size >= audioMaximumSources) stopAudio();
           const buffer = audioContext.createBuffer(data.numberOfChannels, data.numberOfFrames, data.sampleRate);
           for (let channel = 0; channel < data.numberOfChannels; channel++) {
             data.copyTo(buffer.getChannelData(channel), { planeIndex: channel, format: 'f32-planar' });
           }
           const source = audioContext.createBufferSource(); source.buffer = buffer; source.connect(audioContext.destination);
-          sources.add(source); source.onended = () => sources.delete(source);
-          nextAudio = Math.max(audioContext.currentTime + .005, nextAudio);
-          source.start(nextAudio); nextAudio += buffer.duration;
+          source.onended = () => sources.delete(source);
+          // Append continuously while prior sound is queued. Reapplying a
+          // minimum lead to every packet inserts gaps on small late arrivals.
+          const start = sources.size && nextAudio >= now ? nextAudio : now + audioStartLead;
+          source.start(start); nextAudio = start + buffer.duration;
+          sources.set(source, nextAudio);
         }
       } finally { data.close(); }
     } });

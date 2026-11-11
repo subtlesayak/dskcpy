@@ -12,7 +12,7 @@ const parameters = new Uint8Array([0, 0, 1, 0x67, 0x64, 0, 0x28, 0, 0, 1, 0x68, 
 
 // Deterministic lifecycle tests against the actual receiver script. These model
 // delayed browser callbacks; rendered/device QA is separate from this harness.
-function receiver(t, { portrait = false, lockFails = false, webRtc = false, webCodecs = true, qrKey = '', keyboard = false, viewOnly = false, visualHeight = 0 } = {}) {
+function receiver(t, { portrait = false, lockFails = false, webRtc = false, webCodecs = true, qrKey = '', keyboard = false, viewOnly = false, visualHeight = 0, webAudio = false } = {}) {
   const timers = new Set(), sockets = [], decoders = [], orientation = [];
   let resize;
   const locationState = { protocol: 'https:', host: 'receiver.test', pathname: qrKey ? '/join' : '/', search: '', hash: qrKey ? `#connect=${qrKey}` : '' };
@@ -63,7 +63,36 @@ function receiver(t, { portrait = false, lockFails = false, webRtc = false, webC
     close() { this.state = 'closed'; }
     output(timestamp) { this.decodeQueueSize = Math.max(0, this.decodeQueueSize - 1); this.callbacks.output({ timestamp, close() {} }); }
   }
+  const soundDecoders = [], audioSources = [], audioContexts = [];
+  class SoundDecoder extends Target {
+    state = 'unconfigured'; decodeQueueSize = 0;
+    constructor(callbacks) { super(); this.callbacks = callbacks; soundDecoders.push(this); }
+    configure() { this.state = 'configured'; }
+    decode() { this.emit('dequeue'); }
+    close() { this.state = 'closed'; }
+    output(frames = 480) {
+      const data = { numberOfChannels: 2, numberOfFrames: frames, sampleRate: 48000,
+        closed: false, copyTo(target) { target.fill(.01); }, close() { this.closed = true; } };
+      this.callbacks.output(data); return data;
+    }
+  }
+  class AudioContext {
+    state = 'running'; currentTime = 0;
+    constructor() { audioContexts.push(this); }
+    async resume() { this.state = 'running'; }
+    async close() { this.state = 'closed'; }
+    createBuffer(channels, frames, rate) {
+      const planes = Array.from({ length: channels }, () => new Float32Array(frames));
+      return { duration: frames / rate, getChannelData: channel => planes[channel] };
+    }
+    createBufferSource() {
+      const source = { stopped: false, connect() {}, start(at) { this.startAt = at; },
+        stop() { this.stopped = true; this.onended?.(); } };
+      audioSources.push(source); return source;
+    }
+  }
   const window = new Target(); window.isSecureContext = true;
+  if (webAudio) window.AudioDecoder = SoundDecoder;
   if (visualHeight) { window.visualViewport = new Target(); window.visualViewport.height = visualHeight; }
   if (webCodecs) { window.VideoDecoder = Decoder; window.EncodedVideoChunk = true; }
   if (webRtc) window.RTCPeerConnection = true;
@@ -71,7 +100,8 @@ function receiver(t, { portrait = false, lockFails = false, webRtc = false, webC
   const context = vm.createContext({ ...protocol,
     createBrowserKeyboard,
     createVideoReceiver: (options) => createVideoReceiver({ ...options, Decoder }),
-    window, document, WebSocket: Socket, VideoDecoder: Decoder,
+    window, document, WebSocket: Socket, VideoDecoder: Decoder, AudioDecoder: SoundDecoder, AudioContext,
+    EncodedAudioChunk: class { constructor(value) { Object.assign(this, value); } },
     EncodedVideoChunk: class { constructor(value) { Object.assign(this, value); } },
     ResizeObserver: class { constructor(callback) { resize = callback; } observe() {} }, getComputedStyle: () => ({ paddingTop: '0', paddingRight: '0', paddingBottom: '0', paddingLeft: '0' }),
     location: locationState, performance: { now: () => 2000 }, AbortSignal,
@@ -95,7 +125,7 @@ function receiver(t, { portrait = false, lockFails = false, webRtc = false, webC
     new Uint8Array(bytes, 16).set(payload); socket.emit('message', { data: bytes });
   }
   media(0, 1, parameters);
-  return { $, document, window, socket, sockets, locationState, decoders, media, orientation, historyChanges, cssVariables, reflow: () => resize() };
+  return { $, document, window, socket, sockets, locationState, decoders, media, orientation, historyChanges, cssVariables, soundDecoders, audioSources, audioContexts, reflow: () => resize() };
 }
 
 test('suspension drains queued frames and ignores stale decoder callbacks after resume', async (t) => {
@@ -500,5 +530,68 @@ test('rail pause/resume releases typing and retains an explicit accessible playb
   assert.equal(h.$('pause').attrs.get('aria-pressed'), 'false');
   const commands = h.socket.sent.filter(p => Buffer.isBuffer(p) && p[0] === 5).map(p => p[1]);
   assert.ok(commands.includes(7)); assert.equal(commands.at(-1), 8);
+  h.$('disconnect').emit('click');
+});
+
+
+async function audioReceiver(t) {
+  const h = receiver(t, { webAudio: true });
+  h.media(0, 4, new Uint8Array(19));
+  await h.$('audio').emit('click');
+  return h;
+}
+
+test('WebCodecs audio preserves a fresh 100ms burst without canceling scheduled sound', async (t) => {
+  const h = await audioReceiver(t);
+  for (let i = 0; i < 10; i++) h.soundDecoders[0].output();
+  assert.equal(h.audioSources.length, 10);
+  assert.equal(h.audioSources.filter(s => s.stopped).length, 0);
+  for (let i = 1; i < h.audioSources.length; i++) {
+    const before = h.audioSources[i - 1], after = h.audioSources[i];
+    assert.ok(Math.abs(after.startAt - before.startAt - before.buffer.duration) < 1e-9);
+  }
+  const last = h.audioSources.at(-1);
+  assert.ok(last.startAt + last.buffer.duration < .25);
+  h.$('disconnect').emit('click');
+});
+
+test('WebCodecs audio appends a slightly late packet while prior sound is still scheduled', async (t) => {
+  const h = await audioReceiver(t); h.soundDecoders[0].output();
+  const before = h.audioSources[0], expected = before.startAt + before.buffer.duration;
+  h.audioContexts[0].currentTime = expected - .002;
+  h.soundDecoders[0].output();
+  assert.ok(Math.abs(h.audioSources[1].startAt - expected) < 1e-9);
+  h.$('disconnect').emit('click');
+});
+
+test('WebCodecs audio mute and backgrounding cancel sound and ignore old decoder output', async (t) => {
+  const h = await audioReceiver(t), old = h.soundDecoders[0]; old.output();
+  await h.$('audio').emit('click');
+  assert.equal(h.audioSources[0].stopped, true);
+  old.output(); assert.equal(h.audioSources.length, 1);
+  await h.$('audio').emit('click'); const current = h.soundDecoders.at(-1); current.output();
+  h.document.hidden = true; h.document.emit('visibilitychange');
+  assert.equal(h.audioSources.at(-1).stopped, true);
+  assert.equal(current.output().closed, true); assert.equal(h.audioSources.length, 2);
+  h.$('disconnect').emit('click');
+});
+
+test('WebCodecs audio remains bounded during excessive input and recovers after an underrun', async (t) => {
+  const h = await audioReceiver(t);
+  for (let i = 0; i < 80; i++) h.soundDecoders[0].output();
+  const active = h.audioSources.filter(s => !s.stopped);
+  assert.ok(active.length <= 24);
+  assert.ok(active.at(-1).startAt + active.at(-1).buffer.duration < .25);
+  h.audioContexts[0].currentTime = 3;
+  h.soundDecoders[0].output();
+  assert.ok(h.audioSources.at(-1).startAt > 3 && h.audioSources.at(-1).startAt < 3.1);
+  h.$('disconnect').emit('click');
+});
+
+test('WebCodecs audio closes oversized output instead of allocating an unbounded playback buffer', async (t) => {
+  const h = await audioReceiver(t);
+  assert.equal(h.soundDecoders[0].output(48000).closed, true);
+  assert.equal(h.audioSources.length, 0);
+  h.soundDecoders[0].output(); assert.equal(h.audioSources.length, 1);
   h.$('disconnect').emit('click');
 });

@@ -5,7 +5,7 @@
   "scope": "Right receiver rail, accessible typing/options panels, automatic authorized Android USB browser opening, bounded WebCodecs output drain",
   "checks": {
     "backend": {
-      "passed": 176,
+      "passed": 181,
       "failed": 0,
       "optional_skips": 7
     },
@@ -30,7 +30,7 @@
   "source_sha256": {
     "gui/receiver/index.html": "cb7c365e07a89dfb417ea62e22270013d0bdb3f67f8fb77727eb5338c7e11b70",
     "gui/receiver/receiver.css": "502e6917b1f8d671f6a1774c4a6909617da61ca7959a06c14b0a3eeea291bbce",
-    "gui/receiver/receiver.mjs": "872276c3617fef0afd41c379cc6c01d23ac39eb3d8eea992551844cf747885ad",
+    "gui/receiver/receiver.mjs": "98b03663f20c0ee6c17c226d23ee7f3778501dd36041f8982d2c172b1b81d673",
     "gui/receiver/video.mjs": "cc25e3fc28b96c5c7f772e5a9f51cab8e7c4a3a6f6c882a472542fde968295e7",
     "gui/scripts/launch.mjs": "79e2340b25c4e19ffb767bff208515bf1b1b45958c67f20e885c64593f189a5e",
     "gui/server/browser-session.mjs": "1011f96e0f26ed472b68ff7dbd7ee1f4de1cb5d9b6bc97489dcdfe813c6e65ce",
@@ -118,5 +118,6 @@
       "Pinned Disconnect tested on synthetic session; live user session untouched"
     ],
     "physical": "Pending user-chosen receiver refresh; preceding phone keyboard/layout pass remains tied to the previous assets"
-  }
+  },
+  "audio_scheduling_candidate": "doc/testing/mac/receiver-audio-scheduling.json; failing-before/passing-after unit evidence; combined audible test pending"
 }
