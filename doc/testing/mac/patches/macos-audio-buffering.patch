@@ -1,0 +1,292 @@
+--- a/app/src/reverse_display_macos.m
++++ b/app/src/reverse_display_macos.m
+@@ -35,9 +35,8 @@
+     _Atomic bool stopped, failed, disconnected, quit, paused, force_key, audio_enabled, audio_available;
+     _Atomic int64_t acked_pts, sent_pts, encoding_since, audio_acked_pts;
+     struct sc_reverse_watchdog watchdog, audio_watchdog;
+-    CMSampleBufferRef latest_audio; // One bounded callback buffer, protected by mutex.
+-    int64_t audio_received_us;
+-    uint64_t audio_epoch, audio_sequence; // Epoch changes even for rapid mute/unmute.
++    struct sc_reverse_macos_audio_queue audio_queue; // Bounded FIFO, protected by mutex.
++    uint64_t audio_epoch; // Epoch changes even for rapid mute/unmute.
+     CVPixelBufferRef latest; // Exactly one newest capture, protected by mutex.
+     uint64_t generation;
+     VTCompressionSessionRef encoder;
+@@ -74,7 +73,7 @@
+ }
+ - (void)dealloc {
+     if (state.latest) CVPixelBufferRelease(state.latest);
+-    if (state.latest_audio) CFRelease(state.latest_audio);
++    sc_reverse_macos_audio_queue_clear(&state.audio_queue);
+     if (state.encoder) { VTCompressionSessionInvalidate(state.encoder); CFRelease(state.encoder); }
+     if (state.mutex_ready) sc_mutex_destroy(&state.mutex);
+     if (state.send_mutex_ready) sc_mutex_destroy(&state.send_mutex);
+@@ -102,10 +101,7 @@
+                 || CMSampleBufferGetNumSamples(sample) > SC_REVERSE_AUDIO_MAX_CHUNK) return;
+         sc_mutex_lock(&s->mutex);
+         if (mac_audio_active(s)) {
+-            if (s->latest_audio) CFRelease(s->latest_audio);
+-            s->latest_audio = (CMSampleBufferRef)CFRetain(sample);
+-            s->audio_received_us = av_gettime_relative();
+-            ++s->audio_sequence;
++            sc_reverse_macos_audio_queue_push(&s->audio_queue, sample, av_gettime_relative());
+         }
+         sc_mutex_unlock(&s->mutex);
+         return;
+@@ -334,10 +330,13 @@
+         bool unavailable = false;
+         while (!mac_audio_stopped(&audio)) {
+             sc_mutex_lock(&s->mutex);
+-            uint64_t epoch = s->audio_epoch, current = s->audio_sequence;
++            uint64_t epoch = s->audio_epoch;
+             bool active = mac_audio_active(s);
+-            CMSampleBufferRef sample = s->latest_audio; s->latest_audio = NULL;
+-            int64_t received = s->audio_received_us;
++            struct sc_reverse_macos_audio_entry entry = {0};
++            sc_reverse_macos_audio_queue_pop(&s->audio_queue, &entry);
++            CMSampleBufferRef sample = entry.sample;
++            uint64_t current = entry.sequence;
++            int64_t received = entry.received_us;
+             sc_mutex_unlock(&s->mutex);
+             if (audio.epoch != epoch || !active) {
+                 sc_reverse_audio_encoder_destroy(encoder); encoder = NULL;
+@@ -352,6 +351,15 @@
+                 bool ok = encoder && sample && sc_reverse_macos_audio_pcm(sample, pcm, &frames);
+                 if (ok) {
+                     if (current != sequence + 1) sc_reverse_audio_encoder_discard_partial(encoder);
++                    // Short socket/decoder stalls must not punch holes in fresh
++                    // PCM. Retain this chunk until the existing packet window
++                    // has room, but keep the same age cutoff and mute epoch.
++                    size_t needed = frames;
++                    size_t window = SC_REVERSE_AUDIO_FRAMES * SC_REVERSE_AUDIO_WINDOW;
++                    if (needed > window) needed = window;
++                    while (mac_audio_enabled(&audio) && !mac_audio_stopped(&audio)
++                            && av_gettime_relative() - received <= SC_REVERSE_AUDIO_MAX_AGE_US
++                            && sc_reverse_audio_encoder_available_frames(encoder) < needed) SDL_Delay(1);
+                     ok = sc_reverse_audio_encoder_push(encoder, pcm, frames, received, av_gettime_relative());
+                 }
+                 if (!ok && !mac_audio_stopped(&audio)) {
+@@ -375,7 +383,7 @@
+ // partial encoder data (via epoch) even if pause/resume coalesce between polls.
+ static void mac_audio_transition(struct mac_state *s) {
+     ++s->audio_epoch;
+-    if (s->latest_audio) { CFRelease(s->latest_audio); s->latest_audio = NULL; }
++    sc_reverse_macos_audio_queue_clear(&s->audio_queue);
+     sc_reverse_watchdog_set_paused(&s->audio_watchdog, !mac_audio_active(s), av_gettime_relative());
+ }
+ 
+--- a/app/src/reverse_macos_audio.m
++++ b/app/src/reverse_macos_audio.m
+@@ -2,6 +2,37 @@
+ #include "reverse_audio_encoder.h"
+ #include <stddef.h>
+ #include <stdlib.h>
++
++bool sc_reverse_macos_audio_queue_push(struct sc_reverse_macos_audio_queue *queue,
++                                      CMSampleBufferRef sample, int64_t received_us) {
++    bool dropped = queue->count == SC_REVERSE_MACOS_AUDIO_QUEUE_CAPACITY;
++    if (dropped) {
++        CFRelease(queue->entries[queue->head].sample);
++        queue->head = (queue->head + 1) % SC_REVERSE_MACOS_AUDIO_QUEUE_CAPACITY;
++        --queue->count;
++    }
++    unsigned tail = (queue->head + queue->count++) % SC_REVERSE_MACOS_AUDIO_QUEUE_CAPACITY;
++    queue->entries[tail] = (struct sc_reverse_macos_audio_entry) {
++        .sample = (CMSampleBufferRef) CFRetain(sample),
++        .received_us = received_us, .sequence = ++queue->sequence,
++    };
++    return dropped;
++}
++
++bool sc_reverse_macos_audio_queue_pop(struct sc_reverse_macos_audio_queue *queue,
++                                     struct sc_reverse_macos_audio_entry *entry) {
++    if (!queue->count) return false;
++    *entry = queue->entries[queue->head];
++    queue->entries[queue->head].sample = NULL;
++    queue->head = (queue->head + 1) % SC_REVERSE_MACOS_AUDIO_QUEUE_CAPACITY;
++    --queue->count;
++    return true;
++}
++
++void sc_reverse_macos_audio_queue_clear(struct sc_reverse_macos_audio_queue *queue) {
++    struct sc_reverse_macos_audio_entry entry;
++    while (sc_reverse_macos_audio_queue_pop(queue, &entry)) CFRelease(entry.sample);
++}
+ 
+ bool sc_reverse_macos_audio_pcm(CMSampleBufferRef sample, int16_t *pcm, size_t *frames) {
+     if (!sample || !pcm || !frames) return false;
+--- a/app/src/reverse_macos_audio.h
++++ b/app/src/reverse_macos_audio.h
+@@ -6,6 +6,28 @@
+ #include <stddef.h>
+ #include <stdint.h>
+ 
++// Capture callbacks must not block on encoding/socket I/O. Retain a small FIFO
++// through short worker stalls instead of overwriting every unconsumed chunk.
++// The worker still enforces SC_REVERSE_AUDIO_MAX_AGE_US before encoding.
++#define SC_REVERSE_MACOS_AUDIO_QUEUE_CAPACITY 4
++struct sc_reverse_macos_audio_entry {
++    CMSampleBufferRef sample;
++    int64_t received_us;
++    uint64_t sequence;
++};
++struct sc_reverse_macos_audio_queue {
++    struct sc_reverse_macos_audio_entry entries[SC_REVERSE_MACOS_AUDIO_QUEUE_CAPACITY];
++    unsigned head, count;
++    uint64_t sequence;
++};
++// Caller serializes all access. Push retains; pop transfers that retain.
++// Returns true when overflow discards the oldest chunk. Clear releases all.
++bool sc_reverse_macos_audio_queue_push(struct sc_reverse_macos_audio_queue *queue,
++                                      CMSampleBufferRef sample, int64_t received_us);
++bool sc_reverse_macos_audio_queue_pop(struct sc_reverse_macos_audio_queue *queue,
++                                     struct sc_reverse_macos_audio_entry *entry);
++void sc_reverse_macos_audio_queue_clear(struct sc_reverse_macos_audio_queue *queue);
++
+ // out holds at least SC_REVERSE_AUDIO_MAX_CHUNK stereo frames.
+ bool sc_reverse_macos_audio_pcm(CMSampleBufferRef sample, int16_t *out, size_t *frames);
+ #endif
+--- a/app/src/reverse_audio_encoder.c
++++ b/app/src/reverse_audio_encoder.c
+@@ -68,6 +68,24 @@
+     if (e) e->filled = 0;
+ }
+ 
++static void consume_acks(struct sc_reverse_audio_encoder *e) {
++    int64_t ack = e->cbs->acked_pts(e->userdata);
++    // Reject future ACKs even if a caller forgets the wire-level check.
++    if (ack > e->last_pts) return;
++    unsigned consumed = 0;
++    while (consumed < e->pending_count && e->pending[consumed] <= ack) ++consumed;
++    e->pending_count -= consumed;
++    memmove(e->pending, e->pending + consumed, e->pending_count * sizeof(*e->pending));
++}
++
++size_t sc_reverse_audio_encoder_available_frames(struct sc_reverse_audio_encoder *e) {
++    if (!e || !enabled(e)) return 0;
++    consume_acks(e);
++    size_t maximum = SC_REVERSE_AUDIO_WINDOW * SC_REVERSE_AUDIO_FRAMES;
++    size_t frames = (SC_REVERSE_AUDIO_WINDOW - e->pending_count + 1) * SC_REVERSE_AUDIO_FRAMES - 1 - e->filled;
++    return frames < maximum ? frames : maximum;
++}
++
+ bool
+ sc_reverse_audio_encoder_push(struct sc_reverse_audio_encoder *e,
+                              const int16_t *stereo, size_t frames,
+@@ -90,14 +108,7 @@
+         e->filled += count; stereo += count * 2; frames -= count;
+         if (e->filled != SC_REVERSE_AUDIO_FRAMES) continue;
+         e->filled = 0;
+-        int64_t ack = e->cbs->acked_pts(e->userdata);
+-        // Reject future ACKs even if a caller forgets the wire-level check.
+-        if (ack <= e->last_pts) {
+-            unsigned consumed = 0;
+-            while (consumed < e->pending_count && e->pending[consumed] <= ack) ++consumed;
+-            e->pending_count -= consumed;
+-            memmove(e->pending, e->pending + consumed, e->pending_count * sizeof(*e->pending));
+-        }
++        consume_acks(e);
+         if (e->pending_count == SC_REVERSE_AUDIO_WINDOW) continue;
+         if (!e->configured) {
+             if (!e->cbs->send(e->userdata, e->codec->extradata, 19, 0, SC_REVERSE_AUDIO_CONFIG)) return false;
+--- a/app/src/reverse_audio_encoder.h
++++ b/app/src/reverse_audio_encoder.h
+@@ -15,6 +15,10 @@
+                                void *userdata);
+ void sc_reverse_audio_encoder_destroy(struct sc_reverse_audio_encoder *encoder);
+ void sc_reverse_audio_encoder_discard_partial(struct sc_reverse_audio_encoder *encoder);
++// Refresh cumulative ACKs and report conservative PCM capacity in the existing
++// bounded packet window. A caller may retain fresh PCM and retry instead of
++// asking push() to discard it while the receiver catches up. Never blocks.
++size_t sc_reverse_audio_encoder_available_frames(struct sc_reverse_audio_encoder *encoder);
+ bool sc_reverse_audio_encoder_push(struct sc_reverse_audio_encoder *encoder,
+                                   const int16_t *stereo, size_t frames,
+                                   int64_t captured_us, int64_t now_us);
+--- a/app/tests/test_reverse_macos_audio.m
++++ b/app/tests/test_reverse_macos_audio.m
+@@ -42,7 +42,46 @@
+     return sample;
+ }
+ 
++static void test_capture_queue(void) {
++    struct sc_reverse_macos_audio_queue queue = {0};
++    struct sc_reverse_macos_audio_entry entry;
++    assert(!sc_reverse_macos_audio_queue_pop(&queue, &entry));
++    // A temporary callback/worker stall preserves chronological PCM, including
++    // the retain after the capture callback releases its reference.
++    for (unsigned i = 0; i < 4; ++i) {
++        CMSampleBufferRef sample = sample_buffer(true, 48000, 2, 480 + i);
++        assert(!sc_reverse_macos_audio_queue_push(&queue, sample, 1000 + i));
++        CFRelease(sample);
++    }
++    for (unsigned i = 0; i < 4; ++i) {
++        assert(sc_reverse_macos_audio_queue_pop(&queue, &entry));
++        assert(entry.sequence == i + 1 && entry.received_us == 1000 + i);
++        assert(CMSampleBufferGetNumSamples(entry.sample) == 480 + i);
++        CFRelease(entry.sample);
++    }
++    // A prolonged stall keeps only the bounded newest samples and exposes a
++    // sequence gap so callers can discard pre-gap partial Opus frames.
++    for (unsigned i = 0; i < 7; ++i) {
++        CMSampleBufferRef sample = sample_buffer(true, 48000, 2, 500 + i);
++        assert(sc_reverse_macos_audio_queue_push(&queue, sample, 2000 + i) == (i >= 4));
++        CFRelease(sample);
++    }
++    for (unsigned i = 3; i < 7; ++i) {
++        assert(sc_reverse_macos_audio_queue_pop(&queue, &entry));
++        assert(entry.sequence == 5 + i && entry.received_us == 2000 + i);
++        assert(CMSampleBufferGetNumSamples(entry.sample) == 500 + i);
++        CFRelease(entry.sample);
++    }
++    CMSampleBufferRef sample = sample_buffer(true, 48000, 2, 480);
++    assert(!sc_reverse_macos_audio_queue_push(&queue, sample, 3000));
++    CFRelease(sample);
++    sc_reverse_macos_audio_queue_clear(&queue); // Mute/Home must retain no tail.
++    sc_reverse_macos_audio_queue_clear(&queue); // Repeated cleanup is harmless.
++    assert(!sc_reverse_macos_audio_queue_pop(&queue, &entry));
++}
++
+ int main(void) {
++    test_capture_queue();
+     int16_t pcm[SC_REVERSE_AUDIO_MAX_CHUNK * 2]; size_t count = 0;
+     assert(!sc_reverse_macos_audio_pcm(NULL, pcm, &count));
+     for (unsigned planar = 0; planar <= 1; ++planar) {
+--- a/app/tests/test_reverse_audio_encoder.c
++++ b/app/tests/test_reverse_audio_encoder.c
+@@ -110,8 +110,36 @@
+     sc_reverse_audio_encoder_destroy(e);
+ }
+ 
++static void test_retained_pcm_capacity(void) {
++    struct fixture f = {.enabled = true, .ack = -1, .last_pts = -1};
++    struct sc_reverse_audio_encoder *e = sc_reverse_audio_encoder_create(&callbacks, &f);
++    assert(e);
++    int16_t pcm[1920 * 2] = {0};
++    assert(sc_reverse_audio_encoder_push(e, pcm, 240, 100000, 100000));
++    assert(sc_reverse_audio_encoder_available_frames(e) == 1920);
++    // A partial frame must not force a whole-window capture chunk to wait
++    // forever; it fits as four packets plus the remaining partial frame.
++    assert(sc_reverse_audio_encoder_push(e, pcm, 1920, 105000, 105000));
++    assert(f.packets == 4);
++    assert(sc_reverse_audio_encoder_available_frames(e) < 480);
++    int64_t last = f.last_pts;
++    f.ack = INT64_MAX;
++    assert(sc_reverse_audio_encoder_available_frames(e) < 480);
++    assert(f.packets == 4); // Query never emits or accepts a future ACK.
++    f.ack = last;
++    assert(sc_reverse_audio_encoder_available_frames(e) == 1920);
++    assert(sc_reverse_audio_encoder_push(e, pcm, 960, 125000, 125000));
++    assert(f.packets == 6); // Held fresh PCM is sent after capacity returns.
++    f.enabled = false;
++    assert(sc_reverse_audio_encoder_available_frames(e) == 0);
++    f.enabled = true; f.stopped = true;
++    assert(sc_reverse_audio_encoder_available_frames(e) == 0);
++    sc_reverse_audio_encoder_destroy(e);
++}
++
+ int main(void) {
+     test_float_conversion();
+     test_opus_and_backpressure();
++    test_retained_pcm_capacity();
+     return 0;
+ }

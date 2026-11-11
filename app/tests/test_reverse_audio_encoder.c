@@ -110,8 +110,36 @@ static void test_opus_and_backpressure(void) {
     sc_reverse_audio_encoder_destroy(e);
 }
 
+static void test_retained_pcm_capacity(void) {
+    struct fixture f = {.enabled = true, .ack = -1, .last_pts = -1};
+    struct sc_reverse_audio_encoder *e = sc_reverse_audio_encoder_create(&callbacks, &f);
+    assert(e);
+    int16_t pcm[1920 * 2] = {0};
+    assert(sc_reverse_audio_encoder_push(e, pcm, 240, 100000, 100000));
+    assert(sc_reverse_audio_encoder_available_frames(e) == 1920);
+    // A partial frame must not force a whole-window capture chunk to wait
+    // forever; it fits as four packets plus the remaining partial frame.
+    assert(sc_reverse_audio_encoder_push(e, pcm, 1920, 105000, 105000));
+    assert(f.packets == 4);
+    assert(sc_reverse_audio_encoder_available_frames(e) < 480);
+    int64_t last = f.last_pts;
+    f.ack = INT64_MAX;
+    assert(sc_reverse_audio_encoder_available_frames(e) < 480);
+    assert(f.packets == 4); // Query never emits or accepts a future ACK.
+    f.ack = last;
+    assert(sc_reverse_audio_encoder_available_frames(e) == 1920);
+    assert(sc_reverse_audio_encoder_push(e, pcm, 960, 125000, 125000));
+    assert(f.packets == 6); // Held fresh PCM is sent after capacity returns.
+    f.enabled = false;
+    assert(sc_reverse_audio_encoder_available_frames(e) == 0);
+    f.enabled = true; f.stopped = true;
+    assert(sc_reverse_audio_encoder_available_frames(e) == 0);
+    sc_reverse_audio_encoder_destroy(e);
+}
+
 int main(void) {
     test_float_conversion();
     test_opus_and_backpressure();
+    test_retained_pcm_capacity();
     return 0;
 }

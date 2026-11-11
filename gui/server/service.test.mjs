@@ -85,6 +85,13 @@ test('launcher health endpoint exposes only app identity and does not probe or s
   assert.equal(f.children.length, 0);
 });
 
+test('Mac encode-submission telemetry updates the live dashboard', async (t) => {
+  const f = await fixture(t);
+  await f.request('/api/stream/start', { connection: 'usb' });
+  f.children[0].child.stderr.write('DEBUG: Reverse display encode-submission-to-decode round-trip: 12.5 ms\n');
+  assert.equal(f.publicState().latencyMs, 12.5);
+});
+
 test('Mac capability follows the binary probe and rejects incompatible encoders before spawn', async (t) => {
   const f = await fixture(t, { platform: 'darwin', readinessProbe: async () => ({ ...ready,
     checks: [...ready.checks, { id: 'capture', ready: true }] }) });

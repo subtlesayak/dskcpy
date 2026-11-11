@@ -15,6 +15,10 @@ sc_reverse_audio_encoder_create(const struct sc_reverse_audio_callbacks *cbs,
                                void *userdata);
 void sc_reverse_audio_encoder_destroy(struct sc_reverse_audio_encoder *encoder);
 void sc_reverse_audio_encoder_discard_partial(struct sc_reverse_audio_encoder *encoder);
+// Refresh cumulative ACKs and report conservative PCM capacity in the existing
+// bounded packet window. A caller may retain fresh PCM and retry instead of
+// asking push() to discard it while the receiver catches up. Never blocks.
+size_t sc_reverse_audio_encoder_available_frames(struct sc_reverse_audio_encoder *encoder);
 bool sc_reverse_audio_encoder_push(struct sc_reverse_audio_encoder *encoder,
                                   const int16_t *stereo, size_t frames,
                                   int64_t captured_us, int64_t now_us);

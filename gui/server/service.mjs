@@ -198,7 +198,7 @@ export function createControlService({
     if (encoder) {
       state.encoder = encoder[1];
     }
-    const latency = clean.match(/capture-to-decode round-trip: ([0-9.]+) ms/);
+    const latency = clean.match(/(?:capture-to-decode|encode-submission-to-decode) round-trip: ([0-9.]+) ms/);
     if (latency) {
       state.latencyMs = Number(latency[1]);
       state.reconnecting = false;

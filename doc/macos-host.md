@@ -12,6 +12,9 @@ transport or latency check below. The next screenshot showed a stale
 buffered host logs so encoder and decode-acknowledgement updates reach the
 dashboard immediately. The updated telemetry still needs a manual Mac retest.
 
+See the [Mac testing record](testing/mac/README.md) for later physical evidence,
+current repository build results and remaining audio/permission/browser failures.
+
 ## Updating when video works but Performance stays on Connecting
 
 The previous Mac host buffered INFO/DEBUG output when launched by the dashboard.
@@ -81,8 +84,9 @@ was 17 bytes; the corrected name is 13 bytes. Keep debug assertions enabled.
 
 Mac desktop audio forwarding is **implemented experimentally**, using
 ScreenCaptureKit system capture and 10 ms Opus packets. Audible playback still
-requires manual Mac verification; Windows audio is unchanged. No iOS or browser media
-receiver, extended virtual monitor, HDR, system-wide text keyboard, or zero-latency
+requires manual Mac verification; Windows audio is unchanged. The [experimental browser receiver](browser-receiver.md) is also available.
+Cross-browser and Apple-device behavior still requires physical testing. No
+extended virtual monitor, HDR, system-wide text keyboard, or zero-latency
 guarantee is included. The Android companion is debug-signed for testing.
 
 ## 1. On Windows: transfer the bundle
@@ -186,8 +190,8 @@ If audio is unavailable, check Screen & System Audio Recording permission and
 that FFmpeg includes `libopus` (`ffmpeg -encoders`). Toggle phone audio to retry.
 Protected media may not be capturable. `--no-audio` disables host audio capture.
 No microphone permission or microphone output is requested. The capture callback
-retains at most one sample buffer, rejects oversized chunks, and never performs
-network I/O. Separate audio acknowledgements cannot unblock the video window.
+retains a bounded four-entry audio FIFO, rejects oversized chunks, and never
+performs network I/O. Separate audio acknowledgements cannot unblock the video window.
 
 ## 5. Then test wireless modes
 

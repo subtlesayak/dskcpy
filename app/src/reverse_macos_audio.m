@@ -3,6 +3,37 @@
 #include <stddef.h>
 #include <stdlib.h>
 
+bool sc_reverse_macos_audio_queue_push(struct sc_reverse_macos_audio_queue *queue,
+                                      CMSampleBufferRef sample, int64_t received_us) {
+    bool dropped = queue->count == SC_REVERSE_MACOS_AUDIO_QUEUE_CAPACITY;
+    if (dropped) {
+        CFRelease(queue->entries[queue->head].sample);
+        queue->head = (queue->head + 1) % SC_REVERSE_MACOS_AUDIO_QUEUE_CAPACITY;
+        --queue->count;
+    }
+    unsigned tail = (queue->head + queue->count++) % SC_REVERSE_MACOS_AUDIO_QUEUE_CAPACITY;
+    queue->entries[tail] = (struct sc_reverse_macos_audio_entry) {
+        .sample = (CMSampleBufferRef) CFRetain(sample),
+        .received_us = received_us, .sequence = ++queue->sequence,
+    };
+    return dropped;
+}
+
+bool sc_reverse_macos_audio_queue_pop(struct sc_reverse_macos_audio_queue *queue,
+                                     struct sc_reverse_macos_audio_entry *entry) {
+    if (!queue->count) return false;
+    *entry = queue->entries[queue->head];
+    queue->entries[queue->head].sample = NULL;
+    queue->head = (queue->head + 1) % SC_REVERSE_MACOS_AUDIO_QUEUE_CAPACITY;
+    --queue->count;
+    return true;
+}
+
+void sc_reverse_macos_audio_queue_clear(struct sc_reverse_macos_audio_queue *queue) {
+    struct sc_reverse_macos_audio_entry entry;
+    while (sc_reverse_macos_audio_queue_pop(queue, &entry)) CFRelease(entry.sample);
+}
+
 bool sc_reverse_macos_audio_pcm(CMSampleBufferRef sample, int16_t *pcm, size_t *frames) {
     if (!sample || !pcm || !frames) return false;
     CMAudioFormatDescriptionRef format = CMSampleBufferGetFormatDescription(sample);
