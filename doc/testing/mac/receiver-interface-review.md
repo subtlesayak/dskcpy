@@ -23,7 +23,7 @@ Physical phone screenshots supplied after the initial synthetic review reveal th
 | MEDIUM | Layout | Receiver typing panel and right rail, portrait and landscape | Large panel, help text and text-button rail consume much of the remaining view | Implemented a one-row input strip and 56px icon rail; 44px targets and 200% text sizing verified | The desktop becomes too small to read comfortably while typing |
 | LOW | UI | Receiver textarea | Native resize handle is visible on a touch-first remote-input field | Implemented a non-resizable single-row field that grows with enlarged text | Resizing competes with the remote screen for scarce space |
 
- Repairs implemented during this review include moving controls to the right, placing secondary actions in Options, restoring trigger focus on Close/Escape, revealing the typing-panel parent before focusing its field, and improving the input boundary from 2.44:1 to 4.44:1 contrast. USB now opens the authorized phone browser with a one-use automatic invitation; manual entry is a fallback disclosure.
+Repairs implemented during this review include moving controls to the right, placing secondary actions in Options, restoring trigger focus on Close/Escape, revealing the typing-panel parent before focusing its field, and improving the input boundary from 2.44:1 to 4.44:1 contrast. USB now opens the authorized phone browser with a one-use automatic invitation; manual entry is a fallback disclosure.
 
 ## Verification
 
@@ -31,19 +31,20 @@ Passed:
 
 - `cd gui && npm test`: 175 passed, zero failed, seven optional platform/native-fixture skips. This includes decoder recovery, stale callback isolation, typed input lifecycle, panel focus, authorized USB auto-open, early phone authentication, manual fallback and launcher configuration reuse checks.
 - `cd gui && npm run build`: TypeScript and Vite production build passed.
-- Actual synthetic video in the browser at 320×640 and 844×390: no horizontal overflow, controls at least 44px, 16px focused typing field visible, Options and typing panels mutually exclusive. Landscape typing sits beside the video.
+- Actual synthetic video in the browser at 320×640 and 844×390: no horizontal overflow, controls at least 44px, 16px focused typing field visible, Options and typing panels mutually exclusive. Typing now uses a compact row below the video.
 - Actual fullscreen and hide/show controls: Exit full screen was exposed; the Show controls target stayed outside the video. Temporary viewport override reset afterward.
 - Contrast measurements: main text 15.33:1, button text 11.75:1, secondary text 8.23:1, focus ring against its measured control background 6.70:1, input boundary against input background 4.44:1.
 - USB hardware diagnosis: Edge on Android 17 authenticated but stalled without video output; software H.264 configuration was unavailable. A 100ms stalled-output flush, followed by a fresh host IDR, now maintains the authenticated USB stream with fresh frame acknowledgments for over 60 seconds. The user confirms phone video stays visible for 20 seconds and reports typing works. A controlled repeat was independently read as 789 in Mac Calculator, confirming native text delivery. Flushing can reduce frame rate and increase IDR traffic.
 
+- New actual fullscreen preview with a deliberately smaller visual viewport: outer height 390px; visible inner frame 180px at top offset 12px. Video, typing field, Close and Hide all remained inside the expected visible bounds.
+- RTL plus 200% root text size at 320px: 32px input text fits a 66px-high field with no internal or page overflow. This is a text-resize check, not a full browser-zoom or screen-reader pass.
+
 Not verified:
 
-- IME/non-Latin layouts, VoiceOver traversal, RTL, pseudo-localization and 200% browser zoom.
+- IME/non-Latin layouts, VoiceOver traversal, pseudo-localization and 200% browser zoom.
 - Real-phone soft-keyboard/fullscreen repeat of the newly fixed assets remains pending. Earlier phone screenshots are the failing baseline.
 - Safari/iPhone/iPad behavior, current candidate audio smoothness, long-session performance and physical recovery regressions.
 
-- New actual fullscreen preview with a deliberately smaller visual viewport: outer height 390px; visible inner frame 180px at top offset 12px. Video, typing field, Close and Hide all remained inside the expected visible bounds.
-- RTL plus 200% root text size at 320px: 32px input text fits a 66px-high field with no internal or page overflow. This is a text-resize check, not a full browser-zoom or screen-reader pass.
 
 The native binary is SHA-256 `b083ecfd69cf350e7cf831b767c1ebf36640c5e728ac79579f1fcc4c73331955`. ACK timing is not physical touch-to-display latency. This review is neither a WCAG conformance claim nor a universal device qualification.
 

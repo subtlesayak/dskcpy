@@ -27,7 +27,7 @@
     "WebRTC audio-clock fix merged to master is not yet in this isolated runtime"
   ],
   "source_sha256": {
-    "gui/receiver/index.html": "ba9e4289ff7b555a354836378aafb721a70f84478bdb3f7ca803606c5ffafd91",
+    "gui/receiver/index.html": "3d9c2f2877d4b452c1058d64aea29cd6de2de454924a6dd138a6ef4cffdb4e35",
     "gui/receiver/receiver.css": "31a8835a964db448e6f12ee954f05c4ccf11ddb0feeaf00509e50d5eee320df7",
     "gui/receiver/receiver.mjs": "758a640b95c958bd29b1edd0d5eff899612fd693650c61249e3bb2617d9c8451",
     "gui/receiver/video.mjs": "cc25e3fc28b96c5c7f772e5a9f51cab8e7c4a3a6f6c882a472542fde968295e7",
