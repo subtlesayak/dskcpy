@@ -1,19 +1,34 @@
-import { avcCodec, avcParameters, touchPacket, scrollPacket, takeDecodedTimestamps, fitDisplay, createMediaAcknowledger, needsControlsRow } from './protocol.mjs';
+import { avcCodec, avcParameters, touchPacket, scrollPacket, takeDecodedTimestamps, fitDisplay, createMediaAcknowledger, needsControlsRow, parseJoinFragment } from './protocol.mjs';
+import { createRtcReceiver } from './rtc.mjs';
+import { createVideoReceiver } from './video.mjs';
+import { createBrowserKeyboard } from './keyboard.mjs';
 
 const $ = (id) => document.getElementById(id);
+function takeJoinFragment() {
+  const fragment = location.hash || '';
+  const key = parseJoinFragment(fragment);
+  if (fragment.startsWith('#connect=')) {
+    window.history.replaceState(null, '', `${location.pathname}${location.search}`);
+  }
+  return key;
+}
+let scannedKey = takeJoinFragment();
 const canvas = $('display');
+const rtcDisplay = $('rtc-display');
+let rtcReceiver, mediaMode = 'webcodecs';
+let keyboardSupported = false, keyboardOpen = false, viewOnly = false;
+const preferredMode = 'RTCPeerConnection' in window ? 'webrtc' : 'webcodecs';
 const context = canvas.getContext('2d', { alpha: false, desynchronized: true });
 let ws, video, audio, audioContext, videoConfig, configBytes, audioConfig;
 let authenticated = false, header = false, closing = false, paused = false, muted = true, touchEnabled = true;
-let waitingKey = true, frames = 0, statsAt = 0, nextAudio = 0, repeatTimer, repeatInterval;
+let frames = 0, statsAt = 0, nextAudio = 0, repeatTimer, repeatInterval;
 const sources = new Set();
 const pointers = new Map();
 const pendingAudioAcks = [];
 let generation = 0;
 let sessionExpected = false, retryTimer, connectionTimer, resumeDeadline = 0, probing = false;
 let resumeAllowed = true;
-let videoGeneration = 0, audioGeneration = 0, fullscreenAttempt = 0;
-const pendingVideoAcks = new Set();
+let audioGeneration = 0, fullscreenAttempt = 0, playbackAttempt = 0;
 const mediaAcks = createMediaAcknowledger(send);
 const controlTrays = [
   { trigger: 'volume', panel: 'volume-controls', first: 'volume-down' },
@@ -22,6 +37,18 @@ const controlTrays = [
 ];
 let openControlTray = null;
 let selectDrag = false, touchGesture = null;
+const keyboardInput = createBrowserKeyboard({ field: $('keyboard-input'), send,
+  canSend: () => keyboardSupported && authenticated && header && !paused && !document.hidden && touchEnabled && !viewOnly,
+  onError: (message) => { $('error').textContent = message; } });
+function hideKeyboard() {
+  keyboardOpen = false; keyboardInput.setEnabled(false);
+  $('keyboard-controls').hidden = true; $('keyboard').setAttribute('aria-expanded', 'false');
+}
+$('keyboard').addEventListener('click', () => {
+  if (!keyboardSupported || viewOnly || paused || document.hidden || !touchEnabled) return;
+  keyboardOpen = !keyboardOpen; $('keyboard-controls').hidden = !keyboardOpen;
+  $('keyboard').setAttribute('aria-expanded', String(keyboardOpen)); keyboardInput.setEnabled(keyboardOpen);
+});
 
 function send(bytes) {
   if (!authenticated || !header || ws?.readyState !== WebSocket.OPEN) return false;
@@ -43,7 +70,8 @@ function audioUnavailable() {
   $('audio').setAttribute('aria-pressed', 'false');
   $('error').textContent = 'Opus audio is unavailable in this browser. Video can continue.';
 }
-function releaseTouches() {
+function releaseTouches(includeKeyboard = true) {
+  if (includeKeyboard) keyboardInput.release();
   cancelSentTouches();
   pointers.clear();
   touchGesture = null;
@@ -51,11 +79,14 @@ function releaseTouches() {
 }
 function fail(message) { $('error').textContent = message; disconnect(); }
 function clearMedia() {
+  playbackAttempt++;
+  rtcReceiver?.close(); rtcReceiver = null;
+  rtcDisplay.hidden = true; document.body.classList.remove('rtc-stream');
   stopAudio(); pendingAudioAcks.length = 0;
-  videoGeneration++; audioGeneration++; pendingVideoAcks.clear();
-  if (video && video.state !== 'closed') video.close(); video = null;
+  audioGeneration++;
+  video?.close(); video = null;
   if (audio && audio.state !== 'closed') audio.close(); audio = null;
-  header = false; videoConfig = null; configBytes = null; audioConfig = null; waitingKey = true;
+  header = false; videoConfig = null; configBytes = null; audioConfig = null;
 }
 function disconnect() {
   if (closing) return;
@@ -69,9 +100,10 @@ function disconnect() {
   releaseTouches(); stopAudio(); drainAudioAcks(true);
   ws?.close(4000, 'Disconnected by viewer'); ws = null;
   clearMedia();
+  hideKeyboard(); keyboardSupported = false; viewOnly = false; $('keyboard').hidden = true;
   if (audioContext) void audioContext.close().catch(() => {}); audioContext = null;
   authenticated = false; header = false; muted = true; paused = false;
-  videoConfig = null; configBytes = null; audioConfig = null; frames = 0; waitingKey = true;
+  videoConfig = null; configBytes = null; audioConfig = null; frames = 0;
   context.clearRect(0, 0, canvas.width, canvas.height);
   $('join-panel').hidden = false; $('stream-panel').hidden = true;
   document.body.classList.remove('is-streaming', 'controls-hidden');
@@ -96,11 +128,12 @@ async function resumeSession() {
   const mine = generation;
   try {
     const response = await fetch('/stream/session', { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(5000) });
-    const available = response.ok && (await response.json()).resumable;
+    const sessionInfo = response.ok ? await response.json() : {};
+    const available = sessionInfo.resumable;
     if (mine !== generation || ws || document.hidden) return;
     if (available) {
       sessionExpected = true; resumeDeadline ||= Date.now() + 120000;
-      $('error').textContent = ''; connect();
+      $('error').textContent = ''; connect(null, sessionInfo.mediaMode || preferredMode);
     } else if (sessionExpected) {
       // Do not POST on an expired session: it has already been revoked.
       sessionExpected = false;
@@ -114,9 +147,10 @@ async function resumeSession() {
   } finally { probing = false; }
 }
 
-const supported = window.isSecureContext && 'VideoDecoder' in window && 'EncodedVideoChunk' in window;
-$('capability').textContent = supported ? 'WebCodecs video available. The host codec is checked when connecting.'
-  : 'This browser needs WebCodecs over HTTPS (or localhost). Try a current Chrome or Edge browser.';
+const supported = window.isSecureContext && (preferredMode === 'webrtc'
+  || ('VideoDecoder' in window && 'EncodedVideoChunk' in window));
+$('capability').textContent = supported ? 'Browser video is available. Connect using the computer’s private link.'
+  : 'Use a current browser and the trusted HTTPS link from the computer.';
 if (!supported) $('join').disabled = true;
 
 $('join-form').addEventListener('submit', (event) => {
@@ -133,12 +167,12 @@ $('join-form').addEventListener('submit', (event) => {
   connect(key);
 });
 
-function connect(key = null) {
+function connect(key = null, requestedMode = preferredMode) {
   mediaAcks.reset();
   $('join').disabled = true; $('join').textContent = 'Connecting…'; $('status').textContent = 'Authenticating…';
   if (!key) $('status').textContent = 'Reconnecting…';
   const mine = ++generation;
-  const socket = new WebSocket(`${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/stream`);
+  const socket = new WebSocket(`${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}${requestedMode === 'webrtc' ? '/stream/webrtc' : '/stream'}`);
   ws = socket; socket.binaryType = 'arraybuffer';
   const timeout = connectionTimer = setTimeout(() => { if (mine === generation && !document.hidden && !paused) fail('Connection timed out. Check the desktop invitation and receiver address.'); }, 15000);
   socket.addEventListener('open', () => { if (key) { socket.send(key); key = null; } }, { once: true });
@@ -162,8 +196,32 @@ function connect(key = null) {
     try {
       if (typeof event.data === 'string') {
         const message = JSON.parse(event.data);
+        if (message.type === 'rtc-offer' && authenticated && mediaMode === 'webrtc') {
+          if (rtcReceiver) throw new Error('Unexpected repeated media offer.');
+          rtcDisplay.hidden = false; rtcDisplay.muted = muted;
+          document.body.classList.add('rtc-stream');
+          rtcReceiver = createRtcReceiver({ element: rtcDisplay,
+            signal: (value) => { if (mine === generation && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(value)); },
+            onPlaying: () => {
+              if (mine !== generation || paused || document.hidden) return;
+              clearTimeout(timeout); $('status').textContent = 'Streaming'; $('error').textContent = '';
+              $('stats').textContent = `${canvas.width} × ${canvas.height} · WebRTC · native browser video and audio`;
+            }, onError: (message) => { if (mine === generation) $('error').textContent = message; } });
+          void rtcReceiver.offer(message.description).catch((error) => { if (mine === generation) fail(error.message); });
+          return;
+        }
         if (message.type !== 'authenticated') throw new Error('Unexpected receiver response.');
+        mediaMode = message.mediaMode || 'webcodecs';
+        if (mediaMode === 'webcodecs' && !('VideoDecoder' in window)) throw new Error('This connection needs WebCodecs. Use the private VPN link for browser-native video.');
         authenticated = true; sessionExpected = true;
+        viewOnly = message.viewOnly === true;
+        keyboardSupported = message.keyboard === true && !viewOnly;
+        $('keyboard').hidden = !keyboardSupported;
+        touchEnabled = !viewOnly; $('touch').disabled = viewOnly;
+        $('touch').textContent = viewOnly ? 'Window · view only' : 'Touch on';
+        $('touch').setAttribute('aria-pressed', String(touchEnabled));
+        for (const id of ['volume', 'window']) $(id).hidden = viewOnly;
+        $('audio').disabled = viewOnly;
         $('status').textContent = 'Connected · waiting for video';
         $('join-panel').hidden = true; $('stream-panel').hidden = false;
         document.body.classList.add('is-streaming');
@@ -183,8 +241,19 @@ function connect(key = null) {
       const timestamp = Number(data.getBigUint64(4));
       if (!Number.isSafeInteger(timestamp)) throw new Error('Invalid media timestamp.');
       const flags = data.getUint32(12), payload = new Uint8Array(event.data, 16);
-      if (flags === 16) { $('audio').textContent = 'Audio unavailable'; $('audio').setAttribute('aria-label', 'Audio unavailable'); $('audio').disabled = true; return; }
-      if (flags === 4) { audioConfig = payload.slice(); configureAudio(); return; }
+      if (flags === 16) {
+        stopAudio(); drainAudioAcks(true); audioGeneration++;
+        if (audio && audio.state !== 'closed') audio.close(); audio = null;
+        $('audio').textContent = 'Audio unavailable'; $('audio').setAttribute('aria-label', 'Audio unavailable');
+        $('audio').disabled = true; return;
+      }
+      if (flags === 4) {
+        stopAudio(); // A fresh codec configuration also discards the old route's scheduled audio.
+        audioConfig = payload.slice(); $('audio').disabled = false;
+        $('audio').textContent = muted ? 'Audio off' : 'Audio on';
+        $('audio').setAttribute('aria-label', $('audio').textContent);
+        if (mediaMode !== 'webrtc') configureAudio(); return;
+      }
       if (flags === 8) {
         if (!muted && !paused && !document.hidden && audio?.state === 'configured' && audio.decodeQueueSize < 4) {
           try {
@@ -194,62 +263,46 @@ function connect(key = null) {
         } else mediaAcks.acknowledge(6, timestamp);
         return;
       }
+      if (mediaMode === 'webrtc') return;
       if ((flags & 1) || (!videoConfig && (flags & 2))) {
         configBytes = avcParameters(payload);
-        videoConfig = { codec: avcCodec(configBytes), optimizeForLatency: true };
+        videoConfig = { codec: avcCodec(configBytes), codedWidth: canvas.width,
+          codedHeight: canvas.height, optimizeForLatency: true };
         createVideoDecoder();
         if (flags & 1) return;
       }
-      if (paused || document.hidden) { mediaAcks.acknowledge(4, timestamp); waitingKey = true; return; }
+      if (paused || document.hidden) { mediaAcks.acknowledge(4, timestamp); return; }
       if (!video || !configBytes) throw new Error('Missing H.264 configuration.');
       const keyFrame = Boolean(flags & 2);
-      if (waitingKey && !keyFrame) { mediaAcks.acknowledge(4, timestamp); return; }
-      if (video.decodeQueueSize > 2) throw new Error('Video decoder stalled. Reconnect to clear the backlog.');
       let encoded = payload;
       if (keyFrame) {
         encoded = new Uint8Array(configBytes.length + payload.length); encoded.set(configBytes); encoded.set(payload, configBytes.length);
-        if (waitingKey) { video.reset(); video.configure(videoConfig); }
-        waitingKey = false;
       }
-      pendingVideoAcks.add(timestamp);
       video.decode(new EncodedVideoChunk({ type: keyFrame ? 'key' : 'delta', timestamp, data: encoded }));
     } catch (error) { fail(error.message || 'The receiver could not decode this stream.'); }
   });
 
   function createVideoDecoder() {
-    const epoch = ++videoGeneration;
-    if (video && video.state !== 'closed') video.close();
-    video = new VideoDecoder({ error: () => {
-      if (mine === generation && epoch === videoGeneration) fail('This browser could not decode the host H.264 stream. Try a lower resolution or another encoder.');
-    },
-      output: (frame) => {
-        try {
-          if (mine !== generation || epoch !== videoGeneration) return;
-          pendingVideoAcks.delete(frame.timestamp);
-          if (!paused && !document.hidden) {
-            context.drawImage(frame, 0, 0, canvas.width, canvas.height); frames++;
-            clearTimeout(timeout);
-            $('status').textContent = 'Streaming';
-            if (performance.now() - statsAt > 1000) {
-              $('stats').textContent = `${canvas.width} × ${canvas.height} · ${frames} decoded frames · H.264 · decode ACK, not motion-to-photon latency`;
-              statsAt = performance.now();
-            }
-          }
-          mediaAcks.acknowledge(4, frame.timestamp);
-        } finally { frame.close(); }
+    video ||= createVideoReceiver({ suspended: paused || document.hidden,
+      onError: (message) => { if (mine === generation) fail(message); },
+      onKeyframe: () => { if (mine === generation) action(8); },
+      onAck: (timestamp) => { if (mine === generation) mediaAcks.acknowledge(4, timestamp); },
+      onFrame: (frame) => {
+        if (mine !== generation || paused || document.hidden) return;
+        context.drawImage(frame, 0, 0, canvas.width, canvas.height); frames++;
+        clearTimeout(timeout);
+        $('status').textContent = 'Streaming';
+        if (performance.now() - statsAt > 1000) {
+          $('stats').textContent = `${canvas.width} × ${canvas.height} · ${frames} decoded frames · H.264 · decode ACK, not motion-to-photon latency`;
+          statsAt = performance.now();
+        }
       } });
-    video.configure(videoConfig); waitingKey = true;
+    video.configure(videoConfig);
   }
-  // Recreate a codec closed when the page was suspended, using retained SPS/PPS.
-  recreateVideo = createVideoDecoder;
 }
 
-let recreateVideo;
 function suspendDecoder() {
-  videoGeneration++;
-  if (video && video.state !== 'closed') video.close(); video = null;
-  for (const pts of pendingVideoAcks) mediaAcks.acknowledge(4, pts);
-  pendingVideoAcks.clear(); waitingKey = true;
+  video?.suspend();
   drainAudioAcks(true);
   audioGeneration++;
   if (audio && audio.state !== 'closed') audio.close(); audio = null;
@@ -285,6 +338,24 @@ function configureAudio() {
   catch { audioUnavailable(); }
 }
 $('audio').addEventListener('click', async () => {
+  if (viewOnly) return;
+  if (mediaMode === 'webrtc') {
+    const mine = generation, attempt = ++playbackAttempt;
+    const updateButton = () => {
+      $('audio').textContent = muted ? 'Audio off' : 'Audio on';
+      $('audio').setAttribute('aria-label', $('audio').textContent);
+      $('audio').setAttribute('aria-pressed', String(!muted));
+    };
+    muted = !muted; rtcDisplay.muted = muted; action(muted ? 11 : 10);
+    updateButton();
+    if (!muted) try { await rtcDisplay.play(); } catch {
+      if (mine !== generation || attempt !== playbackAttempt || !authenticated) return;
+      muted = true; rtcDisplay.muted = true; action(11);
+      $('error').textContent = 'Audio could not start. Tap Audio off to try again.';
+    }
+    if (mine !== generation || attempt !== playbackAttempt || !authenticated) return;
+    updateButton(); return;
+  }
   if (!('AudioDecoder' in window)) { $('error').textContent = 'WebCodecs Opus audio is unavailable in this browser. Video still works.'; return; }
   if (!muted) { muted = true; stopAudio(); drainAudioAcks(true); action(11); }
   else {
@@ -301,14 +372,24 @@ $('audio').addEventListener('click', async () => {
 });
 function updatePause() {
   if (!authenticated || !header || ws?.readyState !== WebSocket.OPEN) return;
-  releaseTouches(); stopAudio(); waitingKey = true;
+  releaseTouches(); stopAudio();
+  if (paused || document.hidden) hideKeyboard();
   suspendDecoder();
-  if (!document.hidden && !paused && videoConfig) recreateVideo?.();
+  if (!document.hidden && !paused) video?.resume();
   ws.send(document.hidden ? 'suspend' : 'resume');
   action(paused || document.hidden ? 7 : 8);
   if (document.hidden) resumeDeadline ||= Date.now() + 120000;
   else resumeDeadline = 0;
-  if (!document.hidden && !muted && audioContext?.state !== 'running') {
+  if (mediaMode === 'webrtc') {
+    const mine = generation, attempt = ++playbackAttempt;
+    if (document.hidden || paused) { rtcDisplay.muted = true; rtcDisplay.pause?.(); }
+    else { rtcDisplay.muted = muted; void rtcDisplay.play?.().catch(() => {
+      if (mine === generation && attempt === playbackAttempt && authenticated) {
+        $('error').textContent = 'Tap Resume to restart browser playback.';
+      }
+    }); }
+  }
+  if (mediaMode !== 'webrtc' && !document.hidden && !muted && audioContext?.state !== 'running') {
     // Mobile browsers may suspend audio independently of the video connection.
     // Ask for a fresh tap instead of showing an inaccurate "Audio on" state.
     muted = true; action(11); $('audio').textContent = 'Audio off';
@@ -337,7 +418,9 @@ window.addEventListener('pagehide', () => {
 window.addEventListener('pageshow', () => { updatePause(); void resumeSession(); });
 void resumeSession();
 $('touch').addEventListener('click', () => {
+  if (viewOnly) return;
   releaseTouches(); touchEnabled = !touchEnabled;
+  if (!touchEnabled) hideKeyboard();
   $('touch').textContent = touchEnabled ? 'Touch on' : 'Touch off'; $('touch').setAttribute('aria-pressed', String(touchEnabled));
 });
 function point(event) {
@@ -464,6 +547,7 @@ for (const { trigger } of controlTrays) {
   $(trigger).addEventListener('click', () => setControlTray(openControlTray === trigger ? null : trigger, true));
 }
 function setControlsVisible(visible) {
+  if (!visible) hideKeyboard();
   setControlTray();
   document.body.classList.toggle('controls-hidden', !visible);
   $('show-controls').hidden = visible;
@@ -473,7 +557,7 @@ function setControlsVisible(visible) {
 $('hide-controls').addEventListener('click', () => setControlsVisible(false));
 $('show-controls').addEventListener('click', () => setControlsVisible(true));
 function fitCanvas() {
-  releaseTouches();
+  releaseTouches(false); // Soft-keyboard viewport changes must not cancel typing or composition.
   const panel = $('stream-panel'), padding = getComputedStyle(panel);
   const fullHeight = panel.clientHeight - parseFloat(padding.paddingTop) - parseFloat(padding.paddingBottom);
   const fullWidth = panel.clientWidth - parseFloat(padding.paddingLeft) - parseFloat(padding.paddingRight);
@@ -482,6 +566,7 @@ function fitCanvas() {
   const bounds = $('stage').getBoundingClientRect();
   const size = fitDisplay(canvas.width, canvas.height, bounds.width, bounds.height);
   canvas.style.width = `${size.width}px`; canvas.style.height = `${size.height}px`;
+  rtcDisplay.style.width = `${size.width}px`; rtcDisplay.style.height = `${size.height}px`;
 }
 new ResizeObserver(fitCanvas).observe($('stage'));
 document.addEventListener('fullscreenchange', () => {
@@ -505,3 +590,15 @@ for (const [id, code] of [['volume-down', 0], ['volume-up', 1], ['minimize', 3],
   });
   for (const name of ['pointerup', 'pointercancel', 'lostpointercapture', 'blur']) button.addEventListener(name, () => { clearTimeout(repeatTimer); clearInterval(repeatInterval); });
 }
+
+function joinInvitation(key) {
+  if (key && supported && !ws) {
+    $('session-key').value = key;
+    $('join-form').requestSubmit();
+  }
+}
+// Camera/browser links can reuse this document with a fragment-only navigation.
+// Always scrub the invitation, without replacing an already connected viewer.
+window.addEventListener('hashchange', () => joinInvitation(takeJoinFragment()));
+joinInvitation(scannedKey);
+scannedKey = null;

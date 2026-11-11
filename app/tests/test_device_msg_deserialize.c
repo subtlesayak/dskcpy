@@ -3,6 +3,7 @@
 #include <assert.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "device_msg.h"
@@ -172,6 +173,65 @@ static void test_deserialize_reverse_scroll(void) {
     assert(sc_device_msg_deserialize(input, sizeof(input), &msg) == -1);
 }
 
+static void test_reverse_keyboard(void) {
+    struct sc_device_msg msg;
+    uint8_t key[] = {8, 0, 0, 4, 8};
+    for (unsigned n = 0; n < sizeof(key); ++n) assert(sc_device_msg_deserialize(key, n, &msg) == 0);
+    assert(sc_device_msg_deserialize(key, sizeof(key), &msg) == 5);
+    assert(msg.reverse_key.usage == 4 && msg.reverse_key.modifiers == 8);
+    key[1] = 2; assert(sc_device_msg_deserialize(key, sizeof(key), &msg) == -1);
+    key[3] = key[4] = 0; assert(sc_device_msg_deserialize(key, sizeof(key), &msg) == 5);
+    const uint8_t unicode[] = {9, 0, 4, 0xf0, 0x9f, 0x91, 0x8b};
+    for (unsigned n = 0; n < sizeof(unicode); ++n) assert(sc_device_msg_deserialize(unicode, n, &msg) == 0);
+    assert(sc_device_msg_deserialize(unicode, sizeof(unicode), &msg) == sizeof(unicode));
+    assert(msg.reverse_text.length == 4 && !memcmp(msg.reverse_text.text, unicode + 3, 4));
+    const uint8_t invalid[][7] = {{9,0,1,0}, {9,0,2,0xc0,0x80}, {9,0,3,0xed,0xa0,0x80},
+        {9,0,4,0xf4,0x90,0x80,0x80}, {9,2,1,0,0,0,0}, {9,0,1,0x1b}};
+    for (unsigned i = 0; i < sizeof(invalid)/sizeof(*invalid); ++i)
+        assert(sc_device_msg_deserialize(invalid[i], sizeof(*invalid), &msg) == -1);
+    uint8_t maximum[515] = {9,2,0}; memset(maximum + 3, 'x', 512);
+    assert(sc_device_msg_deserialize(maximum, sizeof(maximum), &msg) == 515);
+    sc_device_msg_destroy(&msg);
+}
+
+static void test_bounded_message_vectors(void) {
+    const uint8_t types[] = {DEVICE_MSG_TYPE_CLIPBOARD, DEVICE_MSG_TYPE_ACK_CLIPBOARD,
+        DEVICE_MSG_TYPE_UHID_OUTPUT, DEVICE_MSG_TYPE_REVERSE_TOUCH, DEVICE_MSG_TYPE_REVERSE_KEY,
+        DEVICE_MSG_TYPE_REVERSE_TEXT, DEVICE_MSG_TYPE_REVERSE_SCROLL,
+        DEVICE_MSG_TYPE_REVERSE_FRAME_ACK, DEVICE_MSG_TYPE_REVERSE_AUDIO_ACK,
+        DEVICE_MSG_TYPE_REVERSE_SYSTEM_ACTION};
+    uint32_t state = UINT32_C(0x5ad15);
+    // Exact-sized allocations make truncated reads visible under ASan. Every
+    // successful parse must consume only available bytes and remain destroyable.
+    // Fixed seed and work bound make any failure reproducible in ordinary CI.
+    for (unsigned i = 0; i < 8192; ++i) {
+        size_t length = i % 65;
+        uint8_t *input = length ? malloc(length) : NULL;
+        assert(!length || input);
+        for (size_t j = 0; j < length; ++j) {
+            state = state * UINT32_C(1664525) + UINT32_C(1013904223);
+            input[j] = (uint8_t) (state >> 24);
+        }
+        if (length) input[0] = types[i % (sizeof(types) / sizeof(*types))];
+        // Also exercise complete small variable messages, not just random huge
+        // length advertisements. Their payload remains adversarial UTF-8/data.
+        if (length >= 5 && i % 3 == 0) {
+            if (input[0] == DEVICE_MSG_TYPE_CLIPBOARD) {
+                input[1] = input[2] = input[3] = 0; input[4] = (uint8_t) (length - 5);
+            } else if (input[0] == DEVICE_MSG_TYPE_UHID_OUTPUT) {
+                input[3] = 0; input[4] = (uint8_t) (length - 5);
+            } else if (input[0] == DEVICE_MSG_TYPE_REVERSE_TEXT) {
+                input[1] = 0; input[2] = (uint8_t) (length - 3);
+            }
+        }
+        struct sc_device_msg msg = {0};
+        ssize_t consumed = sc_device_msg_deserialize(input, length, &msg);
+        assert(consumed >= -1 && (consumed <= 0 || (size_t) consumed <= length));
+        if (consumed > 0) sc_device_msg_destroy(&msg);
+        free(input);
+    }
+}
+
 int main(int argc, char *argv[]) {
     (void) argc;
     (void) argv;
@@ -184,5 +244,7 @@ int main(int argc, char *argv[]) {
     test_deserialize_reverse_frame_ack();
     test_deserialize_reverse_system_action();
     test_deserialize_reverse_scroll();
+    test_reverse_keyboard();
+    test_bounded_message_vectors();
     return 0;
 }

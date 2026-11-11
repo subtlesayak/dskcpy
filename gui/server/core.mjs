@@ -52,6 +52,13 @@ export function sanitizeStreamConfig(input = {}) {
     throw new Error('Invalid device identifier. Refresh devices and select the phone again.');
   }
   const wirelessSerial = serial.includes(':') || serial.includes('adb-tls-connect');
+  const windowId = input.windowId;
+  const windowOwnerPid = input.windowOwnerPid;
+  if (windowId !== undefined && (!Number.isInteger(windowId) || windowId < 1 || windowId > 0xffffffff || connection !== 'browser')) {
+    throw new Error('Choose a current window from the local browser window picker.');
+  }
+  if (windowOwnerPid !== undefined && (!windowId || !Number.isInteger(windowOwnerPid) || windowOwnerPid < 1 || windowOwnerPid > 0x7fffffff))
+    throw new Error('Refresh and select the window again.');
   if (serial && !['ip', 'internet'].includes(connection) && (connection === 'wifi') !== wirelessSerial) {
     throw new Error('The selected device does not match the connection method.');
   }
@@ -65,6 +72,8 @@ export function sanitizeStreamConfig(input = {}) {
 
   return {
     connection,
+    ...(windowId === undefined ? {} : { windowId }),
+    ...(windowOwnerPid === undefined ? {} : { windowOwnerPid }),
     address,
     ...(serial && !['ip', 'internet'].includes(connection) ? { serial } : {}),
     maxSize: numberInRange(input.maxSize, 1920, 640, 3840),
@@ -123,6 +132,9 @@ export function buildScrcpyArgs(config, bridgePort) {
   if (config.encoder !== 'auto') {
     args.push(`--video-encoder=${config.encoder}`);
   }
+  if (config.windowId) args.push(`--reverse-window=${config.windowId}`, '--no-audio');
+  else if (config.connection === 'browser' && config.browserKeyboard === true) args.push('--reverse-keyboard');
+  if (config.windowOwnerPid) args.push(`--reverse-window-owner=${config.windowOwnerPid}`);
   return args;
 }
 

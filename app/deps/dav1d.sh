@@ -64,5 +64,9 @@ else
     meson setup . "$SOURCES_DIR/$PROJECT_DIR" "${conf[@]}"
 fi
 
-ninja
+if [[ "${DSKCPY_MAC_HOST_BUILD:-0}" == 1 ]]; then
+    ninja -j"${DSKCPY_BUILD_JOBS:-2}"
+else
+    ninja
+fi
 ninja install

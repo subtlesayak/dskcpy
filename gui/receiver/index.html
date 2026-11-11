@@ -13,7 +13,7 @@
     <section id="join-panel" aria-labelledby="join-title">
       <p class="eyebrow">Your desktop, here</p>
       <h1 id="join-title">Connect to a desktop</h1>
-      <p>On the computer, open Connect → Browser receiver and select Create link and code. Paste that code below to start watching.</p>
+      <p>On the computer, open Connect → Browser receiver and select Create link and code. Scan its QR with your phone’s camera, or paste the code below to connect.</p>
       <form id="join-form">
         <label for="session-key">Connection code</label>
         <input id="session-key" name="session-key" type="password" autocomplete="off" autocapitalize="none" spellcheck="false" maxlength="32" required aria-describedby="key-help error">
@@ -26,9 +26,14 @@
     </section>
     <p id="error" role="alert"></p>
     <section id="stream-panel" hidden aria-label="Remote desktop">
-      <div id="stage"><canvas id="display" aria-label="Streamed desktop. Touch to control; desktop keyboard forwarding is not yet supported."></canvas></div>
+      <div id="stage"><video id="rtc-display" autoplay playsinline muted hidden aria-label="Streamed desktop video"></video><canvas id="display" aria-label="Streamed desktop. Touch to control when input is enabled."></canvas></div>
       <div id="control-dock">
       <p id="orientation-help" class="subtle" role="status" hidden></p>
+      <section id="keyboard-controls" hidden aria-label="Remote keyboard">
+        <label for="keyboard-input">Type on the computer</label>
+        <textarea id="keyboard-input" rows="1" maxlength="512" autocomplete="off" autocapitalize="off" spellcheck="false" aria-describedby="keyboard-help"></textarea>
+        <p id="keyboard-help" class="subtle">Keep this field focused to send text and keyboard shortcuts. Browser and system shortcuts may remain local.</p>
+      </section>
       <section id="volume-controls" class="quick-controls" aria-label="Computer volume" hidden>
         <p>Computer volume <span class="subtle">Hold to repeat</span></p>
         <button id="volume-down" type="button" title="Lower computer volume. Hold to repeat.">Volume −</button>
@@ -41,6 +46,7 @@
       </section>
       <div id="toolbar" aria-label="Stream controls">
         <button id="touch" type="button" aria-pressed="true">Touch on</button>
+        <button id="keyboard" type="button" aria-expanded="false" aria-controls="keyboard-controls" hidden>Keyboard</button>
         <button id="pause" type="button" aria-label="Pause video" aria-pressed="false">Pause</button>
         <button id="audio" type="button" aria-label="Audio off" aria-pressed="false">Audio off</button>
         <button id="volume" type="button" aria-expanded="false" aria-controls="volume-controls">Volume<span class="disclosure-caret" aria-hidden="true">⌃</span></button>

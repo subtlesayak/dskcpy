@@ -28,6 +28,8 @@ jobs:
       - run: npm ci --prefix gui
       - run: npm test --prefix gui
       - run: npm run build --prefix gui
+      - name: Artifact identity and upgrade preflight regressions
+        run: node --test tools/*.test.mjs
 
   native-windows:
     runs-on: windows-latest
@@ -41,16 +43,17 @@ jobs:
           node-version: '24'
       - uses: msys2/setup-msys2@v2
         with:
-          msystem: MINGW64
+          # MINGW64 is deprecated; libusb is now published for UCRT64.
+          msystem: UCRT64
           update: true
           install: >-
-            mingw-w64-x86_64-gcc
-            mingw-w64-x86_64-meson
-            mingw-w64-x86_64-ninja
-            mingw-w64-x86_64-pkgconf
-            mingw-w64-x86_64-ffmpeg
-            mingw-w64-x86_64-sdl3
-            mingw-w64-x86_64-libusb
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-meson
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-pkgconf
+            mingw-w64-ucrt-x86_64-ffmpeg
+            mingw-w64-ucrt-x86_64-sdl3
+            mingw-w64-ucrt-x86_64-libusb
       - name: Configure clean native test build
         run: meson setup .tmp/ci-native --buildtype=debug -Dcompile_server=false
       - name: Compile and run native tests
@@ -61,9 +64,10 @@ jobs:
         env:
           MSYS2_PATH_TYPE: inherit
           SCRCPY_LOG_PIPE_TEST_BINARY: .tmp/ci-native/app/log-pipe-fixture.exe
+          SCRCPY_WINDOWS_RUNTIME_TEST_BINARY: .tmp/ci-native/app/scrcpy.exe
         run: |
           npm ci --prefix gui --ignore-scripts
-          node --test gui/server/telemetry.test.mjs
+          node --test gui/server/telemetry.test.mjs gui/server/windows-runtime-native.test.mjs
 
   native-macos:
     runs-on: macos-15
@@ -73,7 +77,7 @@ jobs:
         with:
           node-version: '24'
       - name: Install native build dependencies
-        run: brew install ffmpeg sdl3 meson ninja pkgconf
+        run: brew install ffmpeg sdl3 meson ninja pkgconf cmake nasm
       - name: Compile the experimental Mac host and run native tests
         run: |
           meson setup build-macos --buildtype=debug -Dcompile_server=false -Dreverse_macos=true -Dusb=false
@@ -84,6 +88,33 @@ jobs:
           npm ci --prefix gui --ignore-scripts
           build-macos/app/scrcpy --help | grep -F 'ScreenCaptureKit/VideoToolbox'
           node --test gui/server/macos-build.test.mjs gui/server/telemetry.test.mjs
+      - name: Gate native regressions with address and undefined-behavior sanitizers
+        run: |
+          meson setup build-macos-sanitized --buildtype=debug -Dcompile_server=false -Dreverse_macos=true -Dusb=false -Db_sanitize=address,undefined
+          meson compile -C build-macos-sanitized -j 2
+          meson test -C build-macos-sanitized --print-errorlogs
+
+      # One Mac runner verifies both paths; source dependencies/builds remain
+      # isolated from the ordinary Homebrew-backed developer test build.
+      - name: Cache pinned dependency archives (always checksum before extraction)
+        uses: actions/cache@v4
+        with:
+          path: |
+            app/deps/work/sources/*.tar.gz
+            app/deps/work/sources/*.tar.xz
+            app/deps/work/sources/*.zip
+          key: macos-host13-sources-${{ hashFiles('app/deps/*.sh', 'app/deps/_init') }}
+      - name: Build and verify the separate unsigned Mac hosting candidate
+        run: bash release/build_macos_host.sh release/work/host-arm64
+      - name: Check packaged browser/dashboard runtime without starting capture
+        run: release/work/host-arm64/Start-dskcpy-host.command --check
+      - name: Preserve executable permissions in CI artifact
+        run: tar -C release/work -czf release/work/host-arm64.tar.gz host-arm64
+      - uses: actions/upload-artifact@v7
+        with:
+          name: unsigned-macos-host-arm64-candidate
+          path: release/work/host-arm64.tar.gz
+          retention-days: 7
 
   android-packaging:
     runs-on: ubuntu-latest
@@ -93,6 +124,9 @@ jobs:
         buildtype: [debug, release]
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
@@ -114,6 +148,7 @@ jobs:
           test -s .tmp/ci-android/server/reverse-display.apk
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify .tmp/ci-android/server/reverse-display.apk
           cmp server/build/outputs/apk/debug/server-debug.apk .tmp/ci-android/server/reverse-display.apk
+          node tools/check-android-upgrade.mjs --apk .tmp/ci-android/server/reverse-display.apk --sdk-tools "$ANDROID_HOME/build-tools/36.0.0" --require-current --output .tmp/ci-android/server/android-identity.json
       - name: Android unit tests
         if: matrix.buildtype == 'debug'
         run: ./gradlew :server:testDebugUnitTest

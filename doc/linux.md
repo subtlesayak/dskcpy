@@ -1,10 +1,18 @@
 # On Linux
 
+> [!NOTE]
+> This retained page describes upstream-style **Android-to-computer** use.
+> Linux desktop hosting is not implemented.
+> Upstream releases and package-manager installs do not include dskcpy hosting.
+> Versioned 4.1 download links below are historical pins, not current-release claims;
+> use [upstream releases](https://github.com/Genymobile/scrcpy/releases/latest)
+> if you want current upstream scrcpy.
+
 ## Install
 
-### From the official release
+### Historical upstream 4.1 release
 
-Download a static build of the [latest release]:
+The retained upstream 4.1 static builds are:
 
  - [`scrcpy-linux-x86_64-v4.1.tar.gz`][direct-linux-x86_64] (x86_64)  
    <sub>SHA-256: `ad56ae8bfeedf41e824945c11dbf55fcb092b3e615b9b486f48a50e30d389635`</sub>
@@ -31,7 +39,10 @@ Scrcpy is packaged in several distributions and package managers:
 
 ### From an install script
 
-To install the latest release from `master`, follow this simplified process.
+This section installs upstream scrcpy from the upstream repository for
+Android-to-computer use. It does not install dskcpy or its companion.
+The fork's retained `install_release.sh` pins an older upstream server; do not
+use it as a dskcpy host installer.
 
 First, you need to install the required packages:
 
@@ -44,7 +55,7 @@ sudo apt install ffmpeg libsdl3-0 libusb-1.0-0 adb wget \
 ```
 
 Then clone the repo and execute the installation script
-([source](/install_release.sh)):
+([upstream script](https://github.com/Genymobile/scrcpy/blob/master/install_release.sh)):
 
 ```bash
 git clone https://github.com/Genymobile/scrcpy
@@ -74,7 +85,7 @@ _See [build.md](build.md) to build and install the app manually._
 
 ## Run
 
-_Make sure that your device meets the [prerequisites](/README.md#prerequisites)._
+_Make sure that your device meets the [prerequisites](https://github.com/Genymobile/scrcpy#prerequisites)._
 
 Once installed, run from a terminal:
 
@@ -91,4 +102,4 @@ scrcpy --no-audio --record=file.mkv
 Documentation for command line arguments is available:
  - `man scrcpy`
  - `scrcpy --help`
- - on [github](/README.md)
+ - on [github](https://github.com/Genymobile/scrcpy)

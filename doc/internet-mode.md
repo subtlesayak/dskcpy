@@ -1,10 +1,15 @@
 # Internet mode (experimental, VPN-backed)
 
-Stream Windows to Android when the phone uses mobile data and the computer uses
-a different internet connection. This first version uses **Tailscale** for the
-encrypted network and its direct/relay routing. It is not a built-in WebRTC or
-AnyDesk relay service. No public ADB port, router port-forward, or hosted GUI is
-required. The desktop dashboard remains localhost-only.
+Stream a Windows or experimental Mac desktop to the **native Android app**
+when the devices use different networks. Tailscale supplies the encrypted
+private network and its direct/relay routing. Native Internet media uses this
+protocol; browser WebRTC receiving is a separate mode. No public ADB port,
+router forwarding or hosted controller is required. The dashboard stays local.
+
+For a receiving webpage, use [browser Internet/VPN setup](browser-receiver.md)
+instead: its invitation is generated on the computer and it connects in the
+opposite direction. Build/start the host with [Windows setup](windows-host.md)
+or [Mac setup](macos-host.md) before the native flow below.
 
 ## Setup
 
@@ -33,8 +38,8 @@ required. The desktop dashboard remains localhost-only.
    network**. Select the online Android peer, enter the key, then start streaming.
    Do not put session keys in chat, screenshots, issue reports, or public URLs.
 5. You can press Home or Back, use another app, and return to dskcpy. On Android
-   6+, the same session resumes without a new secret. Windows pauses video capture
-   while the phone is away and sends a fresh frame on return. A waiting secret
+   6+, the same session resumes without a new secret. The native host pauses
+   video capture while the phone is away and sends a fresh frame on return. A waiting secret
    also survives switching apps, but its original five-minute expiry still applies.
    Allow notifications for a persistent **dskcpy session** entry with **Stop session**.
    Stop in the phone toolbar, notification or desktop to disconnect.

@@ -9,7 +9,11 @@ import { createBrowserSession } from './browser-session.mjs';
 
 const assets = new Map([
   ['/', ['index.html', 'text/html; charset=utf-8']],
+  ['/join', ['index.html', 'text/html; charset=utf-8']],
   ['/receiver.mjs', ['receiver.mjs', 'text/javascript; charset=utf-8']],
+  ['/rtc.mjs', ['rtc.mjs', 'text/javascript; charset=utf-8']],
+  ['/video.mjs', ['video.mjs', 'text/javascript; charset=utf-8']],
+  ['/keyboard.mjs', ['keyboard.mjs', 'text/javascript; charset=utf-8']],
   ['/protocol.mjs', ['protocol.mjs', 'text/javascript; charset=utf-8']],
   ['/receiver.css', ['receiver.css', 'text/css; charset=utf-8']],
 ]);
@@ -27,7 +31,7 @@ export function receiverOrigin(value) {
 // A separate, loopback-only surface: never serves controller APIs or logs.
 // Remote access is opt-in via a user-managed Tailscale Serve HTTPS proxy.
 export function createBrowserReceiver({ configuredPort = 27180, origin,
-  tls, onConnect, onChange = () => {}, invitationMs = 300000, authMs = 5000,
+  tls, rtcBind = '127.0.0.1', onConnect, onChange = () => {}, invitationMs = 300000, authMs = 5000,
   resumeMs = 120000, lifetimeMs = 12 * 60 * 60 * 1000 } = {}) {
   const remoteOrigin = receiverOrigin(origin);
   let port;
@@ -37,8 +41,10 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
   let invitation = null;
   let session = null;
   let expiresAt = null;
+  let inputPolicy = { keyboard: false, viewOnly: false };
   let expiryTimer;
   let failures = 0;
+  let pendingCleanup = Promise.resolve();
   const sockets = new Set();
   const viewerUrl = () => `${['local', 'usb'].includes(mode) ? `http://127.0.0.1:${port}` : remoteOrigin}/`;
   const localOrigins = () => [`http://127.0.0.1:${port}`, `http://localhost:${port}`];
@@ -61,7 +67,7 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
   function status() {
     return { waiting: Boolean(invitation), connected: Boolean(session),
       url: port ? viewerUrl() : null, remote: !['local', 'usb'].includes(mode),
-      remoteAvailable: Boolean(remoteOrigin), mode, expiresAt };
+      remoteAvailable: Boolean(remoteOrigin), mode, expiresAt, mediaMode: session?.mediaMode ?? null };
   }
   function cancel() {
     clearTimeout(expiryTimer);
@@ -83,7 +89,9 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
     const asset = assets.get(req.url);
     if (!allowedHost(req.headers.host)) { res.writeHead(403).end(); return; }
     if (req.url === '/stream/session' && req.method === 'GET') {
-      res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ resumable: mayResume(req) }));
+      const resumable = mayResume(req);
+      res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ resumable,
+        mediaMode: resumable ? session.mediaMode : undefined }));
       return;
     }
     if (req.url === '/stream/session' && req.method === 'POST') {
@@ -102,7 +110,8 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
   server.requestTimeout = 10000;
   server.headersTimeout = 10000;
   server.maxConnections = 32;
-  const wss = new WebSocketServer({ noServer: true, maxPayload: 256, perMessageDeflate: false });
+  // SDP answers are bounded separately; native input remains fixed-size.
+  const wss = new WebSocketServer({ noServer: true, maxPayload: 32768, perMessageDeflate: false });
   wss.on('headers', (headers, req) => {
     if (!req.resumeToken) return;
     // Provisional until the one-use code is accepted. Never exposed to JS,
@@ -111,7 +120,10 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
   });
   const upgrade = (req, socket, head) => {
     const resume = mayResume(req);
-    if (req.url !== '/stream' || !allowedHost(req.headers.host) || !allowedOrigin(req.headers.origin)
+    const mediaMode = req.url === '/stream/webrtc' && mode !== 'usb' ? 'webrtc' : 'webcodecs';
+    if (!['/stream', '/stream/webrtc'].includes(req.url)
+        || (resume && mediaMode !== session.mediaMode)
+        || !allowedHost(req.headers.host) || !allowedOrigin(req.headers.origin)
         || (!resume && (!invitation || session || failures >= 10)) || sockets.size >= 4) {
       socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');
       return;
@@ -139,8 +151,10 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
         clearTimeout(expiryTimer); expiresAt = null;
         for (const other of sockets) if (other !== ws) other.terminate();
         const token = Buffer.from(req.resumeToken);
-        const active = createBrowserSession({ socket: ws, onConnect, resumeMs, lifetimeMs, onClose: () => {
+        const active = createBrowserSession({ socket: ws, onConnect, resumeMs, lifetimeMs,
+          mediaMode, rtcBind, ...inputPolicy, onChange, onClose: () => {
           token.fill(0);
+          pendingCleanup = Promise.all([pendingCleanup, active.cleanup]).then(() => {});
           if (session === active) session = null;
           onChange();
         } });
@@ -152,7 +166,7 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
   };
   server.on('upgrade', upgrade);
 
-  async function invite(connection = 'local') {
+  async function invite(connection = 'local', policy = {}) {
     if (invitation || session) throw new Error('A browser session is already open. Stop it first.');
     if (!['local', 'usb', 'wifi', 'ip', 'internet'].includes(connection)) throw new Error('Choose a browser connection method.');
     if (!['local', 'usb'].includes(connection) && !remoteOrigin) {
@@ -179,6 +193,7 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
       secureServer = secure;
     }
     mode = connection;
+    inputPolicy = { keyboard: policy.keyboard === true && policy.viewOnly !== true, viewOnly: policy.viewOnly === true };
     invitation = randomBytes(24);
     failures = 0;
     expiresAt = new Date(Date.now() + invitationMs).toISOString();
@@ -188,6 +203,7 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
   }
   async function shutdown() {
     cancel();
+    await pendingCleanup;
     wss.close();
     if (listening) await new Promise((resolve) => { server.close(resolve); server.closeAllConnections(); });
     if (secureServer) await new Promise((resolve) => { secureServer.close(resolve); secureServer.closeAllConnections(); });

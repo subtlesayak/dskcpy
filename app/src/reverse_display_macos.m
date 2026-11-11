@@ -12,6 +12,7 @@
 #include "reverse_audio.h"
 #include "reverse_audio_encoder.h"
 #include "reverse_macos_audio.h"
+#include "reverse_macos_keyboard.h"
 #include "receiver.h"
 #include "options.h"
 #include "util/binary.h"
@@ -30,14 +31,16 @@
 struct mac_contact { uint64_t id; CGPoint point; };
 struct mac_state {
     sc_socket video_socket, control_socket;
-    sc_mutex mutex, send_mutex;
-    bool mutex_ready, send_mutex_ready;
+    sc_mutex mutex, send_mutex, keyboard_mutex;
+    bool mutex_ready, send_mutex_ready, keyboard_mutex_ready;
     _Atomic bool stopped, failed, disconnected, quit, paused, force_key, audio_enabled, audio_available;
     _Atomic int64_t acked_pts, sent_pts, encoding_since, audio_acked_pts;
     struct sc_reverse_watchdog watchdog, audio_watchdog;
-    CMSampleBufferRef latest_audio; // One bounded callback buffer, protected by mutex.
-    int64_t audio_received_us;
-    uint64_t audio_epoch, audio_sequence; // Epoch changes even for rapid mute/unmute.
+    struct sc_reverse_macos_audio_queue audio_queue; // Bounded FIFO, protected by mutex.
+    uint64_t audio_epoch; // Epoch changes even for rapid mute/unmute.
+    uint64_t audio_queue_drops; // Protected by mutex; no device identity.
+    _Atomic bool audio_route_changed;
+    _Atomic bool keyboard_release_pending;
     CVPixelBufferRef latest; // Exactly one newest capture, protected by mutex.
     uint64_t generation;
     VTCompressionSessionRef encoder;
@@ -46,11 +49,42 @@ struct mac_state {
     unsigned fps;
     int64_t start_us, metrics_us;
     CGRect display_bounds;
+    CGDirectDisplayID display_id;
+    size_t display_pixels_wide, display_pixels_high;
     struct mac_contact contacts[2]; // Owned exclusively by the input thread.
     unsigned contact_count;
     bool mouse_down, scrolling;
     CGPoint mouse_point, scroll_point;
+    uint32_t window_id;
+    uint32_t window_owner;
+    bool keyboard_enabled, keys[256]; // Input-thread ownership.
 };
+
+static bool mac_window_bounds(uint32_t window_id, uint32_t owner, CGRect *bounds) {
+    NSArray *items = CFBridgingRelease(CGWindowListCopyWindowInfo(kCGWindowListOptionIncludingWindow, window_id));
+    for (NSDictionary *item in items) {
+        if ([item[(id)kCGWindowNumber] unsignedIntValue] != window_id) continue;
+        if (owner && [item[(id)kCGWindowOwnerPID] unsignedIntValue] != owner) return false;
+        if (![item[(id)kCGWindowIsOnscreen] boolValue]) return false;
+        NSDictionary *rect = item[(id)kCGWindowBounds];
+        return rect && CGRectMakeWithDictionaryRepresentation((__bridge CFDictionaryRef)rect, bounds)
+            && bounds->size.width >= 2 && bounds->size.height >= 2;
+    }
+    return false;
+}
+
+static bool mac_display_matches(struct mac_state *s) {
+    if (s->window_id) { CGRect bounds; return mac_window_bounds(s->window_id, s->window_owner, &bounds); }
+    return CGDisplayIsActive(s->display_id)
+        && CGRectEqualToRect(CGDisplayBounds(s->display_id), s->display_bounds)
+        && CGDisplayPixelsWide(s->display_id) == s->display_pixels_wide
+        && CGDisplayPixelsHigh(s->display_id) == s->display_pixels_high;
+}
+
+static bool mac_session_ended(struct mac_state *s) {
+    return atomic_load(&s->stopped) || atomic_load(&s->failed)
+        || atomic_load(&s->disconnected) || atomic_load(&s->quit);
+}
 
 @interface SCMacState : NSObject { @public struct mac_state state; }
 @end
@@ -61,6 +95,8 @@ struct mac_state {
         atomic_init(&state.disconnected, false); atomic_init(&state.quit, false);
         atomic_init(&state.paused, false); atomic_init(&state.force_key, true);
         atomic_init(&state.audio_enabled, false); atomic_init(&state.audio_available, false);
+        atomic_init(&state.audio_route_changed, false);
+        atomic_init(&state.keyboard_release_pending, false);
         atomic_init(&state.audio_acked_pts, -1); atomic_init(&state.acked_pts, -1);
         atomic_init(&state.sent_pts, -1); atomic_init(&state.encoding_since, 0);
         sc_reverse_watchdog_init(&state.watchdog);
@@ -68,22 +104,32 @@ struct mac_state {
         state.audio_watchdog.paused = true;
         state.mutex_ready = sc_mutex_init(&state.mutex);
         state.send_mutex_ready = sc_mutex_init(&state.send_mutex);
-        if (!state.mutex_ready || !state.send_mutex_ready) return nil;
+        state.keyboard_mutex_ready = sc_mutex_init(&state.keyboard_mutex);
+        if (!state.mutex_ready || !state.send_mutex_ready || !state.keyboard_mutex_ready) return nil;
     }
     return self;
 }
 - (void)dealloc {
     if (state.latest) CVPixelBufferRelease(state.latest);
-    if (state.latest_audio) CFRelease(state.latest_audio);
+    sc_reverse_macos_audio_queue_clear(&state.audio_queue);
     if (state.encoder) { VTCompressionSessionInvalidate(state.encoder); CFRelease(state.encoder); }
     if (state.mutex_ready) sc_mutex_destroy(&state.mutex);
     if (state.send_mutex_ready) sc_mutex_destroy(&state.send_mutex);
+    if (state.keyboard_mutex_ready) sc_mutex_destroy(&state.keyboard_mutex);
 }
 @end
 
 static bool mac_audio_active(struct mac_state *s) {
     return atomic_load(&s->audio_enabled) && !atomic_load(&s->paused)
         && !atomic_load(&s->stopped) && !atomic_load(&s->failed);
+}
+
+// Caller holds mutex. Pending old-route audio is deliberately abandoned, so
+// its missing ACKs must not terminate an otherwise healthy video stream.
+static void mac_audio_abandon_pending(struct mac_state *s) {
+    s->audio_watchdog.acked_pts = s->audio_watchdog.submitted_pts;
+    s->audio_watchdog.busy = false;
+    s->audio_watchdog.deadline = 0;
 }
 
 @interface SCMacOutput : NSObject <SCStreamOutput, SCStreamDelegate>
@@ -102,10 +148,7 @@ static bool mac_audio_active(struct mac_state *s) {
                 || CMSampleBufferGetNumSamples(sample) > SC_REVERSE_AUDIO_MAX_CHUNK) return;
         sc_mutex_lock(&s->mutex);
         if (mac_audio_active(s)) {
-            if (s->latest_audio) CFRelease(s->latest_audio);
-            s->latest_audio = (CMSampleBufferRef)CFRetain(sample);
-            s->audio_received_us = av_gettime_relative();
-            ++s->audio_sequence;
+            if (sc_reverse_macos_audio_queue_push(&s->audio_queue, sample, av_gettime_relative())) ++s->audio_queue_drops;
         }
         sc_mutex_unlock(&s->mutex);
         return;
@@ -128,8 +171,22 @@ static bool mac_audio_active(struct mac_state *s) {
     (void)stream;
     SCMacState *owner = self.owner;
     if (owner && !atomic_load(&owner->state.stopped)) {
-        LOGE("Mac capture stopped (ScreenCaptureKit code %ld). Check Screen Recording permission and reconnect.", (long)error.code);
-        atomic_store(&owner->state.failed, true);
+        if ([error.domain isEqualToString:SCStreamErrorDomain] && error.code == SCStreamErrorUserStopped) {
+            LOGI("Mac screen sharing stopped by the user");
+            atomic_store(&owner->state.quit, true);
+            return;
+        }
+        if (atomic_load(&owner->state.disconnected)) return;
+        // Refresh the immutable stream header and input geometry after a known
+        // display change. Permission loss/other capture errors stay fatal and
+        // must not silently restart a user-ended sharing session.
+        if (CGPreflightScreenCaptureAccess() && !mac_display_matches(&owner->state)) {
+            LOGI("Mac display changed; reconnect to refresh capture and input geometry");
+            atomic_store(&owner->state.disconnected, true);
+        } else {
+            LOGE("Mac capture stopped (ScreenCaptureKit code %ld). Check Screen Recording permission and reconnect.", (long)error.code);
+            atomic_store(&owner->state.failed, true);
+        }
     }
 }
 @end
@@ -150,6 +207,39 @@ static bool mac_wait(SCMacCompletion *completion, double seconds) {
         CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.01, false);
     }
     return completion.done && !completion.error;
+}
+
+enum scrcpy_exit_code sc_reverse_display_macos_list_windows(void) {
+    @autoreleasepool {
+        if (@available(macOS 13.0, *)) {
+            if (!CGPreflightScreenCaptureAccess()) {
+                LOGE("Allow Screen Recording for the launching app and restart it before refreshing windows");
+                return SCRCPY_EXIT_FAILURE;
+            }
+            SCMacCompletion *found = [SCMacCompletion new];
+            [SCShareableContent getShareableContentExcludingDesktopWindows:YES onScreenWindowsOnly:YES
+                completionHandler:^(SCShareableContent *content, NSError *error) {
+                    found.value = content; found.error = error; found.done = YES;
+                }];
+            if (!mac_wait(found, 10)) return SCRCPY_EXIT_FAILURE;
+            NSMutableArray *windows = [NSMutableArray new];
+            for (SCWindow *window in [(SCShareableContent *)found.value windows]) {
+                if (!window.isOnScreen || window.windowLayer != 0 || !window.owningApplication
+                        || window.frame.size.width < 2 || window.frame.size.height < 2) continue;
+                NSString *title = window.title ?: @"Untitled window";
+                NSString *app = window.owningApplication.applicationName ?: @"Application";
+                [windows addObject:@{@"id": @(window.windowID), @"ownerPid": @(window.owningApplication.processID),
+                    @"title": [title substringToIndex:MIN(title.length, 120)],
+                    @"application": [app substringToIndex:MIN(app.length, 80)]}];
+                if (windows.count >= 64) break;
+            }
+            NSData *json = [NSJSONSerialization dataWithJSONObject:windows options:0 error:NULL];
+            if (!json) return SCRCPY_EXIT_FAILURE;
+            printf("DSKCPY_WINDOWS %s\n", [[NSString alloc] initWithData:json encoding:NSUTF8StringEncoding].UTF8String);
+            return SCRCPY_EXIT_SUCCESS;
+        }
+        return SCRCPY_EXIT_FAILURE;
+    }
 }
 
 static bool mac_send(struct mac_state *s, const void *data, size_t size, int64_t pts, uint32_t flags) {
@@ -230,8 +320,13 @@ static bool mac_encoder(SCMacState *owner, const struct scrcpy_options *options)
         LOGE("The experimental Mac host supports auto or h264_videotoolbox, not the selected Windows/software encoder");
         return false;
     }
-    NSDictionary *spec = @{(__bridge NSString *)kVTVideoEncoderSpecification_RequireHardwareAcceleratedVideoEncoder: @YES,
-        (__bridge NSString *)kVTVideoEncoderSpecification_EnableLowLatencyRateControl: @YES};
+    char *compat_setting = sc_get_env("DSKCPY_MAC_BROWSER_COMPAT");
+    bool browser_compat = compat_setting && !strcmp(compat_setting, "1");
+    free(compat_setting);
+    NSMutableDictionary *spec = [@{(__bridge NSString *)kVTVideoEncoderSpecification_RequireHardwareAcceleratedVideoEncoder: @YES} mutableCopy];
+    // WebRTC's mandatory H.264 profile is constrained baseline. Apple's special
+    // low-latency mode requires High, so preserve it for native receivers only.
+    if (!browser_compat) spec[(__bridge NSString *)kVTVideoEncoderSpecification_EnableLowLatencyRateControl] = @YES;
     OSStatus result = VTCompressionSessionCreate(NULL, s->width, s->height, kCMVideoCodecType_H264,
         (__bridge CFDictionaryRef)spec, NULL, NULL, mac_encoded, (__bridge void *)owner, &s->encoder);
     if (result != noErr) { LOGE("Could not create the hardware VideoToolbox encoder (%d)", (int)result); return false; }
@@ -240,7 +335,9 @@ static bool mac_encoder(SCMacState *owner, const struct scrcpy_options *options)
         (__bridge NSString *)kVTCompressionPropertyKey_AllowFrameReordering: @NO,
         // Apple's low-latency rate control requires High profile and an
         // infinite GOP. Request recovery IDRs explicitly in the worker.
-        (__bridge NSString *)kVTCompressionPropertyKey_ProfileLevel: (__bridge NSString *)kVTProfileLevel_H264_High_AutoLevel,
+        (__bridge NSString *)kVTCompressionPropertyKey_ProfileLevel: browser_compat
+            ? (__bridge NSString *)kVTProfileLevel_H264_Baseline_AutoLevel
+            : (__bridge NSString *)kVTProfileLevel_H264_High_AutoLevel,
         (__bridge NSString *)kVTCompressionPropertyKey_ExpectedFrameRate: @(s->fps),
         (__bridge NSString *)kVTCompressionPropertyKey_AverageBitRate: @(options->video_bit_rate),
     };
@@ -318,6 +415,13 @@ static bool mac_audio_send(void *context, const uint8_t *data, size_t size, int6
 }
 
 
+static int64_t mac_audio_now(void *context) {
+    (void)context; return av_gettime_relative();
+}
+static void mac_audio_wait(void *context) {
+    (void)context; SDL_Delay(1);
+}
+
 static int mac_audio_thread(void *context) {
     @autoreleasepool {
         SCMacState *owner = (__bridge SCMacState *)context;
@@ -326,36 +430,80 @@ static int mac_audio_thread(void *context) {
         static const struct sc_reverse_audio_callbacks cbs = {.stopped = mac_audio_stopped,
             .enabled = mac_audio_enabled, .acked_pts = mac_audio_acked, .send = mac_audio_send};
         struct sc_reverse_audio_encoder *encoder = NULL;
-        uint64_t sequence = 0;
+        uint64_t sequence = 0, resampler_trim_frames = 0;
         bool unavailable = false;
+        unsigned retries = 0;
+        int64_t retry_at = 0, report_at = 0;
+        AudioStreamBasicDescription last_format = {0};
+        const struct sc_reverse_audio_wait audio_clock = {.now = mac_audio_now, .wait = mac_audio_wait};
+        struct sc_reverse_macos_audio_converter converter = {0};
         while (!mac_audio_stopped(&audio)) {
             sc_mutex_lock(&s->mutex);
-            uint64_t epoch = s->audio_epoch, current = s->audio_sequence;
+            uint64_t epoch = s->audio_epoch;
             bool active = mac_audio_active(s);
-            CMSampleBufferRef sample = s->latest_audio; s->latest_audio = NULL;
-            int64_t received = s->audio_received_us;
+            struct sc_reverse_macos_audio_entry entry = {0};
+            sc_reverse_macos_audio_queue_pop(&s->audio_queue, &entry);
+            CMSampleBufferRef sample = entry.sample;
+            uint64_t current = entry.sequence;
+            int64_t received = entry.received_us;
             sc_mutex_unlock(&s->mutex);
             if (audio.epoch != epoch || !active) {
                 sc_reverse_audio_encoder_destroy(encoder); encoder = NULL;
                 audio.epoch = epoch; sequence = current; unavailable = false;
+                retries = 0; retry_at = 0;
+                sc_reverse_macos_audio_converter_reset(&converter);
+            }
+            if (active && unavailable && sample && retries < 3 && av_gettime_relative() >= retry_at) {
+                unavailable = false; ++retries;
             }
             if (active && !unavailable && (!atomic_load(&s->audio_available) || sample)) {
                 if (!encoder && atomic_load(&s->audio_available)) {
                     encoder = sc_reverse_audio_encoder_create(&cbs, &audio);
                     if (encoder) LOGI("Desktop audio: ScreenCaptureKit -> Opus, 48 kHz stereo, 128 kbps, 10 ms (experimental)");
                 }
-                int16_t pcm[SC_REVERSE_AUDIO_MAX_CHUNK * 2]; size_t frames = 0;
-                bool ok = encoder && sample && sc_reverse_macos_audio_pcm(sample, pcm, &frames);
+                int16_t pcm[SC_REVERSE_MACOS_AUDIO_OUTPUT_FRAMES * 2]; size_t frames = 0;
+                if (sample && current != sequence + 1) sc_reverse_macos_audio_converter_reset(&converter);
+                uint64_t format_generation = converter.generation;
+                bool ok = encoder && sample && sc_reverse_macos_audio_convert(&converter, sample, pcm, &frames);
                 if (ok) {
-                    if (current != sequence + 1) sc_reverse_audio_encoder_discard_partial(encoder);
-                    ok = sc_reverse_audio_encoder_push(encoder, pcm, frames, received, av_gettime_relative());
+                    const AudioStreamBasicDescription *format = CMAudioFormatDescriptionGetStreamBasicDescription(CMSampleBufferGetFormatDescription(sample));
+                    if (last_format.mSampleRate != format->mSampleRate
+                            || last_format.mChannelsPerFrame != format->mChannelsPerFrame
+                            || last_format.mBitsPerChannel != format->mBitsPerChannel
+                            || last_format.mFormatFlags != format->mFormatFlags) {
+                        LOGI("Mac audio format changed: rate=%.0f channels=%u bits=%u planar=%u",
+                            format->mSampleRate, (unsigned)format->mChannelsPerFrame,
+                            (unsigned)format->mBitsPerChannel, (unsigned)((format->mFormatFlags & kAudioFormatFlagIsNonInterleaved) != 0));
+                        last_format = *format;
+                    }
+                    if (current != sequence + 1 || converter.generation != format_generation)
+                        sc_reverse_audio_encoder_discard_partial(encoder);
+                    size_t offset = frames > SC_REVERSE_AUDIO_MAX_CHUNK ? frames - SC_REVERSE_AUDIO_MAX_CHUNK : 0;
+                    resampler_trim_frames += offset;
+                    frames -= offset;
+                    ok = sc_reverse_audio_encoder_feed(encoder, pcm + offset * 2, frames, received, &audio_clock);
+                    if (av_gettime_relative() >= report_at) {
+                        struct sc_reverse_audio_stats stats;
+                        sc_reverse_audio_encoder_get_stats(encoder, &stats);
+                        sc_mutex_lock(&s->mutex);
+                        uint64_t dropped = s->audio_queue_drops;
+                        sc_mutex_unlock(&s->mutex);
+                        LOGI("Mac audio counters (current encoder): packets=%llu stale_frames=%llu window_frames=%llu catchup_frames=%llu capture_queue_drops=%llu resampler_trim_frames=%llu",
+                            (unsigned long long)stats.packets, (unsigned long long)stats.stale_frames,
+                            (unsigned long long)stats.window_frames, (unsigned long long)stats.catchup_frames,
+                            (unsigned long long)dropped, (unsigned long long)resampler_trim_frames);
+                        report_at = av_gettime_relative() + 2000000;
+                    }
                 }
                 if (!ok && !mac_audio_stopped(&audio)) {
                     const uint8_t notice = 0;
                     mac_audio_send(&audio, &notice, 1, 0, SC_REVERSE_AUDIO_UNAVAILABLE);
-                    LOGW("Mac desktop audio unavailable (capture format or libopus); video continues. Toggle phone audio to retry.");
+                    LOGW("Mac desktop audio unavailable; video continues. Retrying audio within a bounded budget.");
                     sc_reverse_audio_encoder_destroy(encoder); encoder = NULL;
+                    sc_reverse_macos_audio_converter_reset(&converter);
+                    sc_mutex_lock(&s->mutex); mac_audio_abandon_pending(s); sc_mutex_unlock(&s->mutex);
                     unavailable = true;
+                    retry_at = av_gettime_relative() + 1000000;
                 }
                 sequence = current;
             }
@@ -363,15 +511,16 @@ static int mac_audio_thread(void *context) {
             SDL_Delay(2);
         }
         sc_reverse_audio_encoder_destroy(encoder);
+        sc_reverse_macos_audio_converter_reset(&converter);
     }
     return 0;
 }
 
-// Called with mutex held by the control thread. Clear both buffered samples and
+// Called with mutex held. Clear both buffered samples and
 // partial encoder data (via epoch) even if pause/resume coalesce between polls.
 static void mac_audio_transition(struct mac_state *s) {
     ++s->audio_epoch;
-    if (s->latest_audio) { CFRelease(s->latest_audio); s->latest_audio = NULL; }
+    sc_reverse_macos_audio_queue_clear(&s->audio_queue);
     sc_reverse_watchdog_set_paused(&s->audio_watchdog, !mac_audio_active(s), av_gettime_relative());
 }
 
@@ -384,6 +533,49 @@ static void mac_cancel_input(struct mac_state *s) {
     if (s->mouse_down) mac_mouse(s, kCGEventLeftMouseUp, s->mouse_point);
     s->mouse_down = false; s->scrolling = false; s->contact_count = 0;
 }
+static void mac_cancel_keyboard(struct mac_state *s) {
+    sc_mutex_lock(&s->keyboard_mutex);
+    bool allowed = AXIsProcessTrusted(), pending = false;
+    for (unsigned usage = 0; usage < 256; ++usage) if (s->keys[usage]) {
+        if (!allowed) { pending = true; continue; }
+        CGEventRef event = sc_reverse_macos_key_event(usage, false, 0, false);
+        if (event) { CGEventPost(kCGHIDEventTap, event); CFRelease(event); }
+        s->keys[usage] = false;
+    }
+    atomic_store(&s->keyboard_release_pending, pending);
+    sc_mutex_unlock(&s->keyboard_mutex);
+}
+static void mac_keyboard(struct sc_receiver *receiver, const struct sc_device_msg *msg, void *context) {
+    (void)receiver;
+    SCMacState *owner = (__bridge SCMacState *)context;
+    struct mac_state *s = &owner->state;
+    if (msg->type == DEVICE_MSG_TYPE_REVERSE_KEY && msg->reverse_key.action == 2) { mac_cancel_keyboard(s); return; }
+    if (!s->keyboard_enabled || s->window_id || mac_session_ended(s) || atomic_load(&s->paused)
+            || !AXIsProcessTrusted() || !mac_display_matches(s)) { mac_cancel_keyboard(s); return; }
+    if (atomic_load(&s->keyboard_release_pending)) mac_cancel_keyboard(s);
+    if (msg->type == DEVICE_MSG_TYPE_REVERSE_KEY) {
+        uint16_t usage = msg->reverse_key.usage;
+        bool down = msg->reverse_key.action == 0;
+        sc_mutex_lock(&s->keyboard_mutex);
+        if (mac_session_ended(s) || (!down && !s->keys[usage])) { sc_mutex_unlock(&s->keyboard_mutex); return; }
+        CGEventRef event = sc_reverse_macos_key_event(usage, down, msg->reverse_key.modifiers, down && s->keys[usage]);
+        if (event) { CGEventPost(kCGHIDEventTap, event); CFRelease(event); s->keys[usage] = down; }
+        sc_mutex_unlock(&s->keyboard_mutex);
+    } else {
+        NSString *text = [[NSString alloc] initWithBytes:msg->reverse_text.text length:msg->reverse_text.length encoding:NSUTF8StringEncoding];
+        if (!text || text.length > SC_REVERSE_TEXT_MAX) return;
+        UniChar characters[SC_REVERSE_TEXT_MAX]; [text getCharacters:characters range:NSMakeRange(0, text.length)];
+        for (unsigned down = 1; ; --down) {
+            CGEventRef event = CGEventCreateKeyboardEvent(NULL, 0, down != 0);
+            if (event) {
+                CGEventKeyboardSetUnicodeString(event, text.length, characters);
+                CGEventSetFlags(event, 0);
+                CGEventPost(kCGHIDEventTap, event); CFRelease(event);
+            }
+            if (!down) break;
+        }
+    }
+}
 static CGPoint mac_centroid(struct mac_state *s) {
     return CGPointMake((s->contacts[0].point.x + s->contacts[1].point.x) / 2,
                        (s->contacts[0].point.y + s->contacts[1].point.y) / 2);
@@ -392,7 +584,9 @@ static void mac_touch(struct sc_receiver *receiver, const struct sc_device_msg *
     (void)receiver;
     SCMacState *owner = (__bridge SCMacState *)context;
     struct mac_state *s = &owner->state;
-    if (atomic_load(&s->stopped) || atomic_load(&s->paused) || !AXIsProcessTrusted()) { mac_cancel_input(s); return; }
+    if (s->window_id || mac_session_ended(s) || atomic_load(&s->paused)
+            || !AXIsProcessTrusted()) { mac_cancel_input(s); return; }
+    if (!mac_display_matches(s)) { mac_cancel_input(s); atomic_store(&s->disconnected, true); return; }
     unsigned action = msg->reverse_touch.action & AMOTION_EVENT_ACTION_MASK;
     if (action == AMOTION_EVENT_ACTION_CANCEL) { mac_cancel_input(s); return; }
     double x, y;
@@ -432,7 +626,9 @@ static void mac_scroll(struct sc_receiver *receiver, const struct sc_device_msg 
     (void)receiver;
     SCMacState *owner = (__bridge SCMacState *)context;
     struct mac_state *s = &owner->state;
-    if (atomic_load(&s->stopped) || atomic_load(&s->paused) || !AXIsProcessTrusted()) return;
+    if (s->window_id || mac_session_ended(s) || atomic_load(&s->paused)
+            || !AXIsProcessTrusted()) { mac_cancel_input(s); return; }
+    if (!mac_display_matches(s)) { mac_cancel_input(s); atomic_store(&s->disconnected, true); return; }
     double x, y;
     if (!sc_reverse_macos_point(&msg->reverse_scroll.position, s->display_bounds.origin.x, s->display_bounds.origin.y,
             s->display_bounds.size.width, s->display_bounds.size.height, &x, &y)) return;
@@ -495,25 +691,36 @@ static void mac_window_zoom(void) {
     if (result != kAXErrorSuccess) LOGW("The active Mac window does not expose a zoom/restore action");
     if (button) CFRelease(button); if (window) CFRelease(window); CFRelease(app);
 }
+static void mac_pause_transition(void *context, bool paused) {
+    struct mac_state *s = context;
+    mac_cancel_input(s); mac_cancel_keyboard(s);
+    atomic_store(&s->paused, paused);
+    sc_mutex_lock(&s->mutex);
+    sc_reverse_watchdog_set_paused(&s->watchdog, paused, av_gettime_relative());
+    mac_audio_transition(s);
+    sc_mutex_unlock(&s->mutex);
+    LOGI("Reverse display %s (Android %s)", paused ? "paused" : "resumed", paused ? "background" : "foreground");
+}
+static void mac_request_keyframe(void *context) {
+    struct mac_state *s = context;
+    atomic_store(&s->force_key, true);
+}
 static void mac_action(struct sc_receiver *receiver, const struct sc_device_msg *msg, void *context) {
     (void)receiver;
     SCMacState *owner = (__bridge SCMacState *)context;
     struct mac_state *s = &owner->state;
-    if (atomic_load(&s->stopped)) return;
+    if (mac_session_ended(s)) { mac_cancel_input(s); mac_cancel_keyboard(s); return; }
     enum sc_reverse_system_action action = msg->reverse_system_action.action;
-    if (action == SC_REVERSE_SYSTEM_ACTION_STOP_SESSION) { mac_cancel_input(s); atomic_store(&s->quit, true); return; }
+    if (action == SC_REVERSE_SYSTEM_ACTION_STOP_SESSION) { mac_cancel_input(s); mac_cancel_keyboard(s); atomic_store(&s->quit, true); return; }
     if (action == SC_REVERSE_SYSTEM_ACTION_PAUSE_VIDEO || action == SC_REVERSE_SYSTEM_ACTION_RESUME_VIDEO) {
         bool paused = action == SC_REVERSE_SYSTEM_ACTION_PAUSE_VIDEO;
-        mac_cancel_input(s);
-        atomic_store(&s->paused, paused);
-        sc_mutex_lock(&s->mutex);
-        sc_reverse_watchdog_set_paused(&s->watchdog, paused, av_gettime_relative());
-        mac_audio_transition(s);
-        sc_mutex_unlock(&s->mutex);
-        if (!paused) atomic_store(&s->force_key, true);
-        LOGI("Reverse display %s (Android %s)", paused ? "paused" : "resumed", paused ? "background" : "foreground");
+        static const struct sc_reverse_macos_pause_callbacks callbacks = {
+            .transition = mac_pause_transition, .keyframe = mac_request_keyframe,
+        };
+        sc_reverse_macos_pause(atomic_load(&s->paused), paused, &callbacks, s);
         return;
     }
+    if (s->window_id) return; // Window capture is view-only, including host audio/volume/window actions.
     if (action == SC_REVERSE_SYSTEM_ACTION_AUDIO_ENABLE || action == SC_REVERSE_SYSTEM_ACTION_AUDIO_DISABLE) {
         sc_mutex_lock(&s->mutex);
         bool enabled = action == SC_REVERSE_SYSTEM_ACTION_AUDIO_ENABLE;
@@ -523,7 +730,9 @@ static void mac_action(struct sc_receiver *receiver, const struct sc_device_msg 
     }
     if (atomic_load(&s->paused)) return;
     dispatch_async(dispatch_get_main_queue(), ^{
-        if (atomic_load(&owner->state.stopped) || atomic_load(&owner->state.paused)) return;
+        // This runs later on the main queue. A capture failure, explicit user
+        // stop or disconnect may have ended the session since admission.
+        if (mac_session_ended(&owner->state) || atomic_load(&owner->state.paused)) return;
         if (action <= SC_REVERSE_SYSTEM_ACTION_VOLUME_MUTE) { mac_volume(action); return; }
         if (!AXIsProcessTrusted()) { LOGW("Enable Accessibility permission for Mac desktop input"); return; }
         switch (action) {
@@ -563,6 +772,7 @@ static void mac_ended(struct sc_receiver *receiver, bool error, void *context) {
     (void)receiver;
     SCMacState *owner = (__bridge SCMacState *)context;
     mac_cancel_input(&owner->state);
+    mac_cancel_keyboard(&owner->state);
     if (!atomic_load(&owner->state.stopped)) atomic_store(error ? &owner->state.failed : &owner->state.disconnected, true);
 }
 static bool mac_gui_pipe(void) {
@@ -590,7 +800,7 @@ sc_reverse_display_macos_run(sc_socket video_socket, sc_socket control_socket, c
                 LOGE("Allow Screen Recording for the launching Terminal/dskcpy in System Settings > Privacy & Security, then restart it");
                 return SCRCPY_EXIT_FAILURE;
             }
-            if (!AXIsProcessTrustedWithOptions((__bridge CFDictionaryRef)@{(__bridge NSString *)kAXTrustedCheckOptionPrompt: @YES}))
+            if (!options->reverse_window && !AXIsProcessTrustedWithOptions((__bridge CFDictionaryRef)@{(__bridge NSString *)kAXTrustedCheckOptionPrompt: @YES}))
                 LOGW("View-only until Accessibility permission is granted to the launching Terminal/dskcpy");
             SCMacCompletion *discovery = [SCMacCompletion new];
             [SCShareableContent getShareableContentExcludingDesktopWindows:NO onScreenWindowsOnly:YES
@@ -605,12 +815,39 @@ sc_reverse_display_macos_run(sc_socket video_socket, sc_socket control_socket, c
             }];
             if (options->reverse_display_index >= displays.count) { LOGE("Mac monitor index is out of range (%lu displays)", (unsigned long)displays.count); return SCRCPY_EXIT_FAILURE; }
             SCDisplay *display = displays[options->reverse_display_index];
+            SCWindow *window = nil;
+            if (options->reverse_window) {
+                for (SCWindow *candidate in content.windows)
+                    if (candidate.windowID == options->reverse_window && candidate.isOnScreen
+                            && candidate.windowLayer == 0 && candidate.owningApplication) { window = candidate; break; }
+                CGRect bounds;
+                if (!window || !mac_window_bounds(options->reverse_window, options->reverse_window_owner, &bounds)
+                        || (options->reverse_window_owner && (uint32_t)window.owningApplication.processID != options->reverse_window_owner)) {
+                    LOGE("Selected window is unavailable. Refresh the window list and select again.");
+                    return SCRCPY_EXIT_FAILURE;
+                }
+                double largest = 0;
+                for (SCDisplay *candidate in displays) {
+                    CGRect overlap = CGRectIntersection(bounds, CGDisplayBounds(candidate.displayID));
+                    double area = CGRectIsNull(overlap) ? 0 : overlap.size.width * overlap.size.height;
+                    if (area > largest) { largest = area; display = candidate; }
+                }
+            }
             SCMacState *owner = [SCMacState new];
             if (!owner) return SCRCPY_EXIT_FAILURE;
             struct mac_state *s = &owner->state;
             s->video_socket = video_socket; s->control_socket = control_socket;
+            s->display_id = display.displayID;
             s->display_bounds = CGDisplayBounds(display.displayID);
-            if (!sc_reverse_macos_dimensions((uint32_t)CGDisplayPixelsWide(display.displayID), (uint32_t)CGDisplayPixelsHigh(display.displayID),
+            s->display_pixels_wide = CGDisplayPixelsWide(display.displayID);
+            s->display_pixels_high = CGDisplayPixelsHigh(display.displayID);
+            s->window_id = options->reverse_window;
+            s->window_owner = window ? (uint32_t)window.owningApplication.processID : 0;
+            s->keyboard_enabled = options->reverse_keyboard && !window;
+            double scale = s->display_pixels_wide / s->display_bounds.size.width;
+            uint32_t source_width = window ? (uint32_t)ceil(window.frame.size.width * scale) : (uint32_t)s->display_pixels_wide;
+            uint32_t source_height = window ? (uint32_t)ceil(window.frame.size.height * scale) : (uint32_t)s->display_pixels_high;
+            if (!sc_reverse_macos_dimensions(source_width, source_height,
                     options->max_size, &s->width, &s->height)) { LOGE("Invalid Mac capture dimensions"); return SCRCPY_EXIT_FAILURE; }
             double fps = options->max_fps ? strtod(options->max_fps, NULL) : 60;
             s->fps = (unsigned)lrint(isfinite(fps) && fps > 0 ? fmax(1, fmin(240, fps)) : 60);
@@ -627,7 +864,7 @@ sc_reverse_display_macos_run(sc_socket video_socket, sc_socket control_socket, c
             sc_write32be(header + 8, s->width); sc_write32be(header + 12, s->height);
             if (net_send_all(video_socket, header, sizeof(header)) != sizeof(header)) return SCRCPY_EXIT_FAILURE;
             s->start_us = av_gettime_relative();
-            static const struct sc_receiver_callbacks callbacks = {.on_ended = mac_ended, .on_reverse_touch = mac_touch, .on_reverse_scroll = mac_scroll,
+            static const struct sc_receiver_callbacks callbacks = {.on_ended = mac_ended, .on_reverse_touch = mac_touch, .on_reverse_scroll = mac_scroll, .on_reverse_keyboard = mac_keyboard,
                 .on_reverse_frame_ack = mac_ack, .on_reverse_system_action = mac_action, .on_reverse_audio_ack = mac_audio_ack};
             struct sc_receiver receiver;
             if (!sc_receiver_init(&receiver, control_socket, &callbacks, (__bridge void *)owner)) return SCRCPY_EXIT_FAILURE;
@@ -640,21 +877,25 @@ sc_reverse_display_macos_run(sc_socket video_socket, sc_socket control_socket, c
             configuration.pixelFormat = kCVPixelFormatType_32BGRA;
             configuration.minimumFrameInterval = CMTimeMake(1, s->fps);
             configuration.queueDepth = 3; configuration.showsCursor = YES;
-            configuration.capturesAudio = options->reverse_audio;
+            bool capture_audio = options->reverse_audio && !window;
+            configuration.capturesAudio = capture_audio;
+            configuration.scalesToFit = YES;
+            if (@available(macOS 14.0, *)) configuration.preservesAspectRatio = YES;
             configuration.sampleRate = 48000; configuration.channelCount = 2;
             configuration.excludesCurrentProcessAudio = YES;
             // No microphone output is requested. --no-audio disables capture too.
-            SCContentFilter *filter = [[SCContentFilter alloc] initWithDisplay:display excludingWindows:@[]];
+            SCContentFilter *filter = window ? [[SCContentFilter alloc] initWithDesktopIndependentWindow:window]
+                : [[SCContentFilter alloc] initWithDisplay:display excludingWindows:@[]];
             SCStream *stream = [[SCStream alloc] initWithFilter:filter configuration:configuration delegate:output];
             NSError *error = nil;
             bool output_added = input_started && [stream addStreamOutput:output type:SCStreamOutputTypeScreen sampleHandlerQueue:queue error:&error];
-            bool audio_added = output_added && options->reverse_audio
+            bool audio_added = output_added && capture_audio
                 && [stream addStreamOutput:output type:SCStreamOutputTypeAudio sampleHandlerQueue:audio_queue error:&error];
             if (!audio_added) configuration.capturesAudio = NO;
             SCMacCompletion *started = [SCMacCompletion new];
             // SCStream copies configuration at construction. Apply video-only
             // fallback if its audio output could not be registered.
-            if (output_added && options->reverse_audio && !audio_added) {
+            if (output_added && capture_audio && !audio_added) {
                 SCMacCompletion *updated = [SCMacCompletion new];
                 [stream updateConfiguration:configuration completionHandler:^(NSError *failure) { updated.error = failure; updated.done = YES; }];
                 output_added = mac_wait(updated, 5);
@@ -682,13 +923,74 @@ sc_reverse_display_macos_run(sc_socket video_socket, sc_socket control_socket, c
             bool worker_started = capture_started && sc_thread_create(&worker, mac_video_thread, "rev-mac-video", (__bridge void *)owner);
             sc_thread audio_worker;
             bool audio_started = worker_started && sc_thread_create(&audio_worker, mac_audio_thread, "rev-mac-audio", (__bridge void *)owner);
+            AudioObjectPropertyAddress route_property = {kAudioHardwarePropertyDefaultOutputDevice,
+                kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMain};
+            AudioObjectPropertyListenerBlock route_listener = ^(UInt32 count, const AudioObjectPropertyAddress *addresses) {
+                (void)count; (void)addresses;
+                if (!atomic_load(&owner->state.stopped)) atomic_store(&owner->state.audio_route_changed, true);
+            };
+            bool route_observed = capture_started && audio_added
+                && AudioObjectAddPropertyListenerBlock(kAudioObjectSystemObject, &route_property, audio_queue, route_listener) == noErr;
             if (worker_started && !audio_started) LOGW("Mac audio worker unavailable; video continues");
             enum scrcpy_exit_code result = SCRCPY_EXIT_FAILURE;
+            NSNotificationCenter *workspace_notifications = NSWorkspace.sharedWorkspace.notificationCenter;
+            id sleep_observer = nil;
             if (worker_started) {
-                LOGI("Mac desktop: %ux%u at %u fps; touch maps to mouse, two fingers scroll", s->width, s->height, s->fps);
+                sleep_observer = [workspace_notifications addObserverForName:NSWorkspaceWillSleepNotification object:nil queue:nil
+                    usingBlock:^(NSNotification *notification) {
+                        (void)notification;
+                        // Capture a strong owner, not a stack address: an in-flight
+                        // workspace callback remains safe during observer removal.
+                        if (!atomic_load(&owner->state.stopped)) {
+                            LOGI("Mac is sleeping; reconnect after wake");
+                            atomic_store(&owner->state.disconnected, true);
+                        }
+                    }];
+                LOGI("Mac %s: %ux%u at %u fps%s", window ? "window" : "desktop", s->width, s->height, s->fps,
+                    window ? "; view-only, audio off" : "; touch maps to mouse, two fingers scroll");
                 bool gui_pipe = mac_gui_pipe();
+                int64_t display_check_us = 0;
                 for (;;) {
                     if (mac_gui_quit(gui_pipe) || atomic_load(&s->quit)) { result = SCRCPY_EXIT_SUCCESS; break; }
+                    int64_t display_now = av_gettime_relative();
+                    if (display_now >= display_check_us) {
+                        display_check_us = display_now + 250000;
+                        if (s->keyboard_enabled && (!AXIsProcessTrusted() || atomic_load(&s->keyboard_release_pending))) mac_cancel_keyboard(s);
+                        if (!mac_display_matches(s)) {
+                            LOGI("Mac display changed; reconnect to refresh capture and input geometry");
+                            atomic_store(&s->disconnected, true);
+                        }
+                        if (s->window_id && !mac_session_ended(s)) {
+                            CGRect bounds; double x, y, width, height;
+                            if (mac_window_bounds(s->window_id, s->window_owner, &bounds)
+                                    && sc_reverse_macos_letterbox(bounds.size.width, bounds.size.height, s->width, s->height,
+                                        &x, &y, &width, &height)) {
+                                CGRect destination = CGRectMake(x, y, width, height);
+                                if (!CGRectEqualToRect(destination, configuration.destinationRect)) {
+                                    configuration.destinationRect = destination;
+                                    SCMacCompletion *resized = [SCMacCompletion new];
+                                    [stream updateConfiguration:configuration completionHandler:^(NSError *failure) {
+                                        resized.error = failure; resized.done = YES;
+                                    }];
+                                    if (!mac_wait(resized, 3)) atomic_store(&s->failed, true);
+                                }
+                            }
+                        }
+                        if (atomic_exchange(&s->audio_route_changed, false) && audio_added && !mac_session_ended(s)) {
+                            // The worker discards both resampler delay and Opus tail at the new epoch.
+                            // Neither mute nor video/permission state is changed by a route event.
+                            sc_mutex_lock(&s->mutex);
+                            mac_audio_transition(s);
+                            mac_audio_abandon_pending(s);
+                            sc_mutex_unlock(&s->mutex);
+                            SCMacCompletion *updated = [SCMacCompletion new];
+                            [stream updateConfiguration:configuration completionHandler:^(NSError *failure) {
+                                updated.error = failure; updated.done = YES;
+                            }];
+                            if (!mac_wait(updated, 3)) LOGW("Audio output changed; capture configuration refresh failed. Video remains available.");
+                            else LOGI("Audio output changed; discarded stale audio and refreshed capture configuration");
+                        }
+                    }
                     if (atomic_load(&s->failed)) break;
                     if (atomic_load(&s->disconnected)) { result = SCRCPY_EXIT_DISCONNECTED; break; }
                     int64_t now = av_gettime_relative(), encoding = atomic_load(&s->encoding_since);
@@ -705,6 +1007,8 @@ sc_reverse_display_macos_run(sc_socket video_socket, sc_socket control_socket, c
                     CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.01, false);
                 }
             } else LOGE("Could not start Mac capture; check Screen Recording permission and the hardware encoder");
+            if (sleep_observer) [workspace_notifications removeObserver:sleep_observer];
+            if (route_observed) AudioObjectRemovePropertyListenerBlock(kAudioObjectSystemObject, &route_property, audio_queue, route_listener);
             atomic_store(&s->stopped, true);
             net_interrupt(video_socket); net_interrupt(control_socket);
             if (input_started) sc_receiver_join(&receiver);

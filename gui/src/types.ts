@@ -23,6 +23,7 @@ export interface Device {
 }
 
 export interface StreamConfig {
+  windowId?: number;
   autoReconnect?: boolean;
   connection: ConnectionMode;
   serial?: string;
@@ -52,6 +53,7 @@ export interface BridgeStatus {
   reconnectLimit: number;
   nextRetryAt: string | null;
   readiness: {
+    features?: { browserKeyboard: boolean; macWindowCapture: boolean };
     checks: { id: string; label: string; ready: boolean; message: string }[];
     transports: Record<ConnectionMode, { ready: boolean; message: string; required: string[] }>;
     checkedAt: string;

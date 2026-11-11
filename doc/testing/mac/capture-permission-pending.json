@@ -1,0 +1,10 @@
+{
+  "permission": "Screen & System Audio Recording",
+  "terminalSwitch": "OFF verified",
+  "systemNotice": "Existing Terminal can keep recording until quit",
+  "selectedDialogAction": "Later",
+  "effectiveDenialTested": false,
+  "nextUserAction": "Save Terminal work, quit Terminal fully, reopen original launcher; do not grant capture yet",
+  "controlPermission": "ON restored",
+  "streamRestartedByAgent": false
+}

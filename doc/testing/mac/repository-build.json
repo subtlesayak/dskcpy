@@ -1,0 +1,29 @@
+{
+  "baseCommit": "b74226c2",
+  "nativeSha256": "efc2369b8ab15d685db523ee3a504fe0dc940b6ce9c02b0caf214432427a69bb",
+  "sourceSha256": {
+    "app/src/reverse_audio_encoder.c": "115858e57ef37bde81ce8870f9f55337eeae3a43c69018d03962f09b48ca93fe",
+    "app/src/reverse_audio_encoder.h": "e9d898dad9cabb68b2823fe322756181e97f27257da296febbb914df544f262b",
+    "app/src/reverse_display_macos.m": "3268b2b4e26963e5c7bb1c1ecab097d14241d07410a2d4d62f00d0c58be18b6d",
+    "app/src/reverse_macos_audio.h": "191c6682472b9a26184ca12c198e796b2678f581a109af9578380d4268145aba",
+    "app/src/reverse_macos_audio.m": "27e39f8c92d0c77f7c908e6001fd9a9804801e44b77036e22ffcd9fca7084d07",
+    "app/tests/test_reverse_audio_encoder.c": "e6bebf0efc37ae8c8a9036488d47c1b2d690379e49313baaab79b9fb81904bc3",
+    "app/tests/test_reverse_macos_audio.m": "f0b0b9d1e54c9fe838906bc49e2eb3df5f2de59afac7afa8c9ec44bcc14fd91b"
+  },
+  "validation": {
+    "nativeBuild": "pass",
+    "nativeTests": {
+      "passed": 16,
+      "failed": 0
+    },
+    "backendTests": {
+      "passed": 106,
+      "skipped": 6,
+      "failed": 0
+    },
+    "guiProductionBuild": "pass",
+    "physicalRequalification": "not performed"
+  },
+  "runtimeActivated": false,
+  "portableBinary": "Not established; local Homebrew libraries target macOS 27"
+}

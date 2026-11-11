@@ -1,0 +1,35 @@
+{
+  "checked_at": "2026-11-11T08:57:13.635193+00:00",
+  "changes": {
+    "node_modules/source-map-js": {
+      "before": "1.2.1",
+      "after": "1.2.2",
+      "development_only": true
+    },
+    "node_modules/vite": {
+      "before": "8.2.2",
+      "after": "8.2.4",
+      "development_only": true
+    }
+  },
+  "runtime_dependencies_unchanged": true,
+  "audit_counts": {
+    "info": 0,
+    "low": 0,
+    "moderate": 0,
+    "high": 0,
+    "critical": 0,
+    "total": 0
+  },
+  "production_build": "TypeScript and Vite 8.2.4 passed; emitted asset names and sizes unchanged",
+  "source_sha256": {
+    "gui/package.json": "213dd2ebf148e86f14daef8ad73ddbbeeebb0a08b3010cfeb5ed3010a4cd8f64",
+    "gui/package-lock.json": "fa9f497209ea77cdd3a1c30cd32edb7eb26b335de2a497c9cdf927a4d9b17266"
+  },
+  "references": [
+    "https://github.com/vitejs/vite/security/advisories/GHSA-rq7h-c2jc-7f22",
+    "https://github.com/vitejs/vite/releases/tag/v8.2.4",
+    "https://github.com/7rulnik/source-map-js/releases/tag/v1.2.2"
+  ],
+  "limit": "npm audit reports known advisories at check time; not a complete security assessment. Physical receiver qualification is separate."
+}

@@ -1,0 +1,22 @@
+{
+  "checked_at": "2026-11-11T09:57:49Z",
+  "source_base": "5f990fac22ba87636f6f26549b457af842ed37d2",
+  "scope": "Original browser Opus RTP sample-clock repair; no native PTS, ACK, media framing or UI changes",
+  "source_sha256": {
+    "gui/server/browser-rtc.mjs": "cd50c1d2fe0ab6e98bfc7de4da1f4bbc9074c236c0e2b949dc46e60c2f6c6e3b",
+    "gui/server/browser-rtc.test.mjs": "a6be423c1efc7fee3dd697316e289a4ddff3dfe29a0333dab9975e42b234d6f3"
+  },
+  "verification": {
+    "prior_source": "Both new timing regressions fail: burst packets reuse RTP timestamps and a concurrent drop loses sampling time",
+    "fixed_source": "Seven WebRTC tests pass, including real loopback ICE/DTLS/SRTP; burst cadence, wraparound, real gaps and in-flight packet drop checks pass",
+    "full_backend": {
+      "tests": 150,
+      "passed": 143,
+      "skipped": 7,
+      "failed": 0,
+      "optional_skips": "No native fixture in isolated worktree plus six optional platform checks"
+    }
+  },
+  "contract": "Both native hosts encode 480-sample / 10 ms Opus packets at 48 kHz. RTP advances at least 480 samples per incoming packet; larger enqueue-time gaps remain gaps. Dropped concurrent packets consume sampling time, not sequence numbers. No queue is added.",
+  "hardware_status": "Separate phone baseline has working video/touch and audible stutter. This correction has not been activated or physically tested; it does not establish the cause or resolution of that stutter."
+}

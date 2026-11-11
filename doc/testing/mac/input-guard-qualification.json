@@ -1,0 +1,24 @@
+{
+  "change": "Discard touch/scroll and queued window/volume actions after quit, disconnect or capture failure",
+  "paths": [
+    "app/src/reverse_display_macos.m"
+  ],
+  "base_source_sha256": "5689bb8f1fb61c1fbec2b4ed1ba586f32f251c89433cd32d78fc92590b998e4e",
+  "candidate_source_sha256": "d9b4e6756af6f9bc89efd404ed1ecba89a6e38cd69bd786b6d3414b77874ebb5",
+  "patch_sha256": "2e866899a01e34547fa3f7e6ddad6f7c1c4010855c6eb7ada262beaf0a9dff97",
+  "native_sha256": "6645f72dcabee3483f1db035ed43bd4aa019660a739154aef546ab89193e811f",
+  "native_tests_passed": 23,
+  "patch_roundtrip": "exact",
+  "activated": true,
+  "physical_input_after_stop": "Still unverified",
+  "active_physically_tested_native_sha256": "7981322af07b51a2899b10f783ed3c347384d9df687313fccd318dd910e35697",
+  "apply_order": [
+    "macos-audio-buffering.patch",
+    "macos-display-recovery.patch",
+    "macos-input-session-guard.patch"
+  ],
+  "activation_transport": "USB",
+  "companion": "unchanged-v1; installed APK byte hash verified",
+  "physical_normal_input": "User tapped 1,2,3 from phone; physical Calculator shows 123; independently read through native UI",
+  "permission_recovery": "USB physical control permission OFF blocks touch while video continues; ON restores clean phone single-tap without stream restart. Post-stop queued actions remain unverified."
+}

@@ -1,4 +1,4 @@
-# dskcpy GUI
+# Local dashboard
 
 dskcpy is a local control surface for the reverse-display fork. The
 React UI currently runs as a localhost web app:
@@ -9,6 +9,14 @@ React UI currently runs as a localhost web app:
 The control service binds to `127.0.0.1` only. It validates a small typed
 configuration and launches scrcpy with an argument array (never through a
 shell), so the browser cannot execute arbitrary commands.
+
+## Before you start
+
+Build/configure the native host and dashboard using [Windows setup](../doc/windows-host.md)
+or [Mac setup](../doc/macos-host.md). Run the dashboard **on the host computer**.
+To watch from a phone's browser, use the separate
+[browser receiver](../doc/browser-receiver.md), not the dashboard address.
+Native Android app receiving and browser receiving have different setup requirements.
 
 ## Wireless discovery and recovery
 
@@ -36,9 +44,11 @@ an API client. These settings belong to the GUI service, not CLI flags.
 
 ## Run locally
 
-```bash
-npm ci
-npm run dev
+For development, from the checkout root with native/runtime settings configured:
+
+```sh
+npm ci --prefix gui
+npm run dev --prefix gui
 ```
 
 Open <http://127.0.0.1:5173>. The Vite server proxies `/api` to the local
@@ -46,17 +56,20 @@ control service on port `27183`.
 
 For a production-style localhost build:
 
-```bash
-npm run build
-npm start
+```sh
+npm run build --prefix gui
+npm start --prefix gui
 ```
 
 Then open <http://127.0.0.1:27183>.
 
 ### Windows double-click launcher
 
-After building the native host and dashboard, double-click `start-dskcpy.cmd`
-in the checkout root. It opens the local dashboard in your default browser.
+After building the native host and dashboard, run `.\start-dskcpy.cmd` or
+double-click it in Explorer. The standard MSYS2 UCRT64 installation is detected;
+custom installations may need the runtime override described in
+[Windows setup](../doc/windows-host.md). The launcher opens the
+local dashboard in your default browser.
 Keep its terminal open; Ctrl+C stops the service and its owned stream.
 Use your normal logged-in desktop session, not a restricted automation session
 or a Windows service. The launcher does not request administrator privileges.
@@ -96,8 +109,13 @@ automatically. This is a source-checkout launcher, not an installer or signed
 portable release.
 
 The service uses `SCRCPY_GUI_BINARY`, `SCRCPY_RUNTIME_DIR`, and `ADB` when set.
-Otherwise it looks for the local `x-reverse` build, a standard MSYS2 MinGW
-runtime on Windows, and `adb` via `ANDROID_HOME`, then `ANDROID_SDK_ROOT` when
+Otherwise it looks for the local `x-reverse` build. Windows runtime lookup uses
+`SCRCPY_RUNTIME_DIR`, then `MINGW_PREFIX/bin`, then PE-import-based UCRT64/MINGW64
+discovery in known PATH roots and `C:\msys64`. Unknown images prefer an available
+UCRT64 installation, then legacy MINGW64. Conflicting MSYS2 bin entries are
+removed from the child environment, and the actual `--help` load is checked.
+Set an explicit runtime for custom/unrecognized images; do not mix DLL families.
+ADB lookup uses `ANDROID_HOME`, then `ANDROID_SDK_ROOT` when
 `ANDROID_HOME` is unset, or `PATH` when neither SDK variable is set. An explicit
 `ADB` path takes priority. A broken explicit path or SDK is reported, never
 silently replaced with a different installation.
@@ -164,14 +182,17 @@ pressed/focused/ripple states. Close-window and lock actions retain confirmation
 
 Windows reverse display, USB/Wi-Fi/direct-IP selection, device discovery,
 stream start/stop, generated commands, logs, selected encoder, and live
-capture-to-decode acknowledgement are wired to the local service.
+decode-acknowledgement measurements are wired to the local service.
 
 The opt-in experimental macOS host now provides ScreenCaptureKit/VideoToolbox
 video, mouse/scroll controls and experimental ScreenCaptureKit-to-Opus desktop
 audio. Use the [Mac setup guide](../doc/macos-host.md) and its launcher to configure
-the correct native build. Wireless Mac video is user-reported working; audio
-playback, the latest telemetry update and the remaining hardware checklist need
-manual Mac testing. The audio row describes capability, not proof of live playback.
+the correct native build. Dated video/input/recovery observations are in the
+[Mac testing record](../doc/testing/mac/README.md). Current-source telemetry tests
+are automated; sustained audible playback, output-route changes and the final
+hardware matrix still need physical qualification. A capability row is not proof
+of live playback. Mac window/keyboard setup is in the
+[browser guide](../doc/browser-receiver.md#mac-window-sharing-and-desktop-keyboard).
 
 An experimental browser **receiver** is now available under Connect → Browser
 receiver. It uses a separate authenticated media endpoint, not the controller

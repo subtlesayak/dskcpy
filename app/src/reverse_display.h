@@ -19,6 +19,7 @@ sc_reverse_display_run(sc_socket video_socket, sc_socket control_socket,
                         const struct scrcpy_options *options);
 
 #ifdef HAVE_REVERSE_MACOS
+enum scrcpy_exit_code sc_reverse_display_macos_list_windows(void);
 enum scrcpy_exit_code
 sc_reverse_display_macos_run(sc_socket video_socket, sc_socket control_socket,
                              const struct scrcpy_options *options);

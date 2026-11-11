@@ -33,8 +33,10 @@ button:focus-visible, input:focus-visible, a:focus-visible { outline: 3px solid 
 .is-streaming #status { font-size: .875rem; text-align: end; }
 .is-streaming #error { grid-row: 2; margin: 0; font-size: .875rem; max-height: 20dvh; overflow-y: auto; }
 #stream-panel { grid-row: 3; position: relative; display: grid; grid-template-rows: minmax(0, 1fr) auto; min-height: 0; min-width: 0; }
-#stage { min-height: 0; min-width: 0; background: #000; display: flex; justify-content: center; align-items: center; overflow: hidden; border-radius: 8px; }
-canvas { display: block; max-width: 100%; max-height: 100%; touch-action: none; }
+#stage { min-height: 0; min-width: 0; background: #000; display: grid; place-items: center; overflow: hidden; border-radius: 8px; }
+canvas { display: block; grid-area: 1 / 1; z-index: 1; max-width: 100%; max-height: 100%; touch-action: none; }
+#rtc-display { grid-area: 1 / 1; object-fit: contain; max-width: 100%; max-height: 100%; pointer-events: none; }
+.rtc-stream #display { opacity: 0; }
 #control-dock { position: relative; min-width: 0; }
 #toolbar { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 6px; padding-block-start: 8px; }
 #toolbar button { min-width: 0; min-height: 44px; padding: 6px 8px; font-size: .875rem; line-height: 1.25; overflow-wrap: anywhere; }
@@ -57,3 +59,5 @@ canvas { display: block; max-width: 100%; max-height: 100%; touch-action: none; 
 #stream-panel:fullscreen { --receiver-inset-right: max(4px, env(safe-area-inset-right)); --receiver-inset-bottom: max(4px, env(safe-area-inset-bottom)); width: 100%; height: 100%; background: #080f13; padding: max(4px, env(safe-area-inset-top)) var(--receiver-inset-right) var(--receiver-inset-bottom) max(4px, env(safe-area-inset-left)); }
 @media (max-width: 48rem) { #toolbar { grid-template-columns: repeat(4, minmax(0, 1fr)); } #join-panel { margin-block: 20px; } }
 @media (max-width: 28rem) { .quick-controls { grid-template-columns: repeat(2, minmax(0, 1fr)); } .quick-controls p { grid-column: 1 / -1; } .quick-controls p span { display: inline; margin-inline-start: 8px; } }
+#keyboard-controls { padding: .5rem; }
+#keyboard-input { display: block; width: 100%; min-height: 44px; max-height: 100px; font: inherit; resize: vertical; }

@@ -14,6 +14,7 @@ src = [
     'src/decoder.c',
     'src/demuxer.c',
     'src/device_msg.c',
+    'src/reverse_keyboard.c',
     'src/disconnect.c',
     'src/events.c',
     'src/icon.c',
@@ -83,7 +84,7 @@ reverse_macos = get_option('reverse_macos') and host_machine.system() == 'darwin
 conf.set('HAVE_REVERSE_MACOS', reverse_macos)
 if reverse_macos
     add_languages('objc', native: false)
-    src += ['src/reverse_display_macos.m', 'src/reverse_macos_audio.m']
+    src += ['src/reverse_display_macos.m', 'src/reverse_macos_audio.m', 'src/reverse_macos_keyboard.m']
     add_project_arguments('-fobjc-arc', '-fblocks', '-std=gnu11', '-mmacosx-version-min=13.0', language: 'objc')
     add_project_arguments('-mmacosx-version-min=13.0', language: 'c')
     add_project_link_arguments('-mmacosx-version-min=13.0', language: ['c', 'objc'])
@@ -248,6 +249,10 @@ endif
 if get_option('buildtype') == 'debug'
     # Driven by the Node pipe-telemetry regression; not a capture executable.
     if reverse_macos
+        mac_keyboard_test = executable('test_reverse_macos_keyboard',
+            ['tests/test_reverse_macos_keyboard.m', 'src/reverse_macos_keyboard.m'],
+            include_directories: src_dir, dependencies: dependencies)
+        test('test_reverse_macos_keyboard', mac_keyboard_test)
         mac_audio_test = executable('test_reverse_macos_audio',
             ['tests/test_reverse_macos_audio.m', 'src/reverse_macos_audio.m', 'src/reverse_audio_encoder.c'],
             include_directories: src_dir, dependencies: dependencies)
@@ -256,6 +261,9 @@ if get_option('buildtype') == 'debug'
     executable('log-pipe-fixture', ['tests/log_pipe_fixture.c', 'src/util/log.c', 'src/compat.c'],
                include_directories: src_dir, dependencies: dependencies)
     tests = [
+        ['test_demuxer_packet', ['tests/test_demuxer_packet.c', 'src/packet_merger.c', 'src/trait/packet_source.c']],
+        ['test_timeout', ['tests/test_timeout.c', 'src/util/timeout.c']],
+        ['test_timeout_thread', ['tests/test_timeout_thread.c', 'src/util/timeout.c', 'src/util/thread.c', 'src/util/tick.c']],
         ['test_reverse_audio_encoder', ['tests/test_reverse_audio_encoder.c', 'src/reverse_audio_encoder.c']],
         ['test_reverse_watchdog', ['tests/test_reverse_watchdog.c']],
         ['test_reverse_macos_helpers', ['tests/test_reverse_macos_helpers.c', 'src/reverse_macos_helpers.c']],
@@ -299,6 +307,7 @@ if get_option('buildtype') == 'debug'
         ['test_device_msg_deserialize', [
             'tests/test_device_msg_deserialize.c',
             'src/device_msg.c',
+            'src/reverse_keyboard.c',
         ]],
         ['test_orientation', [
             'tests/test_orientation.c',

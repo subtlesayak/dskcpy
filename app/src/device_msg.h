@@ -9,6 +9,7 @@
 
 #include "android/input.h"
 #include "coords.h"
+#include "reverse_keyboard.h"
 
 #define DEVICE_MSG_MAX_SIZE (1 << 18) // 256k
 // type: 1 byte; length: 4 bytes
@@ -23,6 +24,8 @@ enum sc_device_msg_type {
     DEVICE_MSG_TYPE_REVERSE_SYSTEM_ACTION,
     DEVICE_MSG_TYPE_REVERSE_AUDIO_ACK,
     DEVICE_MSG_TYPE_REVERSE_SCROLL,
+    DEVICE_MSG_TYPE_REVERSE_KEY,
+    DEVICE_MSG_TYPE_REVERSE_TEXT,
 };
 
 enum sc_reverse_system_action {
@@ -43,6 +46,8 @@ enum sc_reverse_system_action {
 struct sc_device_msg {
     enum sc_device_msg_type type;
     union {
+        struct { uint8_t action, modifiers; uint16_t usage; } reverse_key;
+        struct { uint16_t length; char text[SC_REVERSE_TEXT_MAX + 1]; } reverse_text;
         struct {
             char *text; // owned, to be freed by free()
         } clipboard;

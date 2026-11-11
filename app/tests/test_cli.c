@@ -244,6 +244,25 @@ static void test_reverse_socket(void) {
     assert(!scrcpy_parse_args(&invalid, ARRAY_LEN(missing_mode), missing_mode));
 }
 
+static void test_mac_capture_options(void) {
+    struct scrcpy_cli_args args = {.opts = scrcpy_options_default};
+    char *window[] = {"scrcpy", "--reverse-display", "--reverse-window=17"};
+#ifdef HAVE_REVERSE_MACOS
+    assert(scrcpy_parse_args(&args, ARRAY_LEN(window), window)); assert(args.opts.reverse_window == 17);
+    args.opts = scrcpy_options_default;
+    char *keyboard[] = {"scrcpy", "--reverse-display", "--reverse-socket=1234", "--reverse-keyboard"};
+    assert(scrcpy_parse_args(&args, ARRAY_LEN(keyboard), keyboard)); assert(args.opts.reverse_keyboard);
+#else
+    assert(!scrcpy_parse_args(&args, ARRAY_LEN(window), window));
+#endif
+    args.opts = scrcpy_options_default;
+    char *conflict[] = {"scrcpy", "--reverse-display", "--reverse-socket=1234", "--reverse-window=17", "--reverse-keyboard"};
+    assert(!scrcpy_parse_args(&args, ARRAY_LEN(conflict), conflict));
+    args.opts = scrcpy_options_default;
+    char *zero[] = {"scrcpy", "--reverse-display", "--reverse-window=0"};
+    assert(!scrcpy_parse_args(&args, ARRAY_LEN(zero), zero));
+}
+
 int main(int argc, char *argv[]) {
     (void) argc;
     (void) argv;
@@ -260,5 +279,6 @@ int main(int argc, char *argv[]) {
     test_connection_conflict();
     test_reverse_socket();
     test_reverse_audio_option();
+    test_mac_capture_options();
     return 0;
 }

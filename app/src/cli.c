@@ -51,6 +51,10 @@ enum {
     OPT_TUNNEL_PORT,
     OPT_REVERSE_DISPLAY,
     OPT_REVERSE_DISPLAY_INDEX,
+    OPT_REVERSE_WINDOW,
+    OPT_REVERSE_WINDOW_OWNER,
+    OPT_LIST_REVERSE_WINDOWS,
+    OPT_REVERSE_KEYBOARD,
     OPT_REVERSE_SOCKET,
     OPT_NO_CLIPBOARD_AUTOSYNC,
     OPT_TCPIP,
@@ -973,6 +977,30 @@ static const struct sc_option options[] = {
         .argdesc = "index",
         .text = "Select the zero-based desktop monitor to stream in "
                 "--reverse-display mode. Default is 0.",
+    },
+    {
+        .longopt_id = OPT_REVERSE_WINDOW,
+        .longopt = "reverse-window",
+        .argdesc = "id",
+        .text = "Capture one explicit Mac window, view-only with audio off. "
+                "Requires --reverse-display and an experimental Mac host.",
+    },
+    {
+        .longopt_id = OPT_REVERSE_WINDOW_OWNER,
+        .longopt = "reverse-window-owner",
+        .argdesc = "pid",
+        .text = "Revalidate a local window picker selection against its owning process. Requires --reverse-window.",
+    },
+    {
+        .longopt_id = OPT_LIST_REVERSE_WINDOWS,
+        .longopt = "list-reverse-windows",
+        .text = "List locally selectable Mac windows as JSON; does not start a stream.",
+    },
+    {
+        .longopt_id = OPT_REVERSE_KEYBOARD,
+        .longopt = "reverse-keyboard",
+        .text = "Opt in to browser keyboard-v1 input on a Mac full-desktop stream. "
+                "Requires --reverse-display --reverse-socket and Accessibility permission.",
     },
     {
         .longopt_id = OPT_REVERSE_SOCKET,
@@ -3044,6 +3072,18 @@ parse_args_with_getopt(struct scrcpy_cli_args *args, int argc, char *argv[],
                     return false;
                 }
                 break;
+            case OPT_REVERSE_WINDOW:
+                if (!parse_display_id(optarg, &opts->reverse_window) || !opts->reverse_window) return false;
+                break;
+            case OPT_REVERSE_WINDOW_OWNER:
+                if (!parse_display_id(optarg, &opts->reverse_window_owner) || !opts->reverse_window_owner) return false;
+                break;
+            case OPT_LIST_REVERSE_WINDOWS:
+                opts->list_reverse_windows = true;
+                break;
+            case OPT_REVERSE_KEYBOARD:
+                opts->reverse_keyboard = true;
+                break;
             case OPT_REVERSE_SOCKET:
                 if (!parse_port(optarg, &opts->reverse_socket) || !opts->reverse_socket) {
                     return false;
@@ -3061,6 +3101,17 @@ parse_args_with_getopt(struct scrcpy_cli_args *args, int argc, char *argv[],
         return false;
     }
 
+    if ((opts->reverse_window_owner && !opts->reverse_window) || (opts->reverse_window && !opts->reverse_display)
+            || (opts->reverse_keyboard && (!opts->reverse_display || !opts->reverse_socket || opts->reverse_window))) {
+        LOGE("Window capture requires reverse display; browser keyboard requires a full-desktop reverse socket");
+        return false;
+    }
+#ifndef HAVE_REVERSE_MACOS
+    if (opts->reverse_window || opts->list_reverse_windows || opts->reverse_keyboard) {
+        LOGE("These capture/input options require the experimental Mac host");
+        return false;
+    }
+#endif
     if (opts->reverse_socket && (!opts->reverse_display || connection
             || opts->serial || opts->select_usb || opts->select_tcpip || opts->tcpip)) {
         LOGE("--reverse-socket requires --reverse-display and no ADB selector");

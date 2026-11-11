@@ -1,0 +1,124 @@
+--- a/app/src/reverse_display_macos.m
++++ b/app/src/reverse_display_macos.m
+@@ -45,11 +45,20 @@
+     unsigned fps;
+     int64_t start_us, metrics_us;
+     CGRect display_bounds;
++    CGDirectDisplayID display_id;
++    size_t display_pixels_wide, display_pixels_high;
+     struct mac_contact contacts[2]; // Owned exclusively by the input thread.
+     unsigned contact_count;
+     bool mouse_down, scrolling;
+     CGPoint mouse_point, scroll_point;
+ };
++
++static bool mac_display_matches(struct mac_state *s) {
++    return CGDisplayIsActive(s->display_id)
++        && CGRectEqualToRect(CGDisplayBounds(s->display_id), s->display_bounds)
++        && CGDisplayPixelsWide(s->display_id) == s->display_pixels_wide
++        && CGDisplayPixelsHigh(s->display_id) == s->display_pixels_high;
++}
+ 
+ @interface SCMacState : NSObject { @public struct mac_state state; }
+ @end
+@@ -124,8 +133,22 @@
+     (void)stream;
+     SCMacState *owner = self.owner;
+     if (owner && !atomic_load(&owner->state.stopped)) {
+-        LOGE("Mac capture stopped (ScreenCaptureKit code %ld). Check Screen Recording permission and reconnect.", (long)error.code);
+-        atomic_store(&owner->state.failed, true);
++        if ([error.domain isEqualToString:SCStreamErrorDomain] && error.code == SCStreamErrorUserStopped) {
++            LOGI("Mac screen sharing stopped by the user");
++            atomic_store(&owner->state.quit, true);
++            return;
++        }
++        if (atomic_load(&owner->state.disconnected)) return;
++        // Refresh the immutable stream header and input geometry after a known
++        // display change. Permission loss/other capture errors stay fatal and
++        // must not silently restart a user-ended sharing session.
++        if (CGPreflightScreenCaptureAccess() && !mac_display_matches(&owner->state)) {
++            LOGI("Mac display changed; reconnect to refresh capture and input geometry");
++            atomic_store(&owner->state.disconnected, true);
++        } else {
++            LOGE("Mac capture stopped (ScreenCaptureKit code %ld). Check Screen Recording permission and reconnect.", (long)error.code);
++            atomic_store(&owner->state.failed, true);
++        }
+     }
+ }
+ @end
+@@ -404,7 +427,9 @@
+     (void)receiver;
+     SCMacState *owner = (__bridge SCMacState *)context;
+     struct mac_state *s = &owner->state;
+-    if (atomic_load(&s->stopped) || atomic_load(&s->paused) || !AXIsProcessTrusted()) { mac_cancel_input(s); return; }
++    if (atomic_load(&s->stopped) || atomic_load(&s->paused) || atomic_load(&s->disconnected)
++            || atomic_load(&s->failed) || !AXIsProcessTrusted()) { mac_cancel_input(s); return; }
++    if (!mac_display_matches(s)) { mac_cancel_input(s); atomic_store(&s->disconnected, true); return; }
+     unsigned action = msg->reverse_touch.action & AMOTION_EVENT_ACTION_MASK;
+     if (action == AMOTION_EVENT_ACTION_CANCEL) { mac_cancel_input(s); return; }
+     double x, y;
+@@ -444,7 +469,9 @@
+     (void)receiver;
+     SCMacState *owner = (__bridge SCMacState *)context;
+     struct mac_state *s = &owner->state;
+-    if (atomic_load(&s->stopped) || atomic_load(&s->paused) || !AXIsProcessTrusted()) return;
++    if (atomic_load(&s->stopped) || atomic_load(&s->paused) || atomic_load(&s->disconnected)
++            || atomic_load(&s->failed) || !AXIsProcessTrusted()) { mac_cancel_input(s); return; }
++    if (!mac_display_matches(s)) { mac_cancel_input(s); atomic_store(&s->disconnected, true); return; }
+     double x, y;
+     if (!sc_reverse_macos_point(&msg->reverse_scroll.position, s->display_bounds.origin.x, s->display_bounds.origin.y,
+             s->display_bounds.size.width, s->display_bounds.size.height, &x, &y)) return;
+@@ -621,8 +648,11 @@
+             if (!owner) return SCRCPY_EXIT_FAILURE;
+             struct mac_state *s = &owner->state;
+             s->video_socket = video_socket; s->control_socket = control_socket;
++            s->display_id = display.displayID;
+             s->display_bounds = CGDisplayBounds(display.displayID);
+-            if (!sc_reverse_macos_dimensions((uint32_t)CGDisplayPixelsWide(display.displayID), (uint32_t)CGDisplayPixelsHigh(display.displayID),
++            s->display_pixels_wide = CGDisplayPixelsWide(display.displayID);
++            s->display_pixels_high = CGDisplayPixelsHigh(display.displayID);
++            if (!sc_reverse_macos_dimensions((uint32_t)s->display_pixels_wide, (uint32_t)s->display_pixels_high,
+                     options->max_size, &s->width, &s->height)) { LOGE("Invalid Mac capture dimensions"); return SCRCPY_EXIT_FAILURE; }
+             double fps = options->max_fps ? strtod(options->max_fps, NULL) : 60;
+             s->fps = (unsigned)lrint(isfinite(fps) && fps > 0 ? fmax(1, fmin(240, fps)) : 60);
+@@ -694,11 +724,32 @@
+             bool audio_started = worker_started && sc_thread_create(&audio_worker, mac_audio_thread, "rev-mac-audio", (__bridge void *)owner);
+             if (worker_started && !audio_started) LOGW("Mac audio worker unavailable; video continues");
+             enum scrcpy_exit_code result = SCRCPY_EXIT_FAILURE;
++            NSNotificationCenter *workspace_notifications = NSWorkspace.sharedWorkspace.notificationCenter;
++            id sleep_observer = nil;
+             if (worker_started) {
++                sleep_observer = [workspace_notifications addObserverForName:NSWorkspaceWillSleepNotification object:nil queue:nil
++                    usingBlock:^(NSNotification *notification) {
++                        (void)notification;
++                        // Capture a strong owner, not a stack address: an in-flight
++                        // workspace callback remains safe during observer removal.
++                        if (!atomic_load(&owner->state.stopped)) {
++                            LOGI("Mac is sleeping; reconnect after wake");
++                            atomic_store(&owner->state.disconnected, true);
++                        }
++                    }];
+                 LOGI("Mac desktop: %ux%u at %u fps; touch maps to mouse, two fingers scroll", s->width, s->height, s->fps);
+                 bool gui_pipe = mac_gui_pipe();
++                int64_t display_check_us = 0;
+                 for (;;) {
+                     if (mac_gui_quit(gui_pipe) || atomic_load(&s->quit)) { result = SCRCPY_EXIT_SUCCESS; break; }
++                    int64_t display_now = av_gettime_relative();
++                    if (display_now >= display_check_us) {
++                        display_check_us = display_now + 250000;
++                        if (!mac_display_matches(s)) {
++                            LOGI("Mac display changed; reconnect to refresh capture and input geometry");
++                            atomic_store(&s->disconnected, true);
++                        }
++                    }
+                     if (atomic_load(&s->failed)) break;
+                     if (atomic_load(&s->disconnected)) { result = SCRCPY_EXIT_DISCONNECTED; break; }
+                     int64_t now = av_gettime_relative(), encoding = atomic_load(&s->encoding_since);
+@@ -715,6 +766,7 @@
+                     CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.01, false);
+                 }
+             } else LOGE("Could not start Mac capture; check Screen Recording permission and the hardware encoder");
++            if (sleep_observer) [workspace_notifications removeObserver:sleep_observer];
+             atomic_store(&s->stopped, true);
+             net_interrupt(video_socket); net_interrupt(control_socket);
+             if (input_started) sc_receiver_join(&receiver);

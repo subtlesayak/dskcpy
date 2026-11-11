@@ -1,21 +1,20 @@
-# Build scrcpy
+# Native build reference
 
-Here are the instructions to build _scrcpy_ (client and server).
+For **desktop hosting**, use [Windows host setup](windows-host.md) or
+[Mac host setup](macos-host.md). Those guides build this fork and its dashboard;
+Android app receiving also needs its matching installable companion.
 
-If you just want to build and install the latest release, follow the simplified
-process described in [doc/linux.md](linux.md).
+This reference covers the inherited **Android-to-computer** client/server and
+lower-level build options. It does not turn an upstream scrcpy release or
+package-manager installation into a dskcpy desktop host. Linux desktop hosting
+is not implemented.
 
 ## Branches
 
-There are two main branches:
- - `master`: contains the latest release. It is the home page of the project on
-   GitHub.
- - `dev`: the current development branch. Every commit present in `dev` will be
-   in the next release.
-
-If you want to contribute code, please base your commits on the latest `dev`
-branch.
-
+Use this fork's `master` as the current integration branch. It is source, not a
+published desktop release. Base proposed changes on current master and preserve
+local work. Upstream scrcpy's `dev` and release branches belong to its separate
+project; do not assume this fork has the same branches or latest upstream base.
 
 ## Requirements
 
@@ -35,8 +34,8 @@ The client requires [FFmpeg] and [SDL]. Just follow the instructions.
 [adb]: https://developer.android.com/studio/command-line/adb.html
 [platform-tools]: https://developer.android.com/studio/releases/platform-tools.html
 [platform-tools-windows]: https://dl.google.com/android/repository/platform-tools-latest-windows.zip
-[ffmpeg]: https://en.wikipedia.org/wiki/FFmpeg
-[SDL]: https://en.wikipedia.org/wiki/Simple_DirectMedia_Layer
+[ffmpeg]: https://ffmpeg.org/
+[SDL]: https://www.libsdl.org/
 
 
 
@@ -89,7 +88,8 @@ sudo dnf install java-devel
 
 #### Cross-compile from Linux
 
-This is the preferred method (and the way the release is built).
+These are inherited cross-compilation instructions for developer/release work.
+They are not the recommended first setup for a Windows desktop host.
 
 From _Debian_, install _mingw_:
 
@@ -103,60 +103,27 @@ You also need the JDK to build the server:
 sudo apt install openjdk-17-jdk
 ```
 
-Then generate the releases:
+The release tooling can generate archives (separate release qualification is required):
 
 ```bash
-./release.sh
+./release/release.sh
 ```
 
-It will generate win32 and win64 releases into `dist/`.
+The aggregate script writes archives under `release/output/`. Individual Windows
+builds stage files under `release/work/build-win32/dist` or `build-win64/dist`.
+Do not treat these developer outputs as qualified/signed desktop releases.
 
 
 #### In MSYS2
 
-From Windows, you need [MSYS2] to build the project. From an MSYS2 terminal,
-install the required packages:
+Use **UCRT64** and one consistent runtime family. Follow the package installation,
+native build and launch/runtime configuration in [Windows host setup](windows-host.md).
+That guide matches the current native CI environment. Deprecated MINGW64 package
+commands and 32-bit substitutions are not a supported dskcpy host setup.
 
-[MSYS2]: http://www.msys2.org/
-
-```bash
-# runtime dependencies
-pacman -S mingw-w64-x86_64-sdl3 \
-          mingw-w64-x86_64-ffmpeg \
-          mingw-w64-x86_64-libusb
-
-# client build dependencies
-pacman -S mingw-w64-x86_64-make \
-          mingw-w64-x86_64-gcc \
-          mingw-w64-x86_64-pkg-config \
-          mingw-w64-x86_64-meson
-```
-
-For a 32 bits version, replace `x86_64` by `i686`:
-
-```bash
-# runtime dependencies
-pacman -S mingw-w64-i686-sdl3 \
-          mingw-w64-i686-ffmpeg \
-          mingw-w64-i686-libusb
-
-# client build dependencies
-pacman -S mingw-w64-i686-make \
-          mingw-w64-i686-gcc \
-          mingw-w64-i686-pkg-config \
-          mingw-w64-i686-meson
-```
-
-Java (>= 7) is not available in MSYS2, so if you plan to build the server,
-install it manually and make it available from the `PATH`:
-
-```bash
-export PATH="$JAVA_HOME/bin:$PATH"
-```
-
-When following the rest of the build instructions below, make sure you use the
-MinGW terminal within MSYS2.
-
+For a combined native/server build, make JDK 17+ and the Android SDK available to
+the terminal before running Meson. The separate native/companion steps in the
+host guide avoid mixing shell-specific SDK setup with native compilation.
 
 ### macOS
 
@@ -169,15 +136,15 @@ Install the packages with [Homebrew]:
 brew install sdl3 ffmpeg libusb
 
 # client build dependencies
-brew install pkg-config meson
+brew install pkgconf meson ninja
 ```
 
-Additionally, if you want to build the server, install Java 17 from Caskroom, and
-make it available from the `PATH`:
+For the Android build, install/configure JDK 17 and the Android SDK components
+listed below. For Homebrew OpenJDK, select its JDK directly:
 
 ```bash
 brew install openjdk@17
-export JAVA_HOME="$(/usr/libexec/java_home --version 1.17)"
+export JAVA_HOME="$(brew --prefix openjdk@17)/libexec/openjdk.jdk/Contents/Home"
 export PATH="$JAVA_HOME/bin:$PATH"
 ```
 
@@ -191,34 +158,40 @@ See [pierlon/scrcpy-docker](https://github.com/pierlon/scrcpy-docker).
 **As a non-root user**, clone the project:
 
 ```bash
-git clone https://github.com/Genymobile/scrcpy
-cd scrcpy
+git clone https://github.com/subtlesayak/dskcpy.git
+cd dskcpy
 ```
 
 
 ### Build
 
-You may want to build only the client: the server binary, which will be pushed
-to the Android device, does not depend on your system and architecture. In that
-case, use the [prebuilt server] (so you will not need Java or the Android SDK).
+For native-only work, `-Dcompile_server=false` skips Android output generation.
+For inherited Android-to-computer use, a version-matched [prebuilt server] can
+avoid a local Android build. It does **not** provide the installable dskcpy
+companion or its reverse-mode UI. Prefer building all related artifacts from
+this fork's matching source.
 
 [prebuilt server]: #option-2-use-prebuilt-server
 
 
 #### Option 1: Build everything from sources
 
-Install the [Android SDK] (_Android Studio_), and set `ANDROID_SDK_ROOT` to its
-directory. For example:
+Install JDK 17+ and the [Android SDK] with platform 36 and build-tools 36.0.0.
+Set `ANDROID_HOME` to the SDK directory (`ANDROID_SDK_ROOT` is a fallback when
+`ANDROID_HOME` is unset). Examples:
 
 [Android SDK]: https://developer.android.com/studio/index.html
 
-```bash
+```sh
 # Linux
-export ANDROID_SDK_ROOT=~/Android/Sdk
+export ANDROID_HOME=~/Android/Sdk
 # Mac
-export ANDROID_SDK_ROOT=~/Library/Android/sdk
-# Windows
-set ANDROID_SDK_ROOT=%LOCALAPPDATA%\Android\sdk
+export ANDROID_HOME=~/Library/Android/sdk
+```
+
+```powershell
+# Windows PowerShell
+$env:ANDROID_HOME = "$env:LOCALAPPDATA\Android\Sdk"
 ```
 
 Then, build:
@@ -250,8 +223,10 @@ meson setup x --buildtype=release --strip -Db_lto=true \
 ninja -Cx  # DO NOT RUN AS ROOT
 ```
 
-The server only works with a matching client version (this server works with the
-`master` branch).
+The pinned upstream 4.1 server is for a compatible inherited Android-to-computer
+client only. It is not the dskcpy companion, and version identity alone does not
+qualify custom protocol changes. Build the fork's server when using fork-specific
+behavior; never replace an installed companion with an unrelated APK.
 
 
 ### Run without installing:

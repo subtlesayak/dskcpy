@@ -1,5 +1,6 @@
 import { accessSync, constants, statSync } from 'node:fs';
 import path from 'node:path';
+import { windowsRuntimeEnvironment } from './windows-runtime.mjs';
 
 function isFile(file, executable = false) {
   try {
@@ -27,7 +28,7 @@ export function resolveExecutable(name, env, cwd, platform = process.platform) {
 }
 
 export function resolveRuntime(repoDir, inputEnv = process.env, platform = process.platform) {
-  const env = { ...inputEnv };
+  let env = { ...inputEnv };
   const local = path.join(repoDir, 'x-reverse', 'app', platform === 'win32' ? 'scrcpy.exe' : 'scrcpy');
   const executable = resolveExecutable(env.SCRCPY_GUI_BINARY || (isFile(local) ? local : 'scrcpy'), env, repoDir, platform);
   const binaryDir = executable ? path.dirname(executable) : path.dirname(local);
@@ -46,9 +47,7 @@ export function resolveRuntime(repoDir, inputEnv = process.env, platform = proce
   env.ADB = adb || adbName;
   env.SCRCPY_GUI_CONTROL = 'stdin-v1';
   if (platform === 'win32') {
-    const runtimeDir = env.SCRCPY_RUNTIME_DIR || (env.MINGW_PREFIX ? path.join(env.MINGW_PREFIX, 'bin') : 'C:\\msys64\\mingw64\\bin');
-    const pathKey = Object.keys(env).find((key) => key.toLowerCase() === 'path') || 'PATH';
-    env[pathKey] = `${runtimeDir}${path.delimiter}${env[pathKey] || ''}`;
+    env = windowsRuntimeEnvironment(env, executable).env;
   }
   return { executable, adb, env, repoDir, platform };
 }
@@ -61,16 +60,20 @@ export async function inspectReadiness(runtime, runCommand) {
   let loaded = false;
   let supported = false;
   let macBackend = false;
+  let nativeHelp = '';
   if (executable) {
     try {
       // Loads the actual dependency chain, including transitive DLLs. Never starts capture.
       const { stdout } = await runCommand(executable, ['--help'], { env, cwd: repoDir });
       loaded = true;
+      nativeHelp = stdout;
       supported = stdout.includes('--reverse-display') && stdout.includes('--reverse-socket');
       macBackend = supported && stdout.includes('ScreenCaptureKit/VideoToolbox');
     } catch { /* Do not reflect environment paths from loader errors into readiness. */ }
   }
-  add('runtime', 'Runtime libraries', loaded, loaded ? 'Program loads successfully.' : 'The streaming program could not load. Check its runtime libraries.');
+  add('runtime', 'Runtime libraries', loaded, loaded ? 'Program loads successfully.'
+    : platform === 'win32' ? 'The streaming program could not load. Match its UCRT64/MINGW64 libraries, or set SCRCPY_RUNTIME_DIR to the correct bin directory.'
+    : 'The streaming program could not load. Check its runtime libraries.');
   add('capture', platform === 'darwin' ? 'Experimental Mac capture' : 'Desktop capture',
     platform === 'win32' ? supported : platform === 'darwin' && macBackend,
     platform === 'darwin' ? macBackend
@@ -97,5 +100,8 @@ export async function inspectReadiness(runtime, runCommand) {
     const failed = checks.filter((check) => required.includes(check.id) && !check.ready);
     return [connection, { ready: failed.length === 0, message: failed[0]?.message || 'Local components are ready.', required }];
   }));
-  return { checks, transports, checkedAt: new Date().toISOString() };
+  return { checks, transports, features: {
+    browserKeyboard: platform === 'darwin' && macBackend && nativeHelp.includes('--reverse-keyboard'),
+    macWindowCapture: platform === 'darwin' && macBackend && nativeHelp.includes('--list-reverse-windows') && nativeHelp.includes('--reverse-window-owner'),
+  }, checkedAt: new Date().toISOString() };
 }

@@ -17,11 +17,14 @@ function Add-Source([string]$relative, [string]$target = $relative) {
     $entries.Add(@{ Source = $item.FullName; Target = $target.Replace('\', '/') })
 }
 foreach ($file in @('LICENSE', 'README.md', 'meson.build', 'meson_options.txt',
-    'build.gradle', 'settings.gradle', 'gradle.properties', 'gradlew', 'gradlew.bat',
+    'build.gradle', 'settings.gradle', 'gradle.properties', 'dskcpy.properties', 'gradlew', 'gradlew.bat',
     'server/build.gradle', 'server/proguard-rules.pro', 'server/build_without_gradle.sh',
     'gui/package.json', 'gui/package-lock.json', 'gui/index.html', 'gui/vite.config.ts',
     'gui/tsconfig.json', 'gui/README.md',
-    'tools/macos-build.sh', 'tools/macos-start.sh', 'release/package_macos_source.ps1',
+    'tools/macos-build.sh', 'tools/macos-start.sh', 'tools/macos-browser-start.sh',
+    'tools/build-identity.mjs', 'tools/check-android-upgrade.mjs',
+    'release/build_macos_host.sh', 'release/package_macos_host.mjs', 'release/Start-dskcpy-host.command',
+    'release/package_macos_source.ps1',
     'release/build_common', 'release/build_server.sh', 'release/package_client.sh')) {
     Add-Source $file
 }
