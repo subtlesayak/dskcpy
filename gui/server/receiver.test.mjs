@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 import * as protocol from '../receiver/protocol.mjs';
 import { createVideoReceiver } from '../receiver/video.mjs';
+import { createBrowserKeyboard } from '../receiver/keyboard.mjs';
 import { validBrowserInput } from './browser-protocol.mjs';
 
 const source = (await readFile(new URL('../receiver/receiver.mjs', import.meta.url), 'utf8')).replace(/^import .*;\r?\n/gm, '');
@@ -11,8 +12,9 @@ const parameters = new Uint8Array([0, 0, 1, 0x67, 0x64, 0, 0x28, 0, 0, 1, 0x68, 
 
 // Deterministic lifecycle tests against the actual receiver script. These model
 // delayed browser callbacks; rendered/device QA is separate from this harness.
-function receiver(t, { portrait = false, lockFails = false, webRtc = false, webCodecs = true, qrKey = '' } = {}) {
+function receiver(t, { portrait = false, lockFails = false, webRtc = false, webCodecs = true, qrKey = '', keyboard = false, viewOnly = false } = {}) {
   const timers = new Set(), sockets = [], decoders = [], orientation = [];
+  let resize;
   const locationState = { protocol: 'https:', host: 'receiver.test', pathname: qrKey ? '/join' : '/', search: '', hash: qrKey ? `#connect=${qrKey}` : '' };
   const historyChanges = [];
   class Target {
@@ -61,10 +63,11 @@ function receiver(t, { portrait = false, lockFails = false, webRtc = false, webC
   if (webRtc) window.RTCPeerConnection = true;
   window.history = { replaceState(_state, _title, url) { locationState.hash = ''; historyChanges.push(url); } };
   const context = vm.createContext({ ...protocol,
+    createBrowserKeyboard,
     createVideoReceiver: (options) => createVideoReceiver({ ...options, Decoder }),
     window, document, WebSocket: Socket, VideoDecoder: Decoder,
     EncodedVideoChunk: class { constructor(value) { Object.assign(this, value); } },
-    ResizeObserver: class { observe() {} }, getComputedStyle: () => ({ paddingTop: '0', paddingRight: '0', paddingBottom: '0', paddingLeft: '0' }),
+    ResizeObserver: class { constructor(callback) { resize = callback; } observe() {} }, getComputedStyle: () => ({ paddingTop: '0', paddingRight: '0', paddingBottom: '0', paddingLeft: '0' }),
     location: locationState, performance: { now: () => 2000 }, AbortSignal,
     innerWidth: portrait ? 390 : 844, innerHeight: portrait ? 844 : 390,
     screen: { orientation: { async lock(value) { orientation.push(value); if (lockFails) throw new Error('Unsupported'); }, unlock() { orientation.push('unlock'); } } },
@@ -76,7 +79,7 @@ function receiver(t, { portrait = false, lockFails = false, webRtc = false, webC
   t.after(() => { for (const timer of timers) clearTimeout(timer); });
   if (!qrKey) { $('session-key').value = 'x'.repeat(32); $('join-form').emit('submit'); }
   const socket = sockets[0]; socket.emit('open');
-  socket.emit('message', { data: JSON.stringify({ type: 'authenticated', mediaMode: webRtc ? 'webrtc' : 'webcodecs' }) });
+  socket.emit('message', { data: JSON.stringify({ type: 'authenticated', keyboard, viewOnly, mediaMode: webRtc ? 'webrtc' : 'webcodecs' }) });
   const header = new ArrayBuffer(16), view = new DataView(header);
   view.setUint32(0, 0x53524431); view.setUint32(4, 1); view.setUint32(8, 640); view.setUint32(12, 480);
   socket.emit('message', { data: header });
@@ -86,7 +89,7 @@ function receiver(t, { portrait = false, lockFails = false, webRtc = false, webC
     new Uint8Array(bytes, 16).set(payload); socket.emit('message', { data: bytes });
   }
   media(0, 1, parameters);
-  return { $, document, window, socket, sockets, locationState, decoders, media, orientation, historyChanges };
+  return { $, document, window, socket, sockets, locationState, decoders, media, orientation, historyChanges, reflow: () => resize() };
 }
 
 test('suspension drains queued frames and ignores stale decoder callbacks after resume', async (t) => {
@@ -376,4 +379,40 @@ test('malformed reused-tab QR invitations are removed without authentication', (
   h.window.emit('hashchange');
   assert.equal(h.locationState.hash, '');
   assert.equal(h.sockets.length, count);
+});
+
+test('negotiated keyboard input stays on the authenticated socket and releases on blur and suspension', (t) => {
+  const h = receiver(t, { keyboard: true, webRtc: true, webCodecs: false });
+  assert.equal(h.$('keyboard').hidden, false); h.$('keyboard').emit('click');
+  assert.equal(h.$('keyboard-controls').hidden, false);
+  h.$('keyboard-input').emit('keydown', { code: 'ControlLeft', key: 'Control', ctrlKey: true });
+  h.window.emit('blur');
+  const keys = () => h.socket.sent.filter((p) => Buffer.isBuffer(p) && p[0] === 8);
+  assert.deepEqual(keys().map((p) => p[1]), [0, 2]);
+  h.document.hidden = true; h.document.emit('visibilitychange');
+  assert.equal(h.$('keyboard-controls').hidden, true);
+  h.$('keyboard-input').emit('keydown', { code: 'Enter', key: 'Enter' });
+  assert.equal(keys().length, 2); h.$('disconnect').emit('click');
+});
+
+test('window view-only policy disables touch, keyboard, audio and desktop window controls', async (t) => {
+  const h = receiver(t, { keyboard: true, viewOnly: true, webRtc: true, webCodecs: false });
+  assert.equal(h.$('keyboard').hidden, true); assert.equal(h.$('touch').disabled, true);
+  assert.equal(h.$('audio').disabled, true); assert.equal(h.$('window').hidden, true);
+  h.$('touch').emit('click'); h.$('keyboard').emit('click'); await h.$('audio').emit('click');
+  pointer(h, 'pointerdown', 1, 100, 100); pointer(h, 'pointerup', 1, 100, 100);
+  assert.equal(inputs(h).length, 0);
+  assert.equal(h.socket.sent.some((p) => Buffer.isBuffer(p) && p[0] === 5 && p[1] === 10), false);
+  h.$('disconnect').emit('click');
+});
+
+test('soft-keyboard viewport reflow preserves pending physical key pairing', (t) => {
+  const h = receiver(t, { keyboard: true, webRtc: true, webCodecs: false });
+  h.$('keyboard').emit('click');
+  h.$('keyboard-input').emit('keydown', { code: 'ControlLeft', key: 'Control', ctrlKey: true });
+  h.reflow(); h.$('keyboard-input').emit('keyup', { code: 'ControlLeft', key: 'Control' });
+  const keys = h.socket.sent.filter((p) => Buffer.isBuffer(p) && p[0] === 8);
+  assert.deepEqual(keys.map((p) => p[1]), [0, 1]);
+  h.$('hide-controls').emit('click'); assert.equal(h.$('keyboard-controls').hidden, true);
+  h.$('disconnect').emit('click');
 });

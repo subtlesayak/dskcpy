@@ -94,6 +94,25 @@ sc_device_msg_deserialize(const uint8_t *buf, size_t len,
 
             return 32;
         }
+        case DEVICE_MSG_TYPE_REVERSE_KEY:
+            if (len < 5) return 0;
+            msg->reverse_key.action = buf[1];
+            msg->reverse_key.usage = sc_read16be(&buf[2]);
+            msg->reverse_key.modifiers = buf[4];
+            if (buf[1] > 2 || (buf[1] == 2 ? (msg->reverse_key.usage || buf[4])
+                    : !sc_reverse_keyboard_usage(msg->reverse_key.usage))) return -1;
+            return 5;
+        case DEVICE_MSG_TYPE_REVERSE_TEXT: {
+            if (len < 3) return 0;
+            uint16_t length = sc_read16be(&buf[1]);
+            if (!length || length > SC_REVERSE_TEXT_MAX) return -1;
+            if (len < (size_t)length + 3) return 0;
+            if (!sc_reverse_keyboard_text(buf + 3, length)) return -1;
+            msg->reverse_text.length = length;
+            memcpy(msg->reverse_text.text, buf + 3, length);
+            msg->reverse_text.text[length] = 0;
+            return length + 3;
+        }
         case DEVICE_MSG_TYPE_REVERSE_SCROLL:
             if (len < 21) {
                 return 0;

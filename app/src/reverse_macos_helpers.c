@@ -4,6 +4,15 @@
 #include <stdlib.h>
 #include <string.h>
 
+bool sc_reverse_macos_letterbox(double sw, double sh, uint16_t width, uint16_t height,
+                                double *x, double *y, double *ow, double *oh) {
+    if (!isfinite(sw) || !isfinite(sh) || sw < 2 || sh < 2 || width < 2 || height < 2) return false;
+    double scale = fmin(width / sw, height / sh);
+    *ow = floor(sw * scale); *oh = floor(sh * scale);
+    *x = floor((width - *ow) / 2); *y = floor((height - *oh) / 2);
+    return *ow >= 1 && *oh >= 1;
+}
+
 bool
 sc_reverse_macos_dimensions(uint32_t width, uint32_t height, uint16_t limit,
                              uint16_t *out_width, uint16_t *out_height) {

@@ -46,6 +46,7 @@ export function createControlService({
   let discoveryAttempt = null;
   let browserPreparation = null;
   let browserConfig = null;
+  let windowCatalogAttempt = null;
   let browserUsbCleanup = null;
   let browserUsbCleanupPending = Promise.resolve();
   const browserReceiver = createBrowserReceiver({ configuredPort: browserPort,
@@ -381,6 +382,10 @@ export function createControlService({
       if (attempt.signal.aborted) throw new Error('Connection cancelled.');
       const transport = readiness.transports.browser;
       if (!transport?.ready) throw new Error(transport?.message || 'Browser capture is not ready.');
+      if (config.windowId && (platform !== 'darwin' || !readiness.features?.macWindowCapture)) {
+        throw new Error('Rebuild the experimental Mac host with window capture support.');
+      }
+      if (config.windowId && !config.windowOwnerPid) throw new Error('Refresh and select the window again before sharing.');
       browserConfig = config;
       const mode = rawConfig.browserTransport || 'local';
       let usbDevice;
@@ -392,7 +397,10 @@ export function createControlService({
         if (!usbDevice) throw new Error('Select one authorized USB device in Connect before starting a USB browser session.');
       }
       if (attempt.signal.aborted) throw new Error('Connection cancelled.');
-      const invitation = await browserReceiver.invite(mode);
+      const invitation = await browserReceiver.invite(mode, { viewOnly: Boolean(config.windowId),
+        // Typing into a receiver focused on the host itself would feed the
+        // injected events back into its own typing field. Local preview omits it.
+        keyboard: mode !== 'local' && !config.windowId && readiness.features?.browserKeyboard === true });
       if (usbDevice) {
         const runtime = currentRuntime();
         const args = ['-s', usbDevice.serial, 'reverse'];
@@ -474,7 +482,9 @@ export function createControlService({
       if (attempt.signal.aborted) throw new Error('Connection cancelled.');
       if (!retrySession && config.autoReconnect) reconnectSession = { config: { ...config }, attempts: 0 };
       const session = reconnectSession;
-      const args = buildScrcpyArgs(config, internetBridge?.port);
+      if (config.windowId && (platform !== 'darwin' || !state.readiness?.features?.macWindowCapture))
+        throw new Error('This native host cannot capture a selected Mac window.');
+      const args = buildScrcpyArgs({ ...config, browserKeyboard: browserBridge?.keyboard === true }, internetBridge?.port);
       state.command = formatCommand(path.basename(runtime.executable), args);
       appendLog('gui', 'Starting ' + state.command);
       const child = spawnProcess(runtime.executable, args, {
@@ -710,6 +720,29 @@ export function createControlService({
       if (request.method === 'POST' && url.pathname === '/api/stream/start') {
         const body = await readJson(request);
         writeJson(response, 202, await startStream(body));
+        return;
+      }
+      if (request.method === 'POST' && url.pathname === '/api/browser/windows') {
+        await readJson(request);
+        if (platform !== 'darwin') throw new Error('Window capture is currently available on the Mac host.');
+        if (!windowCatalogAttempt) windowCatalogAttempt = (async () => {
+          const readiness = await refreshReadiness();
+          if (!readiness.features?.macWindowCapture) throw new Error('Rebuild the experimental Mac host to select windows.');
+          const runtime = currentRuntime();
+          try {
+            const { stdout } = await runCommand(runtime.executable, ['--list-reverse-windows'],
+              { env: runtime.env, cwd: repoDir, timeoutMs: 12000, maxOutputBytes: 65536 });
+            const line = stdout.split(/\r?\n/).find((line) => line.startsWith('DSKCPY_WINDOWS '));
+            const windows = JSON.parse(line?.slice('DSKCPY_WINDOWS '.length) || 'null');
+            if (!Array.isArray(windows) || windows.length > 64 || windows.some((w) => !w || !Number.isInteger(w.id)
+                || w.id < 1 || w.id > 0xffffffff || typeof w.title !== 'string' || w.title.length > 120
+                || !Number.isInteger(w.ownerPid) || w.ownerPid < 1 || w.ownerPid > 0x7fffffff
+                || typeof w.application !== 'string' || w.application.length > 80)) throw new Error('Invalid catalog');
+            return { windows: windows.map((w) => ({ id: w.id, ownerPid: w.ownerPid,
+              title: w.title.replace(/[\x00-\x1f\x7f]/g, ' '), application: w.application.replace(/[\x00-\x1f\x7f]/g, ' ') })) };
+          } catch { throw new Error('Could not list windows. Allow Screen Recording for the launching app, restart it and refresh.'); }
+        })().finally(() => { windowCatalogAttempt = null; });
+        writeJson(response, 200, await windowCatalogAttempt);
         return;
       }
       if (request.method === 'POST' && url.pathname === '/api/browser/invite') {

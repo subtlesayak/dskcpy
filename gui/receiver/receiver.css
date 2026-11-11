@@ -59,3 +59,5 @@ canvas { display: block; grid-area: 1 / 1; z-index: 1; max-width: 100%; max-heig
 #stream-panel:fullscreen { --receiver-inset-right: max(4px, env(safe-area-inset-right)); --receiver-inset-bottom: max(4px, env(safe-area-inset-bottom)); width: 100%; height: 100%; background: #080f13; padding: max(4px, env(safe-area-inset-top)) var(--receiver-inset-right) var(--receiver-inset-bottom) max(4px, env(safe-area-inset-left)); }
 @media (max-width: 48rem) { #toolbar { grid-template-columns: repeat(4, minmax(0, 1fr)); } #join-panel { margin-block: 20px; } }
 @media (max-width: 28rem) { .quick-controls { grid-template-columns: repeat(2, minmax(0, 1fr)); } .quick-controls p { grid-column: 1 / -1; } .quick-controls p span { display: inline; margin-inline-start: 8px; } }
+#keyboard-controls { padding: .5rem; }
+#keyboard-input { display: block; width: 100%; min-height: 44px; max-height: 100px; font: inherit; resize: vertical; }

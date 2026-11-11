@@ -1,11 +1,11 @@
 <!-- generated-by: gsd-doc-writer -->
 # dskcpy
 
-**Stream your desktop to Android. Control it with touch.**
+**Stream your desktop to Android or a browser. Control it with touch.**
 
 dskcpy is an experimental fork of [scrcpy](https://github.com/Genymobile/scrcpy)
 that adds the reverse direction: Windows or macOS desktop video on your Android
-phone or tablet, with input sent back to the computer. Desktop audio forwarding
+phone, tablet or authenticated browser, with input sent back to the computer. Desktop audio forwarding
 is implemented on Windows and experimental on macOS. Use USB, a local wireless
 connection, or a private VPN network.
 
@@ -35,9 +35,19 @@ connection, or a private VPN network.
   touch enable/disable, Stop, and hide/show controls. Hold an icon for its hint.
 - **Local browser dashboard:** Connect, Device, Performance and Activity views;
   wireless pairing/discovery, encoder selection, logs and live decode-ack metrics.
-- **Experimental browser receiver:** native H.264 video, optional Opus audio and
-  authenticated touch input. USB uses an Android ADB tunnel; Wi-Fi/direct IP and
-  Internet/VPN require explicitly configured trusted HTTPS.
+- **Experimental browser receiver:** WebRTC H.264/Opus, one-use QR invitations,
+  touch and mouse input, plus a WebCodecs path for Android USB browser tunnels.
+  Wi-Fi/direct IP and Internet/VPN require explicitly configured trusted HTTPS
+  and a reachable private media interface; no public relay is provisioned.
+- **Mac window sharing:** explicitly select one window in the local browser
+  dashboard. Window mode is view-only with audio off, retains a fixed output
+  canvas on resize, and ends when the target is hidden, minimized or closed.
+- **Mac browser keyboard:** opt in with **Keyboard**, then focus the typing
+  field for Unicode/IME text, navigation keys and shortcuts. Input is released
+  on blur, suspension and disconnect; the native host requires Accessibility.
+- **Mac audio-route recovery:** bounded PCM conversion and output-change
+  recovery discard stale audio while preserving mute and video state. Sustained
+  audible playback and physical route changes still need candidate testing.
 - **Bounded recovery:** optional, limited retries for USB/LAN sessions. Internet
   sessions deliberately require a fresh secret after disconnection.
 
@@ -50,13 +60,18 @@ open source, and USB/LAN streaming does not require a dskcpy account.
 | Host → receiver | Status |
 | --- | --- |
 | Windows → Android | Implemented: video, native touch and system audio. Physical-device testing covers USB and authenticated VPN sessions. |
-| macOS → Android | Experimental, opt-in source build. Wireless video has been reported working on an M3 Mac. Mouse/scroll controls and ScreenCaptureKit → Opus system audio are implemented. **Mac audio playback and broader hardware testing remain unverified.** |
+| macOS → Android | Experimental source build. Earlier artifacts have physical video, mouse/scroll and selected display/permission recovery evidence. ScreenCaptureKit → Opus audio and route recovery are implemented; sustained audible playback and current-candidate hardware qualification remain open. |
 | Linux → Android | Reverse hosting is not implemented. |
 | Desktop → iPhone/iPad | No native iOS receiver. Experimental browser path exists; Safari/iOS compatibility is not yet verified. USB browser tunneling is Android-only. |
-| Desktop → browser | Experimental WebCodecs receiver. Windows NVENC video, audio enable/mute and pause/resume tested on localhost. Android Edge over private HTTPS is user-reported working, including leave/return. The complete physical USB/Wi-Fi/IP/VPN matrix remains pending. |
+| Desktop → browser | Experimental private WebRTC and WebCodecs paths. Real loopback WebRTC and synthetic browser lifecycle checks pass. Mac window mode and desktop keyboard are implemented; current-candidate Safari/iOS, device, audible audio and different-network qualification remain pending. Windows browser keyboard is not advertised. |
 
 The original Android-to-computer scrcpy mode remains in the codebase. Its
 platform support and features are separate from dskcpy's reverse mode.
+
+Build the native host and dashboard from the same revision to use the Mac
+window picker or keyboard. Older native hosts retain their existing connection
+paths and do not advertise these additional capabilities. See the
+[browser guide](doc/browser-receiver.md) for candidate setup and limitations.
 
 ## Prerequisites
 

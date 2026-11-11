@@ -172,6 +172,27 @@ static void test_deserialize_reverse_scroll(void) {
     assert(sc_device_msg_deserialize(input, sizeof(input), &msg) == -1);
 }
 
+static void test_reverse_keyboard(void) {
+    struct sc_device_msg msg;
+    uint8_t key[] = {8, 0, 0, 4, 8};
+    for (unsigned n = 0; n < sizeof(key); ++n) assert(sc_device_msg_deserialize(key, n, &msg) == 0);
+    assert(sc_device_msg_deserialize(key, sizeof(key), &msg) == 5);
+    assert(msg.reverse_key.usage == 4 && msg.reverse_key.modifiers == 8);
+    key[1] = 2; assert(sc_device_msg_deserialize(key, sizeof(key), &msg) == -1);
+    key[3] = key[4] = 0; assert(sc_device_msg_deserialize(key, sizeof(key), &msg) == 5);
+    const uint8_t unicode[] = {9, 0, 4, 0xf0, 0x9f, 0x91, 0x8b};
+    for (unsigned n = 0; n < sizeof(unicode); ++n) assert(sc_device_msg_deserialize(unicode, n, &msg) == 0);
+    assert(sc_device_msg_deserialize(unicode, sizeof(unicode), &msg) == sizeof(unicode));
+    assert(msg.reverse_text.length == 4 && !memcmp(msg.reverse_text.text, unicode + 3, 4));
+    const uint8_t invalid[][7] = {{9,0,1,0}, {9,0,2,0xc0,0x80}, {9,0,3,0xed,0xa0,0x80},
+        {9,0,4,0xf4,0x90,0x80,0x80}, {9,2,1,0,0,0,0}, {9,0,1,0x1b}};
+    for (unsigned i = 0; i < sizeof(invalid)/sizeof(*invalid); ++i)
+        assert(sc_device_msg_deserialize(invalid[i], sizeof(*invalid), &msg) == -1);
+    uint8_t maximum[515] = {9,2,0}; memset(maximum + 3, 'x', 512);
+    assert(sc_device_msg_deserialize(maximum, sizeof(maximum), &msg) == 515);
+    sc_device_msg_destroy(&msg);
+}
+
 int main(int argc, char *argv[]) {
     (void) argc;
     (void) argv;
@@ -184,5 +205,6 @@ int main(int argc, char *argv[]) {
     test_deserialize_reverse_frame_ack();
     test_deserialize_reverse_system_action();
     test_deserialize_reverse_scroll();
+    test_reverse_keyboard();
     return 0;
 }

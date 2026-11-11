@@ -6,6 +6,12 @@
 
 int main(void) {
     uint16_t w, h;
+    double lx, ly, lw, lh;
+    assert(sc_reverse_macos_letterbox(800, 800, 1920, 1080, &lx, &ly, &lw, &lh));
+    assert(lx == 420 && ly == 0 && lw == 1080 && lh == 1080);
+    assert(sc_reverse_macos_letterbox(1600, 400, 1920, 1080, &lx, &ly, &lw, &lh));
+    assert(lx == 0 && ly == 300 && lw == 1920 && lh == 480);
+    assert(!sc_reverse_macos_letterbox(NAN, 400, 1920, 1080, &lx, &ly, &lw, &lh));
     assert(sc_reverse_macos_dimensions(3024, 1964, 1920, &w, &h));
     assert(w == 1920 && h == 1246); // Retina MacBook dimensions, even H.264 output.
     assert(sc_reverse_macos_dimensions(1080, 1920, 0, &w, &h));

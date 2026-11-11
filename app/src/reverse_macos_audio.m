@@ -2,6 +2,74 @@
 #include "reverse_audio_encoder.h"
 #include <stddef.h>
 #include <stdlib.h>
+#include <math.h>
+#include <libswresample/swresample.h>
+#include <libavutil/channel_layout.h>
+
+void sc_reverse_macos_audio_converter_reset(struct sc_reverse_macos_audio_converter *c) {
+    swr_free(&c->resampler); c->rate = c->channels = 0; ++c->generation;
+}
+
+bool sc_reverse_macos_audio_convert(struct sc_reverse_macos_audio_converter *c,
+                                   CMSampleBufferRef sample, int16_t *out, size_t *frames) {
+    if (!sample || !out || !frames) return false;
+    *frames = 0;
+    CMAudioFormatDescriptionRef format = CMSampleBufferGetFormatDescription(sample);
+    const AudioStreamBasicDescription *a = format ? CMAudioFormatDescriptionGetStreamBasicDescription(format) : NULL;
+    if (!a || a->mFormatID != kAudioFormatLinearPCM || !isfinite(a->mSampleRate) || a->mSampleRate < 32000 || a->mSampleRate > 192000
+            || a->mSampleRate != (unsigned)a->mSampleRate || !a->mChannelsPerFrame || a->mChannelsPerFrame > 2
+            || (a->mFormatFlags & kAudioFormatFlagIsBigEndian)) return false;
+    if (a->mSampleRate == 48000 && a->mChannelsPerFrame == 2 && a->mBitsPerChannel == 32
+            && (a->mFormatFlags & kAudioFormatFlagIsFloat)) {
+        if (c->resampler) sc_reverse_macos_audio_converter_reset(c);
+        return sc_reverse_macos_audio_pcm(sample, out, frames);
+    }
+    bool planar = a->mFormatFlags & kAudioFormatFlagIsNonInterleaved;
+    enum AVSampleFormat input;
+    if (a->mBitsPerChannel == 32 && (a->mFormatFlags & kAudioFormatFlagIsFloat)) input = planar ? AV_SAMPLE_FMT_FLTP : AV_SAMPLE_FMT_FLT;
+    else if (a->mBitsPerChannel == 16 && (a->mFormatFlags & kAudioFormatFlagIsSignedInteger)
+            && !(a->mFormatFlags & kAudioFormatFlagIsFloat)) input = planar ? AV_SAMPLE_FMT_S16P : AV_SAMPLE_FMT_S16;
+    else return false;
+    unsigned stride = (a->mBitsPerChannel / 8) * (planar ? 1 : a->mChannelsPerFrame);
+    CMItemCount count = CMSampleBufferGetNumSamples(sample);
+    if (a->mBytesPerFrame != stride || count <= 0 || count > SC_REVERSE_AUDIO_MAX_CHUNK) return false;
+    if (!c->resampler || c->rate != a->mSampleRate || c->channels != a->mChannelsPerFrame || c->format != input) {
+        sc_reverse_macos_audio_converter_reset(c);
+        AVChannelLayout source, target = AV_CHANNEL_LAYOUT_STEREO;
+        av_channel_layout_default(&source, a->mChannelsPerFrame);
+        int result = swr_alloc_set_opts2(&c->resampler, &target, AV_SAMPLE_FMT_S16, 48000,
+            &source, input, (int)a->mSampleRate, 0, NULL);
+        av_channel_layout_uninit(&source);
+        if (result < 0 || swr_init(c->resampler) < 0) { sc_reverse_macos_audio_converter_reset(c); return false; }
+        c->rate = (unsigned)a->mSampleRate; c->channels = a->mChannelsPerFrame; c->format = input;
+    }
+    if (swr_get_out_samples(c->resampler, (int)count) > SC_REVERSE_MACOS_AUDIO_OUTPUT_FRAMES) return false;
+    size_t capacity = 0;
+    OSStatus status = CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(sample, &capacity, NULL, 0,
+        kCFAllocatorDefault, kCFAllocatorDefault, kCMSampleBufferFlag_AudioBufferList_Assure16ByteAlignment, NULL);
+    if (status != noErr || capacity < sizeof(AudioBufferList)
+            || capacity > offsetof(AudioBufferList, mBuffers) + 2 * sizeof(AudioBuffer)) return false;
+    AudioBufferList *list = calloc(1, capacity);
+    if (!list) return false;
+    CMBlockBufferRef block = NULL;
+    status = CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(sample, NULL, list, capacity,
+        kCFAllocatorDefault, kCFAllocatorDefault, kCMSampleBufferFlag_AudioBufferList_Assure16ByteAlignment, &block);
+    unsigned buffers = planar ? a->mChannelsPerFrame : 1;
+    bool valid = status == noErr && list->mNumberBuffers == buffers;
+    const uint8_t *source[2] = {NULL, NULL};
+    if (valid) for (unsigned i = 0; i < buffers; ++i) {
+        AudioBuffer b = list->mBuffers[i];
+        if (!b.mData || b.mNumberChannels != (planar ? 1 : a->mChannelsPerFrame)
+                || b.mDataByteSize < (size_t)count * stride) valid = false;
+        source[i] = b.mData;
+    }
+    uint8_t *target[] = {(uint8_t *)out};
+    int result = valid ? swr_convert(c->resampler, target, SC_REVERSE_MACOS_AUDIO_OUTPUT_FRAMES, source, (int)count) : -1;
+    if (block) CFRelease(block);
+    free(list);
+    if (result < 0) return false;
+    *frames = (size_t)result; return true;
+}
 
 bool sc_reverse_macos_audio_queue_push(struct sc_reverse_macos_audio_queue *queue,
                                       CMSampleBufferRef sample, int64_t received_us) {

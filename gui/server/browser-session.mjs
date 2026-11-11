@@ -7,7 +7,7 @@ import { createRtcMedia } from './browser-rtc.mjs';
 // Keep the native transport alive across a bounded browser suspension. Never
 // retain video frames: only the wire header and codec parameter sets are replayed.
 export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lifetimeMs,
-  mediaMode = 'webcodecs', rtcBind, onChange = () => {} }) {
+  mediaMode = 'webcodecs', rtcBind, keyboard = false, viewOnly = false, onChange = () => {} }) {
   let native, peer, closed = false, ready = false, nativeTimer, awayTimer;
   let wireHeader, videoConfig, audioConfig, width = 0, height = 0;
   let suspended = false, alive = true, rateAt = Date.now(), events = 0;
@@ -45,6 +45,7 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
   function releaseTouches() {
     for (const [id, point] of touches) native?.write(touchPacket(3, id, point.x, point.y, width, height));
     touches.clear();
+    if (keyboard) native?.write(Buffer.from([8, 2, 0, 0, 0]));
   }
   function suspend() {
     command(7); releaseTouches();
@@ -77,7 +78,7 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
   }
   function announce() {
     if (!ready || !peer) return;
-    peer.send(JSON.stringify({ type: 'authenticated', mediaMode }));
+    peer.send(JSON.stringify({ type: 'authenticated', mediaMode, keyboard, viewOnly }));
     if (wireHeader) forward(wireHeader);
     if (videoConfig && mediaMode === 'webcodecs') forward(videoConfig);
     if (audioConfig) forward(audioConfig);
@@ -114,7 +115,9 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
         }
         close(); return;
       }
-      if (!native || !validBrowserInput(message, width, height)) { close(); return; }
+      if (!native || !validBrowserInput(message, width, height, { keyboard })) { close(); return; }
+      if (viewOnly && ![4, 6].includes(message[0])
+          && !(message[0] === 5 && [7, 8, 9, 11].includes(message[1]))) { close(); return; }
       if ([4, 6].includes(message[0])) {
         const pending = message[0] === 4 ? video : audio;
         const pts = message.readBigUInt64BE(1);
@@ -207,7 +210,7 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
       });
       if (closed) { listener.close(); return; }
       ready = true; nativeTimer = setTimeout(close, 10000); announce();
-      await onConnect({ port: listener.address().port, close, get closed() { return closed; } });
+      await onConnect({ port: listener.address().port, keyboard, viewOnly, close, get closed() { return closed; } });
     } catch { close(); }
   }
   return { start, attach, close, mediaMode, get cleanup() { return rtcCleanup; } };

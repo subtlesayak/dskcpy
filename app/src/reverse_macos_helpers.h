@@ -10,6 +10,8 @@
 
 bool sc_reverse_macos_dimensions(uint32_t width, uint32_t height, uint16_t limit,
                                   uint16_t *out_width, uint16_t *out_height);
+bool sc_reverse_macos_letterbox(double source_width, double source_height, uint16_t width, uint16_t height,
+                                double *x, double *y, double *out_width, double *out_height);
 bool sc_reverse_macos_point(const struct sc_position *position,
                             double left, double top, double width, double height,
                             double *x, double *y);

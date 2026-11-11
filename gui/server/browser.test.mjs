@@ -29,7 +29,7 @@ async function fixture(t, options = {}) {
     native.write(header);
   }, ...options });
   t.after(async () => { native?.destroy(); await receiver.shutdown(); });
-  const invitation = await receiver.invite();
+  const invitation = await receiver.invite('local', options.inputPolicy);
   const open = async (origin = invitation.url.slice(0, -1), cookie, route = 'stream') => {
     const ws = new WebSocket(invitation.url.replace('http:', 'ws:') + route, { origin, headers: cookie ? { Cookie: cookie } : {} });
     ws.received = [];
@@ -365,3 +365,28 @@ test('WebRTC signaling requires the one-use code and retains authenticated input
   await closed;
   assert.equal(f.receiver.status().connected, false);
 });
+
+test('keyboard capability is authenticated, native input is forwarded, and detach releases held keys', async (t) => {
+  const f = await fixture(t, { inputPolicy: { keyboard: true } });
+  const ws = await login(f), commands = [];
+  f.native().on('data', (data) => commands.push(data));
+  const announcement = ws.received.filter((m) => !m.binary).map((m) => JSON.parse(m.data)).find((m) => m.type === 'authenticated');
+  assert.equal(announcement.keyboard, true); assert.equal(announcement.viewOnly, false);
+  ws.send(Buffer.from([8,0,0,4,8]));
+  ws.send(Buffer.from([9,0,2,0xc3,0xa9]));
+  await until(() => Buffer.concat(commands).includes(Buffer.from([9,0,2,0xc3,0xa9])));
+  assert.ok(Buffer.concat(commands).includes(Buffer.from([8,0,0,4,8])));
+  ws.terminate();
+  await until(() => Buffer.concat(commands).includes(Buffer.from([8,2,0,0,0])));
+});
+
+for (const input of [Buffer.from([8,0,0,4,0]), Buffer.from(touchPacket(0, 1, 20, 20, 640, 480)), Buffer.from([5,10])]) {
+  test(`window view-only boundary rejects input type ${input[0]} including forged client messages`, async (t) => {
+    const f = await fixture(t, { inputPolicy: { viewOnly: true, keyboard: true } });
+    const ws = await login(f);
+    const message = ws.received.filter((m) => !m.binary).map((m) => JSON.parse(m.data)).find((m) => m.type === 'authenticated');
+    assert.equal(message.viewOnly, true); assert.equal(message.keyboard, false);
+    const closed = once(ws, 'close'); ws.send(input); await closed;
+    assert.equal(f.receiver.status().connected, false);
+  });
+}
