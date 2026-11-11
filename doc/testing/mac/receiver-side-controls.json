@@ -119,5 +119,5 @@
     ],
     "physical": "Pending user-chosen receiver refresh; preceding phone keyboard/layout pass remains tied to the previous assets"
   },
-  "audio_scheduling_candidate": "doc/testing/mac/receiver-audio-scheduling.json; receiver model regressions pass and corrected f837 native has a short physical USB tone/mute pass; sustained/route/background gates remain open"
+  "audio_scheduling_candidate": "doc/testing/mac/receiver-audio-scheduling.json; corrected f837 native passes USB continuous tone/mute, Home10s/return and five-minute audible soak; other transports/routes remain open"
 }

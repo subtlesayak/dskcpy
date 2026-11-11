@@ -1,0 +1,28 @@
+{
+  "checked_at": "2026-11-11T12:48:03.659773+00:00",
+  "fixture": "doc/testing/mac/input-check.html",
+  "sha256": "6dd5f0701fba9517a329353a3de3d4bef9f2568e3799d206847a3175112fa1e5",
+  "purpose": "Owned readable targets, held-pointer duration/release, actual host text echo,held-key indicator and two-finger scroll position. No network transmission or persistence.",
+  "browser_fixture_checks": [
+    "One automated A click increments count to1",
+    "Automated3100ms press reports3.1seconds and releases",
+    "Automated text input echoes caf\u00e9 \u4e16\u754c \ud83d\ude42 and held keys none",
+    "Automated scrolling reports120px",
+    "Fixture reset tozero before physical phone handoff"
+  ],
+  "qualification_limit": "These checks validate the fixture only. They are not native phone input,shortcut,IME,clipboard or interruption qualification.",
+  "physical_result": {
+    "transport": "USB/WebCodecs, native f837, loaded receiver1d303ab5",
+    "tap_targets": "A,B,C each1,independently observed Total3",
+    "held_drag": "16.8 seconds,682 moves,proper release independently observed",
+    "text": "caf\u00e9 \ud83d\ude0a and caf\u00e9\ud83d\ude0a received; human confirms completed phone input; independently read in Mac field",
+    "scroll": "49px independently observed",
+    "key_release": "After phone keyboard closes, pressed physical keys none and modifiers none",
+    "limits": [
+      "CJK input unavailable on human phone keyboard; unverified",
+      "No general IME/shortcut/clipboard or held-input Stop/disconnect qualification"
+    ]
+  },
+  "cleanup_rule": "Held states deliberately are not auto-cleared on blur,so native release events must reach the owned page",
+  "fixture_indicator_correction": "Native Unicode text events use physical code KeyA while key text may differ on keyup (e.g. keydown c,keyup a). Pair code+location instead of text. Actual observed pairs release correctly. This corrects the fixture,not native input."
+}

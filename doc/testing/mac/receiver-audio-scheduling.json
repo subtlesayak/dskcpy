@@ -35,7 +35,7 @@
   },
   "limits": [
     "Unit regression models AudioDecoder/AudioContext and is not audible device verification",
-    "Corrected native f837 has a short USB tone/mute pass; longer playback, background/return, route and Wi-Fi/private-route checks remain open",
+    "Corrected native f837 passes short USB tone/mute, Home10s/return and five-minute audible soak; Wi-Fi/private-route/output-route and longer/broader qualification remain open",
     "Experimental unsigned arm64 macOS 13-target native is not clean-OS/signing/notarization or full desktop-app qualification",
     "Native protocol/ACK IDs unchanged"
   ],
@@ -58,14 +58,18 @@
     "native_sha256": "f837ddf4a81139b360b47ab22fedc18af8de96102f741fb380d7c47f8a2d0bcc",
     "receiver_source": "1d303ab5; receiver.mjs unchanged from 78d7bbb2",
     "transport": "USB / WebCodecs",
-    "physical_result": "Human confirms continuous tone and phone mute/resume work after explicit phone reload and fresh source replay",
-    "native_evidence": "Packets progress beyond 12000 instead of restarting every 160-180ms; later stale/capture-drop counters become nonzero and are retained in local evidence",
+    "physical_result": "PASS: human confirms continuous USB tone, phone mute/resume, Android Home10s/return with video/touch/audio recovery, and continuous sound throughout a five-minute soak",
+    "native_evidence": "Counters exceeded44000 packets after genuine Home/return transition; same current encoder progresses throughout listening. End counters stale/window/catchup/resampler trim0,capture_queue_drops34 versus32 at first soak snapshot. Counts are not audible or latency measurements.",
     "pending": [
-      "Home/return confirmation",
-      "Longer audible soak",
       "Wi-Fi/private-route audio",
-      "Output-device changes"
+      "Output-device changes",
+      "Longer sessions and broader browser/device qualification"
     ],
-    "qualification_limit": "Short audible result only; encoder counters are not a substitute for listening"
+    "qualification_limit": "Short audible result only; encoder counters are not a substitute for listening",
+    "five_minute_tone": {
+      "duration_seconds": 300,
+      "sha256": "7f241c8add7c7207f8d4afdf91d48b53e5da206b3707d97a7cb121cbae15cffe",
+      "signal": "440Hz,48kHz16bitstereo,no silent100ms blocks among3000"
+    }
   }
 }

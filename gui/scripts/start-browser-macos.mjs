@@ -3,12 +3,14 @@ import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { privateRtcBind } from '../server/browser-rtc.mjs';
+import { parseOptions } from './launch.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 try {
   if (process.platform !== 'darwin') throw new Error('Run this launcher in Terminal on the Mac.');
   if (process.argv.slice(2).some((arg) => arg !== '--check')) throw new Error('Use --check or no arguments.');
-  const executable = path.join(root, 'build-macos/app/scrcpy');
+  const executable = path.resolve(root, process.env.SCRCPY_GUI_BINARY || 'build-macos/app/scrcpy');
+  const dashboardPort = parseOptions([], process.env).port;
   if (!existsSync(executable) || !existsSync(path.join(root, 'gui/dist/index.html'))) {
     throw new Error('Build the Mac host and GUI before launching browser sharing.');
   }
@@ -27,16 +29,16 @@ try {
   const serveReady = handler?.Proxy === 'http://127.0.0.1:27180';
   if (process.argv.includes('--check')) {
     console.log(JSON.stringify({ nativeBuilt: true, guiBuilt: true, vpnOnline: true,
-      privateMediaInterface: true, privateHttpsReady: serveReady, receiverPort: 27180, httpsPort: 8443 }));
+      privateMediaInterface: true, privateHttpsReady: serveReady, dashboardPort, receiverPort: 27180, httpsPort: 8443 }));
   } else {
     if (!serveReady) throw new Error('Private receiver HTTPS on port 8443 is not configured. Existing Serve routes were left unchanged.');
-    console.log('Open http://127.0.0.1:27183 on THIS MAC. Choose Browser receiver → Internet / VPN.');
+    console.log(`Open http://127.0.0.1:${dashboardPort} on THIS MAC. Choose Browser receiver → Internet / VPN.`);
     console.log('Create an invitation, then scan its QR with the receiving phone’s camera while connected to Tailscale.');
     console.log('Keep this Terminal open. Capture and input still need the Mac permissions.');
-    const child = spawn(process.execPath, ['gui/scripts/launch.mjs', '--no-open'], {
+    const child = spawn(process.execPath, ['gui/scripts/launch.mjs', '--no-open', '--no-reuse'], {
       cwd: root, stdio: 'inherit', env: { ...env,
         SCRCPY_GUI_BINARY: executable, SCRCPY_ICON_DIR: path.join(root, 'app/data'),
-        DISPLAY_BRIDGE_PORT: '27183', DSKCPY_VIEWER_PORT: '27180',
+        DISPLAY_BRIDGE_PORT: String(dashboardPort), DSKCPY_VIEWER_PORT: '27180',
         DSKCPY_VIEWER_ORIGIN: `https://${hostname}:8443`, DSKCPY_VIEWER_RTC_BIND: bind,
       },
     });
