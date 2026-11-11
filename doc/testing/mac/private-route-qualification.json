@@ -1,0 +1,23 @@
+{
+  "checked_at": "2026-11-11T13:27:23.207057+00:00",
+  "native_sha256": "f837ddf4a81139b360b47ab22fedc18af8de96102f741fb380d7c47f8a2d0bcc",
+  "loaded_receiver_server_source": "c37f86316e813f90025db535a7bb535ba7155ec9",
+  "browser": "Edge on Android,as confirmed by human",
+  "transport": "Private Tailscale HTTPS signaling,WebRTC media",
+  "wifi_result": "Human confirms stable video,smooth audio and working mute/resume",
+  "long_listening": "UNVERIFIED: human did not listen through the end of the five-minute source",
+  "network_migration": "Human confirms phone Wi-Fi OFF,mobile data and Tailscale ON,and picture stays visible. Mac network unchanged.",
+  "mobile_input_audio": {
+    "result": "PASS: human Input works;audio smooth;mute works",
+    "independent_host_evidence": "Mac targetA1,field456,physicalkeysnone,modifiersnone",
+    "transport": "Phone Wi-Fi OFF,mobiledata andTailscaleON;Edge;Mac network unchanged"
+  },
+  "reachability_issue": "Phone initially could not reach page;Mac root/fresh join/private HTTPS all200 with normal TLS. No online Android VPN peer observed then;connection authenticated after phone VPN connected.",
+  "limits": [
+    "Qualitative functional observations,no latency/fps/physical timing study",
+    "No general Safari/iOS,full IME/shortcut/clipboard or long-session claim",
+    "Underlying mobile network migration is separate from a deliberate complete network-outage test",
+    "No VPN/Serve/certificate/account changes"
+  ],
+  "background_return": "Unverified: human missed timed source;repeat pending with user-controlled Mac test tone"
+}

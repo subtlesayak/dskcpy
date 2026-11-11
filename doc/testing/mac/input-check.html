@@ -9,6 +9,7 @@
 <main>
 <h1>Phone input check</h1>
 <p>Use the streamed screen on your phone. This page keeps results only in this window.</p>
+<section class="card" aria-labelledby="tone-title"><h2 id="tone-title">Start the sound when you are ready</h2><p>This quiet tone has no planned gaps and ends after five minutes. Enable audio in the phone receiver first.</p><div class="targets"><button id="tone-play">Play continuous tone</button><button id="tone-stop" disabled>Stop tone</button></div><output id="tone-state" aria-live="polite">Tone: stopped</output><span id="tone-remaining" aria-live="off"></span></section>
 <div class="checks">
 <section class="card"><h2>1. Tap each target once</h2><div class="targets"><button data-tap="A">A · 0</button><button data-tap="B">B · 0</button><button data-tap="C">C · 0</button></div><output id="tap-result" aria-live="polite">Total: 0</output></section>
 <section class="card"><h2>2. Hold and drag</h2><p>Choose “Drag: select” on your phone. Hold this target and move slowly for at least three seconds, then lift your finger.</p><button id="hold" data-held="false">Hold and move here</button><output id="hold-result" aria-live="polite">Pointer released · no holds yet</output></section>
@@ -40,5 +41,26 @@ field.addEventListener('keydown',keyEvent);field.addEventListener('keyup',keyEve
 // Deliberately do not clear held state on blur: actual native release events
 // must arrive for an interruption/cleanup test to pass.
 const rows=get('rows');for(let i=1;i<=20;i++){const p=document.createElement('p');p.textContent=`Row ${i} — scroll this box from the phone`;rows.append(p);}rows.addEventListener('scroll',()=>{get('scroll-result').textContent=`Scroll position: ${Math.round(rows.scrollTop)} px`;});
+let toneContext=null,toneAttempt=0,toneTimer;
+function stopTone(message='Tone: stopped'){
+  toneAttempt++;clearInterval(toneTimer);const context=toneContext;toneContext=null;
+  if(context)void context.close();get('tone-play').disabled=false;get('tone-stop').disabled=true;
+  get('tone-state').textContent=message;get('tone-remaining').textContent='';
+}
+get('tone-stop').addEventListener('click',()=>stopTone());
+get('tone-play').addEventListener('click',async()=>{
+  stopTone();const mine=++toneAttempt;get('tone-play').disabled=true;get('tone-stop').disabled=false;
+  try{
+    const context=new AudioContext();toneContext=context;await context.resume();if(mine!==toneAttempt)return;
+    const base=context.currentTime+.1,oscillator=context.createOscillator(),gain=context.createGain();
+    oscillator.type='sine';oscillator.frequency.value=440;gain.gain.setValueAtTime(0,base);
+    gain.gain.linearRampToValueAtTime(.025,base+.02);gain.gain.setValueAtTime(.025,base+299.98);gain.gain.linearRampToValueAtTime(0,base+300);
+    oscillator.connect(gain).connect(context.destination);oscillator.onended=()=>{if(mine===toneAttempt)stopTone('Tone: finished');};
+    oscillator.start(base);oscillator.stop(base+300);get('tone-state').textContent='Tone: playing continuously';
+    const remaining=()=>{const seconds=Math.max(0,Math.ceil(base+300-context.currentTime));get('tone-remaining').textContent=`${Math.floor(seconds/60)}:${String(seconds%60).padStart(2,'0')} remaining`;};
+    remaining();toneTimer=setInterval(remaining,1000);
+  }catch{if(mine===toneAttempt)stopTone('Tone could not start. Please report this result.');}
+});
+window.addEventListener('pagehide',()=>stopTone());
 </script>
 </html>

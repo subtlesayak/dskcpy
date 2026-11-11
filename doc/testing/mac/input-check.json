@@ -1,7 +1,7 @@
 {
   "checked_at": "2026-11-11T12:48:03.659773+00:00",
   "fixture": "doc/testing/mac/input-check.html",
-  "sha256": "6dd5f0701fba9517a329353a3de3d4bef9f2568e3799d206847a3175112fa1e5",
+  "sha256": "0bd54818ec02535f5ecb06d72a018eb7627826a00be644154d28d5fe5b43fd87",
   "purpose": "Owned readable targets, held-pointer duration/release, actual host text echo,held-key indicator and two-finger scroll position. No network transmission or persistence.",
   "browser_fixture_checks": [
     "One automated A click increments count to1",
@@ -24,5 +24,13 @@
     ]
   },
   "cleanup_rule": "Held states deliberately are not auto-cleared on blur,so native release events must reach the owned page",
-  "fixture_indicator_correction": "Native Unicode text events use physical code KeyA while key text may differ on keyup (e.g. keydown c,keyup a). Pair code+location instead of text. Actual observed pairs release correctly. This corrects the fixture,not native input."
+  "fixture_indicator_correction": "Native Unicode text events use physical code KeyA while key text may differ on keyup (e.g. keydown c,keyup a). Pair code+location instead of text. Actual observed pairs release correctly. This corrects the fixture,not native input.",
+  "physical_input_fixture_sha256": "6dd5f0701fba9517a329353a3de3d4bef9f2568e3799d206847a3175112fa1e5",
+  "user_controlled_audio": {
+    "purpose": "Avoid missed agent-timed audio windows by letting the human press Play on the owned Mac page via the receiver",
+    "source": "Web Audio440Hz sine,.025gain,300s,20ms endpoint fades only;timerdoesnotdriveaudio",
+    "controls": "Play,Stop,countdown,auto-end and pagehide cleanup;generation guards prevent late startup after Stop",
+    "verification": "Syntax/rendered ready controls;physical activation/Home repeat pending",
+    "qualification_limit": "This addition does not retroactively change the previously tested input fixture or qualify a full private five-minute listening test"
+  }
 }

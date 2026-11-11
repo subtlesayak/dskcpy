@@ -3,17 +3,16 @@ import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { privateRtcBind } from '../server/browser-rtc.mjs';
-import { parseOptions } from './launch.mjs';
+import { checkInstallation, parseOptions } from './launch.mjs';
+import { verifyMacBrowserRuntime } from './mac-browser-runtime.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 try {
   if (process.platform !== 'darwin') throw new Error('Run this launcher in Terminal on the Mac.');
   if (process.argv.slice(2).some((arg) => arg !== '--check')) throw new Error('Use --check or no arguments.');
-  const executable = path.resolve(root, process.env.SCRCPY_GUI_BINARY || 'build-macos/app/scrcpy');
   const dashboardPort = parseOptions([], process.env).port;
-  if (!existsSync(executable) || !existsSync(path.join(root, 'gui/dist/index.html'))) {
-    throw new Error('Build the Mac host and GUI before launching browser sharing.');
-  }
+  const { executable } = await verifyMacBrowserRuntime(root);
+  await checkInstallation(root);
   const tailscale = ['/usr/local/bin/tailscale', '/opt/homebrew/bin/tailscale',
     '/Applications/Tailscale.app/Contents/MacOS/Tailscale'].find(existsSync);
   if (!tailscale) throw new Error('Install and connect Tailscale on both devices first.');

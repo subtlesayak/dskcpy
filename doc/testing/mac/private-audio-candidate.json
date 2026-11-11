@@ -20,14 +20,26 @@
     "Missing explicit native binary rejects before VPN/service/capture"
   ],
   "integration_validation": {
-    "backend_pass": 188,
+    "backend_pass": 195,
     "optional_skips": 7,
     "artifact_tests_pass": 7,
     "production_build": "passed"
   },
-  "physical_status": "Not activated; active USB stream preserved. Needs human-controlled launcher switch before private-route audible testing.",
+  "physical_status": "Edge/Android over Wi-Fi+Tailscale/WebRTC: short stablevideo/smoothaudio/mutepass. Then phoneWi-FiOFF/mobiledata: video,input,typing456,audio/mutepass. Private full5min listening and Home/return remain unverified.",
   "limits": [
     "Existing private Serve route only; no network or account settings changed",
     "Unsigned experimental arm64/macOS13 target; no clean minimum-OS or signing/notarization pass"
-  ]
+  ],
+  "preflight_correction": {
+    "review_reproduction": "--check incorrectly reports nativeBuilt:true when explicit native override is an empty directory",
+    "resolution": "Reuse executable/PATH resolution and actual bounded --help Mac capability check,then shared installation verification; invalid explicit values never fall back",
+    "probe_bounds": "5000ms,SIGKILL for only its owned probe child,1MiB output",
+    "checks": "195 backend pass,seven optional skips;actual valid f837 and PATH selection pass;invalid directory/missing/non-executable/ordinary backend CLI rejects;real non-responsive help child is terminated;build pass",
+    "activation_limit": "Check-only/source change does not alter active known-valid f837 private stream"
+  },
+  "source_sha256": {
+    "gui/scripts/mac-browser-runtime.mjs": "37a58ff5c484d17a48879623f7148d210d5e594136c9f45640a049a6459b5874",
+    "gui/scripts/start-browser-macos.mjs": "0ee6d25907ba14342f733dc129cc834a2fa3fd3eebd0339f294e3c1fabf198c2",
+    "gui/server/mac-browser-runtime.test.mjs": "132dbc2c3a5166b8c931de9e57985cbe59647437acfcce38ccd61c197af7d98b"
+  }
 }
