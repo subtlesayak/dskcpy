@@ -18,6 +18,7 @@ struct fixture {
     struct sc_reverse_touch_point active[SC_REVERSE_TOUCH_LIMIT];
     unsigned active_count;
     bool mouse_down, mouse_fail;
+    bool accept_timed_out_frame;
 };
 
 static unsigned
@@ -38,12 +39,16 @@ inject(void *userdata, const struct sc_reverse_touch_frame *frame, unsigned coun
     struct recorded_frame *record = &f->log[f->calls++];
     record->count = count;
     memcpy(record->points, frame, count * sizeof(*frame));
+    enum sc_reverse_touch_result deferred_result = SC_TOUCH_OK;
     if (f->error_index < f->error_count) {
         enum sc_reverse_touch_result result = f->errors[f->error_index++];
         if (result == SC_TOUCH_INVALID) {
             f->active_count = 0;
         }
-        if (result != SC_TOUCH_OK) {
+        if (result == SC_TOUCH_TIMEOUT && f->accept_timed_out_frame) {
+            deferred_result = result;
+            f->accept_timed_out_frame = false;
+        } else if (result != SC_TOUCH_OK) {
             return result;
         }
     }
@@ -59,8 +64,15 @@ inject(void *userdata, const struct sc_reverse_touch_frame *frame, unsigned coun
             f->active_count = 0;
             return SC_TOUCH_INVALID;
         } else if (p->phase == SC_TOUCH_RELEASE || p->phase == SC_TOUCH_ABORT) {
-            assert(p->point.x == f->active[index].x);
-            assert(p->point.y == f->active[index].y);
+            bool same = p->point.x == f->active[index].x
+                     && p->point.y == f->active[index].y;
+            if (!same && p->phase == SC_TOUCH_ABORT) {
+                // A timeout may have accepted the MOVE. Windows invalidates
+                // all contacts when UP differs from the last accepted UPDATE.
+                f->active_count = 0;
+                return SC_TOUCH_INVALID;
+            }
+            assert(same);
         }
         for (unsigned j = 0; j < i; ++j) {
             assert(frame[j].point.pointer_id != p->point.pointer_id);
@@ -79,7 +91,7 @@ inject(void *userdata, const struct sc_reverse_touch_frame *frame, unsigned coun
             f->active[f->active_count++] = frame[i].point;
         }
     }
-    return SC_TOUCH_OK;
+    return deferred_result;
 }
 
 static void
@@ -224,6 +236,33 @@ test_failure_recovery(void) {
 }
 
 static void
+test_uncertain_delivery(void) {
+    const enum sc_reverse_touch_action actions[] = {
+        SC_TOUCH_DOWN, SC_TOUCH_ADD, SC_TOUCH_MOVE, SC_TOUCH_UP,
+    };
+    for (unsigned i = 0; i < sizeof(actions) / sizeof(actions[0]); ++i) {
+        struct fixture f;
+        init(&f, false);
+        if (actions[i] != SC_TOUCH_DOWN) {
+            assert(event(&f, SC_TOUCH_DOWN, 1, 10, 0));
+        }
+        f.errors[0] = SC_TOUCH_TIMEOUT; f.error_count = 1;
+        f.accept_timed_out_frame = true;
+        uint64_t id = actions[i] == SC_TOUCH_ADD ? 2 : 1;
+        assert(!event(&f, actions[i], id, 90, 1));
+        assert(!f.active_count && !f.touch.count && f.touch.needs_down);
+        assert(!f.touch.mouse_only && !f.mouse_calls);
+        unsigned calls = f.calls;
+        sc_reverse_touch_tick(&f.touch, 1000000);
+        assert(f.calls == calls);
+        assert(event(&f, SC_TOUCH_DOWN, 8, 20, 2));
+        assert(event(&f, SC_TOUCH_ADD, 9, 30, 3));
+        assert(sc_reverse_touch_cancel(&f.touch));
+        assert(!f.active_count);
+    }
+}
+
+static void
 test_release_and_keepalive_failures(void) {
     for (unsigned i = 0; i < 3; ++i) {
         struct fixture f;
@@ -352,10 +391,11 @@ main(void) {
     test_retry_and_hold();
     test_retry_each_phase();
     test_failure_recovery();
+    test_uncertain_delivery();
     test_release_and_keepalive_failures();
     test_bounded_retry_and_cleanup();
     test_fallback_and_lifecycle();
     test_bounds_and_stress();
-    puts("reverse touch: seven regression groups passed (2,000 stress gestures)");
+    puts("reverse touch: eight regression groups passed (2,000 stress gestures)");
     return 0;
 }
