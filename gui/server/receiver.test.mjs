@@ -259,7 +259,7 @@ test('browser-native mode connects without WebCodecs and forwards explicit audio
   assert.equal(h.decoders.length, 0);
   assert.equal(h.$('stream-panel').hidden, false);
   await h.$('audio').emit('click');
-  assert.equal(h.$('audio').textContent, 'Audio on');
+  assert.equal(h.$('audio').attrs.get('aria-label'), 'Audio on');
   assert.equal(h.$('rtc-display').muted, false);
   h.document.hidden = true; h.document.emit('visibilitychange');
   assert.equal(h.$('rtc-display').muted, true);
@@ -267,7 +267,7 @@ test('browser-native mode connects without WebCodecs and forwards explicit audio
   h.document.hidden = false; h.document.emit('visibilitychange');
   assert.equal(h.$('rtc-display').paused, false);
   await h.$('audio').emit('click');
-  assert.equal(h.$('audio').textContent, 'Audio off');
+  assert.equal(h.$('audio').attrs.get('aria-label'), 'Audio off');
   assert.equal(h.$('rtc-display').muted, true);
   const commands = h.socket.sent.filter((data) => Buffer.isBuffer(data) && data[0] === 5).map((data) => data[1]);
   assert.ok(commands.includes(10)); assert.equal(commands.at(-1), 11);
@@ -283,7 +283,7 @@ test('late browser audio rejection cannot change a disconnected receiver', async
   rejectPlay(new Error('Playback interrupted by teardown'));
   await enabling;
   assert.equal(h.$('error').textContent, '');
-  assert.equal(h.$('audio').textContent, 'Audio off');
+  assert.equal(h.$('audio').attrs.get('aria-label'), 'Audio off');
 });
 
 test('a superseded audio enable cannot report an error after the user mutes again', async (t) => {
@@ -295,7 +295,7 @@ test('a superseded audio enable cannot report an error after the user mutes agai
   rejectPlay(new Error('Playback interrupted by mute'));
   await enabling;
   assert.equal(h.$('error').textContent, '');
-  assert.equal(h.$('audio').textContent, 'Audio off');
+  assert.equal(h.$('audio').attrs.get('aria-label'), 'Audio off');
   assert.equal(h.$('rtc-display').muted, true);
   h.$('disconnect').emit('click');
 });
@@ -323,7 +323,7 @@ test('hiding during audio enable preserves mute intent and its accessible button
   await enabling;
   h.$('rtc-display').play = () => Promise.resolve();
   h.document.hidden = false; h.document.emit('visibilitychange');
-  assert.equal(h.$('audio').textContent, 'Audio on');
+  assert.equal(h.$('audio').attrs.get('aria-label'), 'Audio on');
   assert.equal(h.$('audio').attrs.get('aria-pressed'), 'true');
   assert.equal(h.$('rtc-display').muted, false);
   assert.equal(h.$('error').textContent, '');
@@ -334,7 +334,7 @@ test('a current browser playback denial still mutes audio and offers a retry', a
   const h = receiver(t, { webRtc: true, webCodecs: false });
   h.$('rtc-display').play = () => Promise.reject(new Error('Playback denied'));
   await h.$('audio').emit('click');
-  assert.equal(h.$('audio').textContent, 'Audio off');
+  assert.equal(h.$('audio').attrs.get('aria-label'), 'Audio off');
   assert.equal(h.$('audio').attrs.get('aria-pressed'), 'false');
   assert.equal(h.$('rtc-display').muted, true);
   assert.match(h.$('error').textContent, /Audio could not start/);
@@ -448,6 +448,30 @@ test('a shrinking visual viewport keeps typing fitted without breaking paired ke
   const keys = h.socket.sent.filter(data => Buffer.isBuffer(data) && data[0] === 8);
   assert.deepEqual(keys.map(data => [data[1], data.readUInt16BE(2)]), [[0, 224], [1, 224]]);
   assert.equal(h.$('keyboard-controls').hidden, false);
+  h.$('disconnect').emit('click');
+});
+
+test('keyboard fitting retains viewport offset through fullscreen and does not force page scrolling', async (t) => {
+  const h = receiver(t, { keyboard: true, visualHeight: 600 }); let scrolls = 0;
+  h.$('keyboard-input').scrollIntoView = () => scrolls++;
+  h.$('keyboard').emit('click');
+  h.window.visualViewport.height = 180; h.window.visualViewport.offsetTop = 12;
+  h.window.visualViewport.emit('resize');
+  assert.equal(h.cssVariables.get('--receiver-height'), '180px');
+  assert.equal(h.cssVariables.get('--receiver-top'), '12px');
+  await h.$('fullscreen').emit('click');
+  assert.equal(h.cssVariables.get('--receiver-height'), '180px');
+  assert.equal(h.$('fullscreen').attrs.get('aria-label'), 'Exit full screen');
+  assert.equal(scrolls, 0); assert.equal(h.$('keyboard-controls').hidden, false);
+  h.$('disconnect').emit('click');
+});
+
+test('pinch zoom does not refit away the user magnification', (t) => {
+  const h = receiver(t, { keyboard: true, visualHeight: 600 });
+  h.window.visualViewport.scale = 2; h.window.visualViewport.height = 300;
+  h.window.visualViewport.offsetTop = 50; h.window.visualViewport.emit('resize');
+  assert.equal(h.cssVariables.get('--receiver-height'), '600px');
+  assert.equal(h.cssVariables.get('--receiver-top'), '0px');
   h.$('disconnect').emit('click');
 });
 

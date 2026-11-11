@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
   <title>Receiver · dskcpy</title>
   <link rel="stylesheet" href="/receiver.css">
   <script type="module" src="/receiver.mjs"></script>
@@ -26,13 +26,14 @@
     </section>
     <p id="error" role="alert"></p>
     <section id="stream-panel" hidden aria-label="Remote desktop">
-      <div id="workspace"><div id="stage"><video id="rtc-display" autoplay playsinline muted hidden aria-label="Streamed desktop video"></video><canvas id="display" aria-label="Streamed desktop. Touch to control when input is enabled."></canvas></div>
+      <div id="receiver-viewport"><div id="workspace"><div id="stage"><video id="rtc-display" autoplay playsinline muted hidden aria-label="Streamed desktop video"></video><canvas id="display" aria-label="Streamed desktop. Touch to control when input is enabled."></canvas></div>
         <div id="control-panels" hidden>
           <p id="orientation-help" class="subtle" role="status" hidden></p>
           <section id="keyboard-controls" hidden aria-label="Remote keyboard">
-            <div class="panel-heading"><label for="keyboard-input">Type on computer</label><button id="close-keyboard" type="button" aria-label="Close keyboard">Close</button></div>
-            <textarea id="keyboard-input" rows="1" maxlength="512" autocomplete="off" autocapitalize="off" spellcheck="false" aria-describedby="keyboard-help"></textarea>
-            <p id="keyboard-help" class="subtle">Text goes to the active Mac window. Browser and system shortcuts may stay on this device.</p>
+            <label class="sr-only" for="keyboard-input">Type on computer</label>
+            <textarea id="keyboard-input" rows="1" maxlength="512" autocomplete="off" autocapitalize="off" spellcheck="false" aria-describedby="keyboard-help" placeholder="Type here"></textarea>
+            <button id="close-keyboard" type="button" aria-label="Close keyboard" title="Close keyboard"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="m6 6 12 12M6 18 18 6"/></svg></button>
+            <p id="keyboard-help" class="sr-only">Text goes to the active Mac window. Browser and system shortcuts may stay on this device.</p>
           </section>
           <section id="more-controls" hidden aria-label="Stream options">
             <div class="panel-heading"><h2>Options</h2><button id="close-options" type="button" aria-label="Close options">Close</button></div>
@@ -56,19 +57,19 @@
       <div id="control-dock">
         <nav id="toolbar" aria-label="Stream controls">
           <div id="primary-controls">
-            <button id="touch" type="button" aria-pressed="true">Touch on</button>
-            <button id="keyboard" type="button" aria-expanded="false" aria-controls="keyboard-controls" hidden>Keyboard</button>
-            <button id="audio" type="button" aria-label="Audio off" aria-pressed="false">Audio off</button>
-            <button id="fullscreen" type="button" title="Open full screen in landscape">Full screen</button>
-            <button id="more" type="button" aria-expanded="false" aria-controls="more-controls">Options</button>
+            <button id="touch" type="button" aria-pressed="true" aria-label="Touch on" title="Touch on"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 3 6 16 3-6 6-3Z"/><path class="state-off" d="m3 21 18-18"/></svg><span class="sr-only" id="touch-label">Touch on</span></button>
+            <button id="keyboard" type="button" aria-expanded="false" aria-controls="keyboard-controls" hidden aria-label="Keyboard" title="Keyboard"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M6 9h.01M10 9h.01M14 9h.01M18 9h.01M6 12h.01M10 12h.01M14 12h.01M18 12h.01M7 16h10"/></svg><span class="sr-only" id="keyboard-label">Keyboard</span></button>
+            <button id="audio" type="button" aria-label="Audio off" aria-pressed="false" title="Audio off"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4Z"/><path class="sound-on" d="M15 8a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14"/><path class="sound-off" d="m16 9 6 6m0-6-6 6"/></svg><span class="sr-only" id="audio-label">Audio off</span></button>
+            <button id="fullscreen" type="button" title="Open full screen in landscape" aria-label="Full screen"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path class="enter-screen" d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/><path class="exit-screen" d="M3 8h5V3m8 0v5h5M8 21v-5H3m13 5v-5h5"/></svg><span class="sr-only" id="fullscreen-label">Full screen</span></button>
+            <button id="more" type="button" aria-expanded="false" aria-controls="more-controls" aria-label="Options" title="Options"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg><span class="sr-only" id="more-label">Options</span></button>
           </div>
-          <p id="rail-scroll-hint" class="subtle" hidden>Scroll controls ↓</p>
-          <button id="hide-controls" type="button">Hide controls</button>
+          <p id="rail-scroll-hint" class="subtle" hidden><span class="sr-only">Scroll controls to see more</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 8 6-6 6 6m-12 8 6 6 6-6"/></svg></p>
+          <button id="hide-controls" type="button" aria-label="Hide controls" title="Hide controls"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 5 7 7-7 7m11-14v14"/></svg><span class="sr-only" id="hide-controls-label">Hide controls</span></button>
         </nav>
       </div>
       <button id="show-controls" type="button" aria-label="Show controls" title="Show controls" hidden>
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
-      </button>
+      </button></div>
     </section>
   </main>
 </body>

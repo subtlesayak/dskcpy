@@ -13,6 +13,10 @@ function takeJoinFragment() {
   return key;
 }
 let scannedKey = takeJoinFragment();
+function setRailLabel(id, label) {
+  $(id).setAttribute('aria-label', label); $(id).setAttribute('title', label);
+  $(`${id}-label`).textContent = label;
+}
 const canvas = $('display');
 const rtcDisplay = $('rtc-display');
 let rtcReceiver, mediaMode = 'webcodecs';
@@ -73,7 +77,7 @@ function drainAudioAcks(all = false) {
 function audioUnavailable() {
   muted = true; stopAudio(); drainAudioAcks(true); action(11);
   if (audio && audio.state !== 'closed') audio.close(); audio = null;
-  $('audio').textContent = 'Audio unsupported'; $('audio').disabled = true;
+  setRailLabel('audio', 'Audio unsupported'); $('audio').disabled = true;
   $('audio').setAttribute('aria-label', 'Audio unsupported');
   $('audio').setAttribute('aria-pressed', 'false');
   $('error').textContent = 'Opus audio is unavailable in this browser. Video can continue.';
@@ -117,7 +121,7 @@ function disconnect() {
   document.body.classList.remove('is-streaming', 'controls-hidden');
   $('join').disabled = false; $('join').textContent = 'Connect';
   $('status').textContent = 'Disconnected · create a new code on the computer';
-  $('audio').textContent = 'Audio off'; $('audio').setAttribute('aria-pressed', 'false');
+  setRailLabel('audio', 'Audio off'); $('audio').setAttribute('aria-pressed', 'false');
   $('audio').disabled = false;
   $('pause').setAttribute('aria-pressed', 'false');
   $('pause').textContent = 'Pause'; $('pause').setAttribute('aria-label', 'Pause video');
@@ -228,7 +232,7 @@ function connect(key = null, requestedMode = preferredMode) {
         keyboardSupported = message.keyboard === true && !viewOnly;
         $('keyboard').hidden = !keyboardSupported;
         touchEnabled = !viewOnly; $('touch').disabled = viewOnly;
-        $('touch').textContent = viewOnly ? 'Window · view only' : 'Touch on';
+        setRailLabel('touch', viewOnly ? 'Window · view only' : 'Touch on');
         $('touch').setAttribute('aria-pressed', String(touchEnabled));
         for (const id of ['volume', 'window']) $(id).hidden = viewOnly;
         $('audio').disabled = viewOnly;
@@ -254,14 +258,14 @@ function connect(key = null, requestedMode = preferredMode) {
       if (flags === 16) {
         stopAudio(); drainAudioAcks(true); audioGeneration++;
         if (audio && audio.state !== 'closed') audio.close(); audio = null;
-        $('audio').textContent = 'Audio unavailable'; $('audio').setAttribute('aria-label', 'Audio unavailable');
+        setRailLabel('audio', 'Audio unavailable'); $('audio').setAttribute('aria-label', 'Audio unavailable');
         $('audio').disabled = true; return;
       }
       if (flags === 4) {
         stopAudio(); // A fresh codec configuration also discards the old route's scheduled audio.
         audioConfig = payload.slice(); $('audio').disabled = false;
-        $('audio').textContent = muted ? 'Audio off' : 'Audio on';
-        $('audio').setAttribute('aria-label', $('audio').textContent);
+        setRailLabel('audio', muted ? 'Audio off' : 'Audio on');
+
         if (mediaMode !== 'webrtc') configureAudio(); return;
       }
       if (flags === 8) {
@@ -353,8 +357,8 @@ $('audio').addEventListener('click', async () => {
   if (mediaMode === 'webrtc') {
     const mine = generation, attempt = ++playbackAttempt;
     const updateButton = () => {
-      $('audio').textContent = muted ? 'Audio off' : 'Audio on';
-      $('audio').setAttribute('aria-label', $('audio').textContent);
+      setRailLabel('audio', muted ? 'Audio off' : 'Audio on');
+
       $('audio').setAttribute('aria-pressed', String(!muted));
     };
     muted = !muted; rtcDisplay.muted = muted; action(muted ? 11 : 10);
@@ -378,8 +382,8 @@ $('audio').addEventListener('click', async () => {
       muted = false; configureAudio(); if (!muted) action(10);
     } catch { $('error').textContent = 'Audio could not start. Check browser playback permissions.'; return; }
   }
-  if (!$('audio').disabled) $('audio').textContent = muted ? 'Audio off' : 'Audio on'; $('audio').setAttribute('aria-pressed', String(!muted));
-  $('audio').setAttribute('aria-label', $('audio').textContent);
+  if (!$('audio').disabled) setRailLabel('audio', muted ? 'Audio off' : 'Audio on'); $('audio').setAttribute('aria-pressed', String(!muted));
+
 });
 function updatePause() {
   if (!authenticated || !header || ws?.readyState !== WebSocket.OPEN) return;
@@ -403,7 +407,7 @@ function updatePause() {
   if (mediaMode !== 'webrtc' && !document.hidden && !muted && audioContext?.state !== 'running') {
     // Mobile browsers may suspend audio independently of the video connection.
     // Ask for a fresh tap instead of showing an inaccurate "Audio on" state.
-    muted = true; action(11); $('audio').textContent = 'Audio off';
+    muted = true; action(11); setRailLabel('audio', 'Audio off');
     $('audio').setAttribute('aria-label', 'Audio off'); $('audio').setAttribute('aria-pressed', 'false');
   }
   if (!document.hidden && !paused) configureAudio();
@@ -432,7 +436,7 @@ $('touch').addEventListener('click', () => {
   if (viewOnly) return;
   releaseTouches(); touchEnabled = !touchEnabled;
   if (!touchEnabled) hideKeyboard();
-  $('touch').textContent = touchEnabled ? 'Touch on' : 'Touch off'; $('touch').setAttribute('aria-pressed', String(touchEnabled));
+  setRailLabel('touch', touchEnabled ? 'Touch on' : 'Touch off'); $('touch').setAttribute('aria-pressed', String(touchEnabled));
 });
 function point(event) {
   const rect = canvas.getBoundingClientRect();
@@ -572,9 +576,9 @@ $('show-controls').addEventListener('click', () => setControlsVisible(true));
 function fitCanvas() {
   releaseTouches(false); // Soft-keyboard viewport changes must not cancel typing or composition.
   $('control-panels').hidden = !(keyboardOpen || openControlTray || !$('orientation-help').hidden);
-  const panel = $('stream-panel'), padding = getComputedStyle(panel);
-  const fullHeight = panel.clientHeight - parseFloat(padding.paddingTop) - parseFloat(padding.paddingBottom);
-  const fullWidth = panel.clientWidth - parseFloat(padding.paddingLeft) - parseFloat(padding.paddingRight);
+  const panel = $('stream-panel'), viewport = $('receiver-viewport'), padding = getComputedStyle(viewport);
+  const fullHeight = viewport.clientHeight - parseFloat(padding.paddingTop) - parseFloat(padding.paddingBottom);
+  const fullWidth = viewport.clientWidth - parseFloat(padding.paddingLeft) - parseFloat(padding.paddingRight);
   panel.classList.toggle('controls-reserved', document.body.classList.contains('controls-hidden')
     && needsControlsRow(canvas.width, canvas.height, fullWidth, fullHeight));
   const bounds = $('stage').getBoundingClientRect();
@@ -590,17 +594,22 @@ new ResizeObserver(fitCanvas).observe($('stage'));
 // opens. Fit the receiver to the visible area without releasing paired keys.
 const visualViewport = window.visualViewport;
 function fitVisualViewport() {
-  if (visualViewport?.height > 0) document.documentElement?.style?.setProperty?.('--receiver-height', `${visualViewport.height}px`);
+  // Do not counteract browser pinch zoom by fitting back to its smaller view.
+  if (visualViewport?.height > 0 && (!visualViewport.scale || Math.abs(visualViewport.scale - 1) < .01)) {
+    document.documentElement?.style?.setProperty?.('--receiver-height', `${visualViewport.height}px`);
+    document.documentElement?.style?.setProperty?.('--receiver-top', `${Math.max(0, visualViewport.offsetTop || 0)}px`);
+  }
   fitCanvas();
-  if (keyboardOpen) $('keyboard-input').scrollIntoView?.({ block: 'nearest' });
+  // The compact field is already inside the fitted viewport. scrollIntoView
+  // here can pan Android's visual viewport and hide the video on each key.
 }
 visualViewport?.addEventListener('resize', fitVisualViewport);
 visualViewport?.addEventListener('scroll', fitVisualViewport);
 if (visualViewport) fitVisualViewport();
 document.addEventListener('fullscreenchange', () => {
   if (!document.fullscreenElement) { fullscreenAttempt++; unlockOrientation(); $('orientation-help').hidden = true; }
-  $('fullscreen').textContent = document.fullscreenElement ? 'Exit full screen' : 'Full screen';
-  fitCanvas();
+  setRailLabel('fullscreen', document.fullscreenElement ? 'Exit full screen' : 'Full screen');
+  fitVisualViewport();
 });
 document.addEventListener('keydown', (event) => { if (event.key === 'Escape') {
   releaseTouches();

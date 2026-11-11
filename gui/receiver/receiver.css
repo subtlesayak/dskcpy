@@ -1,6 +1,7 @@
 :root { color-scheme: dark; font-family: system-ui, sans-serif; color: #dce7ec; background: #080f13; }
 * { box-sizing: border-box; }
 body { margin: 0; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
 main { padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); }
 header { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; margin-block-end: 24px; }
 .brand { font-size: 1.3rem; font-weight: 650; text-decoration: none; color: inherit; }
@@ -26,29 +27,48 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, summary:focus
 #key-help { margin: 0; }
 #error { color: #ffb4ab; max-width: 65ch; margin-inline: auto; overflow-wrap: anywhere; }
 #error:empty { display: none; }
-.is-streaming main { height: var(--receiver-height, 100dvh); min-height: 0; padding: max(8px, env(safe-area-inset-top)) max(8px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left)); display: grid; grid-template-rows: auto auto minmax(0, 1fr); gap: 8px; }
+.is-streaming { overflow: hidden; }
+.is-streaming main { position: fixed; inset-inline: 0; top: var(--receiver-top, 0px); height: var(--receiver-height, 100dvh); min-height: 0; padding: max(8px, env(safe-area-inset-top)) max(8px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left)); display: grid; grid-template-rows: auto auto minmax(0, 1fr); gap: 8px; }
 .is-streaming header { grid-row: 1; margin: 0; gap: 8px; flex-wrap: nowrap; }
 .is-streaming .brand { font-size: 1rem; }
 .is-streaming .brand span { display: none; }
 .is-streaming #status { font-size: .875rem; text-align: end; }
 .is-streaming #error { grid-row: 2; margin: 0; font-size: .875rem; max-height: 20dvh; overflow-y: auto; }
-#stream-panel { grid-row: 3; position: relative; display: grid; grid-template-columns: minmax(0, 1fr) clamp(5.5rem, 10vw, 6.25rem); grid-template-rows: minmax(0, 1fr); min-height: 0; min-width: 0; }
+#stream-panel { grid-row: 3; position: relative; min-height: 0; min-width: 0; }
+#receiver-viewport { position: relative; display: grid; width: 100%; height: 100%; grid-template-columns: minmax(0, 1fr) 56px; grid-template-rows: minmax(0, 1fr); min-height: 0; min-width: 0; }
 #workspace { grid-column: 1; grid-row: 1; display: flex; flex-direction: column; min-height: 0; min-width: 0; }
 #stage { flex: 1; min-height: 0; min-width: 0; background: #000; display: grid; place-items: center; overflow: hidden; border-radius: 8px; }
 canvas { display: block; grid-area: 1 / 1; z-index: 1; max-width: 100%; max-height: 100%; touch-action: none; }
 #rtc-display { grid-area: 1 / 1; object-fit: contain; max-width: 100%; max-height: 100%; pointer-events: none; }
 .rtc-stream #display { opacity: 0; }
 #control-dock { display: contents; }
-#toolbar { grid-column: 2; grid-row: 1; display: flex; flex-direction: column; min-height: 0; min-width: 0; gap: 6px; padding-inline-start: 6px; }
-#primary-controls { display: flex; flex-direction: column; gap: 6px; min-height: 0; min-width: 0; overflow-y: auto; overscroll-behavior: contain; padding: 5px; scroll-padding-block: 5px; }
+#toolbar { grid-column: 2; grid-row: 1; display: flex; flex-direction: column; min-height: 0; min-width: 0; gap: 6px; padding-inline-start: 4px; }
+#primary-controls { display: flex; flex-direction: column; gap: 6px; min-height: 0; min-width: 0; overflow-y: auto; overscroll-behavior: contain; padding: 4px; scroll-padding-block: 4px; scrollbar-width: none; }
+/* The visible two-way scroll cue preserves discoverability without taking
+   15px of the compact rail away from its 44px touch targets. */
+#primary-controls::-webkit-scrollbar { display: none; }
 #toolbar button { flex-shrink: 0; width: 100%; min-width: 0; min-height: 44px; padding: 6px 4px; font-size: .875rem; line-height: 1.4; overflow-wrap: anywhere; }
+#toolbar button { display: grid; place-items: center; }
+#toolbar svg, #close-keyboard svg { pointer-events: none; }
+[dir="rtl"] #hide-controls svg { transform: scaleX(-1); }
+#touch[aria-pressed="true"] .state-off, #audio[aria-pressed="true"] .sound-off, #audio[aria-pressed="false"] .sound-on, #fullscreen .exit-screen { display: none; }
+#fullscreen[aria-label="Exit full screen"] .enter-screen { display: none; }
+#fullscreen[aria-label="Exit full screen"] .exit-screen { display: block; }
 #toolbar button:focus-visible { outline-offset: 1px; }
 #toolbar button[aria-expanded="true"] { background: #24404e; border-color: #64d9fa; }
-#rail-scroll-hint { flex-shrink: 0; margin: 0; text-align: center; font-size: .75rem; line-height: 1.4; }
+#rail-scroll-hint { flex-shrink: 0; margin: 0; text-align: center; height: 16px; line-height: 1; }
 #hide-controls { margin-block-start: auto; }
-#control-panels { flex-shrink: 0; min-height: 0; min-width: 0; max-height: min(50dvh, 24rem); overflow-y: auto; overscroll-behavior: contain; scroll-padding-block: 8px; }
-.keyboard-open #control-panels { max-height: calc(var(--receiver-height, 100dvh) - 3.5rem); }
+#control-panels { flex-shrink: 0; min-height: 0; min-width: 0; max-height: min(60%, 24rem); overflow-y: auto; overscroll-behavior: contain; scroll-padding-block: 8px; }
 #keyboard-controls, #more-controls { margin-block-start: 8px; padding: 12px; background: #101b22; border: 1px solid #405461; border-radius: 12px; }
+#keyboard-controls { display: grid; grid-template-columns: minmax(0, 1fr) 44px; align-items: center; gap: 6px; padding: 6px; }
+#close-keyboard { grid-column: 2; grid-row: 1; display: grid; place-items: center; min-height: 44px; padding: 0; }
+.keyboard-open header { display: none; }
+.keyboard-open main { grid-template-rows: auto minmax(0, 1fr); gap: 4px; }
+.keyboard-open #error { grid-row: 1; }
+.keyboard-open #stream-panel { grid-row: 2; }
+.keyboard-open #workspace { flex-direction: column; }
+.keyboard-open #control-panels { flex-shrink: 0; width: auto; max-height: none; margin-inline-start: 0; overflow: visible; }
+.keyboard-open #keyboard-controls { margin-block-start: 6px; }
 .panel-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-block-end: 8px; }
 .panel-heading h2 { margin: 0; min-width: 0; font-size: 1rem; line-height: 1.4; overflow-wrap: anywhere; }
 .panel-heading button { min-height: 44px; padding: 6px 10px; font-size: .875rem; }
@@ -61,20 +81,22 @@ summary { min-height: 44px; padding: 10px 12px; border: 1px solid #405461; borde
 #show-controls { position: absolute; z-index: 3; right: calc(8px + var(--receiver-inset-right, 0px)); bottom: calc(8px + var(--receiver-inset-bottom, 0px)); width: 44px; height: 44px; min-height: 44px; padding: 0; display: grid; place-items: center; touch-action: manipulation; }
 [dir="rtl"] #show-controls { right: auto; left: calc(8px + var(--receiver-inset-left, 0px)); }
 .controls-hidden header, .controls-hidden #control-dock, .controls-hidden #control-panels { display: none; }
-.controls-hidden #stream-panel { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
-.controls-hidden #stream-panel.controls-reserved { grid-template-columns: minmax(0, 1fr) 60px; }
+.controls-hidden #receiver-viewport { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
+.controls-hidden #stream-panel.controls-reserved #receiver-viewport { grid-template-columns: minmax(0, 1fr) 60px; }
 .controls-hidden #stream-panel.controls-reserved #show-controls { position: static; grid-column: 2; grid-row: 1; justify-self: end; align-self: end; margin: 8px; }
 .controls-hidden main { gap: 0; }
 #stats { font-variant-numeric: tabular-nums; }
-#stream-panel:fullscreen { --receiver-inset-left: max(4px, env(safe-area-inset-left)); --receiver-inset-right: max(4px, env(safe-area-inset-right)); --receiver-inset-bottom: max(4px, env(safe-area-inset-bottom)); width: 100%; height: 100%; background: #080f13; padding: max(4px, env(safe-area-inset-top)) var(--receiver-inset-right) var(--receiver-inset-bottom) max(4px, env(safe-area-inset-left)); }
+#stream-panel:fullscreen { background: #080f13; padding: 0; }
+/* Fullscreen's UA rule forces the outer element to fill the layout viewport.
+   Size this child instead so the soft keyboard cannot cover its controls. */
+#stream-panel:fullscreen #receiver-viewport { --receiver-inset-left: max(4px, env(safe-area-inset-left)); --receiver-inset-right: max(4px, env(safe-area-inset-right)); --receiver-inset-bottom: max(4px, env(safe-area-inset-bottom)); position: absolute; top: var(--receiver-top, 0px); height: var(--receiver-height, 100%); max-height: calc(100% - var(--receiver-top, 0px)); padding: max(4px, env(safe-area-inset-top)) var(--receiver-inset-right) var(--receiver-inset-bottom) max(4px, env(safe-area-inset-left)); }
 @media (max-width: 48rem) { #join-panel { margin-block: 20px; } }
-#keyboard-input { display: block; width: 100%; min-height: 44px; max-height: 100px; font: inherit; font-size: 1rem; line-height: 1.5; resize: vertical; border: 1px solid #627d8c; border-radius: 8px; color: inherit; background: #080f13; padding: 8px 10px; }
-#keyboard-help { margin-block-end: 0; max-width: 65ch; }
+#keyboard-input { display: block; grid-column: 1; grid-row: 1; width: 100%; height: calc(1.5em + 18px); min-height: 44px; font: inherit; font-size: 1rem; line-height: 1.5; resize: none; border: 1px solid #627d8c; border-radius: 8px; color: inherit; background: #080f13; padding: 8px 10px; }
+#keyboard-input:focus-visible { outline-offset: 2px; }
 @media (forced-colors: active) { button:focus-visible, summary:focus-visible, textarea:focus-visible { outline-color: Highlight; } }
 
 @media (min-width: 40rem) {
   #workspace { flex-direction: row; }
   #control-panels { width: clamp(13rem, 28vw, 18rem); max-height: 100%; margin-inline-start: 8px; }
-  .keyboard-open #control-panels { max-height: 100%; }
   #keyboard-controls, #more-controls { margin-block-start: 0; }
 }
