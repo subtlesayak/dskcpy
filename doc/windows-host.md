@@ -92,22 +92,26 @@ In **PowerShell**, from the checkout root:
 npm.cmd ci --prefix gui
 npm.cmd run build --prefix gui
 
-# Replace this example if MSYS2 is installed elsewhere.
-$env:SCRCPY_RUNTIME_DIR = 'C:\msys64\ucrt64\bin'
 node gui/scripts/launch.mjs
 ```
 
-The runtime setting is required when launching a UCRT64 build from PowerShell
-or Explorer: the current Windows resolver otherwise falls back to the legacy
-`C:\msys64\mingw64\bin` unless `MINGW_PREFIX` is inherited. Keep this variable
-in the launching terminal; setting it in another terminal does not affect
-Explorer or an already-running service. No global PATH change is required.
+The resolver reads the native binary's PE imports to choose UCRT64 or legacy
+MINGW64. It discovers matching MSYS2 roots already on PATH and the default
+`C:\msys64` installation. A fresh PowerShell/Explorer launch with a normal
+UCRT64 install needs no runtime variable. Unknown images prefer UCRT64, then an
+available legacy install; the actual `--help` probe still has to load.
+
+For a custom installation or an unrecognized/mixed-runtime image, set
+`$env:SCRCPY_RUNTIME_DIR = 'D:\your-msys2\ucrt64\bin'` in the launching terminal.
+An explicit runtime directory, then `MINGW_PREFIX/bin`, remains authoritative;
+invalid overrides do not silently select another installation. The child PATH
+contains one selected MSYS2 runtime family. Global PATH is unchanged.
 
 The launcher finds `x-reverse/app/scrcpy.exe` and its sibling `server` artifacts.
 It opens the dashboard at <http://127.0.0.1:27183> on **this computer**. Keep the
 terminal open. For later launches from the same configured terminal, you can
 run `.\start-dskcpy.cmd`; Explorer double-click is suitable only when its
-inherited environment already has the correct runtime setting.
+runtime is discoverable or its inherited environment has the custom override.
 
 For custom locations, set `SCRCPY_GUI_BINARY`, `SCRCPY_RUNTIME_DIR`, and any
 asset overrides described in the [dashboard guide](../gui/README.md).
