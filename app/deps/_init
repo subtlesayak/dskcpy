@@ -82,6 +82,7 @@ get_file() {
             # Bound connection/download time and only cache verified payloads.
             # curl also races IPv4/IPv6 rather than stalling on one family.
             curl --fail --location --connect-timeout 15 --max-time 300 --retry 2 \
+                --retry-all-errors --retry-delay 2 \
                 "$url" -o "$file.download"
             checksum "$file.download" "$sum"
             mv "$file.download" "$file"

@@ -96,6 +96,14 @@ jobs:
 
       # One Mac runner verifies both paths; source dependencies/builds remain
       # isolated from the ordinary Homebrew-backed developer test build.
+      - name: Cache pinned dependency archives (always checksum before extraction)
+        uses: actions/cache@v4
+        with:
+          path: |
+            app/deps/work/sources/*.tar.gz
+            app/deps/work/sources/*.tar.xz
+            app/deps/work/sources/*.zip
+          key: macos-host13-sources-${{ hashFiles('app/deps/*.sh', 'app/deps/_init') }}
       - name: Build and verify the separate unsigned Mac hosting candidate
         run: bash release/build_macos_host.sh release/work/host-arm64
       - name: Check packaged browser/dashboard runtime without starting capture
