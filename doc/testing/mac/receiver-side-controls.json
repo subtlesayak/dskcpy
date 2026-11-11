@@ -5,7 +5,7 @@
   "scope": "Right receiver rail, accessible typing/options panels, automatic authorized Android USB browser opening, bounded WebCodecs output drain",
   "checks": {
     "backend": {
-      "passed": 171,
+      "passed": 173,
       "failed": 0,
       "optional_skips": 7
     },
@@ -36,5 +36,7 @@
     "gui/src/BrowserHostPanel.tsx": "2085e4eaf05800cf9e1a9d918dac88e26c166d116c3baea1b20f2f5667ecd672",
     "tools/macos-usb-browser-start.sh": "d0bc038cb42a047aa678034c8eb843143c6b0d56e0ef9c97f229a8d9bc39e732"
   },
-  "standards_reference": "https://www.w3.org/TR/webcodecs/#dom-videodecoder-flush"
+  "standards_reference": "https://www.w3.org/TR/webcodecs/#dom-videodecoder-flush",
+  "merged_master": "bedf40bcc190d8eff6b5458f6df4a182d5e5b9b4",
+  "runtime_note": "Master source merged after the live USB stream began; native artifact and loaded service remain unchanged. WebRTC audio fix loads on a future authorized launcher restart."
 }
