@@ -65,10 +65,10 @@ Then open <http://127.0.0.1:27183>.
 
 ### Windows double-click launcher
 
-After building the native host and dashboard, configure its UCRT64 runtime in
-PowerShell as described in [Windows setup](../doc/windows-host.md), then run
-`.\start-dskcpy.cmd` from that terminal. Explorer double-click requires its own
-inherited environment to contain that runtime setting. The launcher opens the
+After building the native host and dashboard, run `.\start-dskcpy.cmd` or
+double-click it in Explorer. The standard MSYS2 UCRT64 installation is detected;
+custom installations may need the runtime override described in
+[Windows setup](../doc/windows-host.md). The launcher opens the
 local dashboard in your default browser.
 Keep its terminal open; Ctrl+C stops the service and its owned stream.
 Use your normal logged-in desktop session, not a restricted automation session
@@ -110,9 +110,11 @@ portable release.
 
 The service uses `SCRCPY_GUI_BINARY`, `SCRCPY_RUNTIME_DIR`, and `ADB` when set.
 Otherwise it looks for the local `x-reverse` build. Windows runtime lookup uses
-`SCRCPY_RUNTIME_DIR`, then `MINGW_PREFIX/bin`, then the legacy
-`C:\msys64\mingw64\bin` fallback. A UCRT64 build launched outside MSYS2 therefore
-needs `SCRCPY_RUNTIME_DIR` set to its UCRT64 `bin` directory; do not mix DLL families.
+`SCRCPY_RUNTIME_DIR`, then `MINGW_PREFIX/bin`, then PE-import-based UCRT64/MINGW64
+discovery in known PATH roots and `C:\msys64`. Unknown images prefer an available
+UCRT64 installation, then legacy MINGW64. Conflicting MSYS2 bin entries are
+removed from the child environment, and the actual `--help` load is checked.
+Set an explicit runtime for custom/unrecognized images; do not mix DLL families.
 ADB lookup uses `ANDROID_HOME`, then `ANDROID_SDK_ROOT` when
 `ANDROID_HOME` is unset, or `PATH` when neither SDK variable is set. An explicit
 `ADB` path takes priority. A broken explicit path or SDK is reported, never

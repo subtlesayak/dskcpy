@@ -83,7 +83,7 @@ and its data when resolving a signature mismatch.
 ### Windows build
 
 Follow [Windows host setup](doc/windows-host.md). It covers the UCRT64 native
-build, Android companion, dashboard, and explicit runtime-library configuration.
+build, Android companion, dashboard, and runtime-library discovery/overrides.
 Use a new build directory when changing compiler/runtime families.
 
 ### Mac build
