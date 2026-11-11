@@ -86,7 +86,7 @@ function receiver(t, { portrait = false, lockFails = false, webRtc = false, webC
     new Uint8Array(bytes, 16).set(payload); socket.emit('message', { data: bytes });
   }
   media(0, 1, parameters);
-  return { $, document, window, socket, decoders, media, orientation, historyChanges };
+  return { $, document, window, socket, sockets, locationState, decoders, media, orientation, historyChanges };
 }
 
 test('suspension drains queued frames and ignores stale decoder callbacks after resume', async (t) => {
@@ -275,4 +275,36 @@ test('scanning a QR invitation removes the fragment before opening the authentic
   assert.equal(h.socket.sent[0], key);
   assert.equal(h.$('session-key').value, '');
   h.$('disconnect').emit('click');
+});
+
+test('QR links reused in an existing receiver tab scrub before connecting and cannot replace a live viewer', (t) => {
+  const h = receiver(t);
+  h.$('disconnect').emit('click');
+  const key = 'y'.repeat(32);
+  h.locationState.hash = `#connect=${key}`;
+  h.window.emit('hashchange');
+  const next = h.sockets.at(-1);
+  assert.notEqual(next, h.socket);
+  assert.equal(next.fragmentAtConnect, '');
+  next.emit('open');
+  assert.equal(next.sent[0], key);
+  assert.equal(h.$('session-key').value, '');
+  const count = h.sockets.length;
+  h.locationState.hash = `#connect=${'z'.repeat(32)}`;
+  h.window.emit('hashchange');
+  assert.equal(h.locationState.hash, '');
+  assert.equal(h.sockets.length, count);
+  assert.equal(next.readyState, 1);
+  assert.equal(h.$('session-key').value, '');
+  h.$('disconnect').emit('click');
+});
+
+test('malformed reused-tab QR invitations are removed without authentication', (t) => {
+  const h = receiver(t);
+  h.$('disconnect').emit('click');
+  const count = h.sockets.length;
+  h.locationState.hash = `#connect=${'y'.repeat(32)}&other=1`;
+  h.window.emit('hashchange');
+  assert.equal(h.locationState.hash, '');
+  assert.equal(h.sockets.length, count);
 });

@@ -1,12 +1,12 @@
 {
-  "checked_at": "2026-11-11T08:41:27.826166+00:00",
+  "checked_at": "2026-11-11T08:49:10.961905+00:00",
   "baseline": "ac221b1a85fe92f53221f90bc1dbb5832bbb5486",
   "scope": "Private browser WebRTC, QR invitations, bounded legacy decoder recovery and Mac browser launcher",
   "source_sha256": {
     "app/src/reverse_display_macos.m": "a28e97dbdc87d49f7d2d86fc323505e822b074717ee1485ef1ec5f4dbaca0e29",
     "gui/src/BrowserHostPanel.tsx": "5724fde5585a7915fffad5ef3962451214d94e65e456d73b05823d11f3ba1d53",
     "gui/receiver/protocol.mjs": "39391339e58a40a2517b6e127fa2658e76cb33d73f2bcef6a19f58c65223bc50",
-    "gui/receiver/receiver.mjs": "67826a37f8637085db526de7a0c93d08a6fa25450d142cc0ead86a2d74380ac2",
+    "gui/receiver/receiver.mjs": "ed4880b146c9c9e7526f58f31bb9402c5ccf8ad0adb666360b237030b22ba83c",
     "gui/receiver/rtc.mjs": "8a92285ca12a04bbf23c4cd2a97a94122f3ad8d09fca2f3c979654cc6702bb07",
     "gui/receiver/video.mjs": "a77bf3fa521979497322081f147c8d726a52187fcf6379c6afcd9f3f9323df38",
     "gui/server/browser-rtc.mjs": "fab7a2c5e1e5ed8afd0d7b4f9a3d70b2f47fc06ef7fce21e6913e9c2eb1451c6",
@@ -18,7 +18,7 @@
   "native_binary_sha256": "58874abf11bb8f147fab8495e3454e9a01fb3c4b307f80e331d898edaf42d2c4",
   "verification": {
     "backend": {
-      "passed": 134,
+      "passed": 136,
       "skipped": 6,
       "failed": 0
     },
@@ -27,14 +27,15 @@
       "failed": 0
     },
     "production_build": "TypeScript and Vite passed",
-    "qr": "Independent jsQR decoding plus fragment removal before authenticated socket creation",
+    "qr": "Independent jsQR decoding plus initial/reused-tab fragment removal before authentication; malformed fragments and live-viewer preservation tested.",
     "transport": "Real loopback ICE/DTLS/SRTP H.264 and Opus packets",
-    "browser": "Synthetic color-pattern playback, pause/resume and reload observed; not a physical desktop stream"
+    "browser": "Real browser synthetic 640x360 WebRTC video from initial and reused-tab QR invitations; fragment and code field cleared; reload resumed; Disconnect revoked resume; used invitation rejected. No desktop capture or audible audio in this fixture."
   },
   "physical_status": "Different-network phone QR retry pending user result; Safari/iOS, desktop video, touch and audible browser audio remain unqualified on this candidate",
   "limits": [
     "No public STUN/TURN or Funnel; existing authorized private route and trusted HTTPS required",
     "Local Homebrew runtime targets macOS 27; this binary is not a portable macOS 13 release",
     "Android sustained audio stutter and display-socket startup stall remain open; no Android changes"
-  ]
+  ],
+  "followup_baseline": "1e85a17bebf094ce58de849e9e99b3621e4598e7"
 }

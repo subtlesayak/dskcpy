@@ -26,6 +26,9 @@ The QR is generated locally and includes the code in a URL fragment. The receive
 removes the fragment from the current history entry before authentication;
 fragments are not sent in HTTP requests. The ordinary receiver link contains no
 code. No code is written to application logs, browser storage or saved settings.
+Reopening a QR in an existing receiver tab also clears the fragment and connects;
+it leaves an already connected viewer running. Malformed invitations are cleared
+without attempting authentication.
 Treat the QR like the code: anyone who scans it can view and control this computer.
 Capture starts only after authentication.
 The approved browser can reconnect automatically after a refresh or a brief

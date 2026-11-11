@@ -3,10 +3,15 @@ import { createRtcReceiver } from './rtc.mjs';
 import { createVideoReceiver } from './video.mjs';
 
 const $ = (id) => document.getElementById(id);
-let scannedKey = parseJoinFragment(location.hash || '');
-if ((location.hash || '').startsWith('#connect=')) {
-  window.history.replaceState(null, '', `${location.pathname}${location.search}`);
+function takeJoinFragment() {
+  const fragment = location.hash || '';
+  const key = parseJoinFragment(fragment);
+  if (fragment.startsWith('#connect=')) {
+    window.history.replaceState(null, '', `${location.pathname}${location.search}`);
+  }
+  return key;
 }
+let scannedKey = takeJoinFragment();
 const canvas = $('display');
 const rtcDisplay = $('rtc-display');
 let rtcReceiver, mediaMode = 'webcodecs';
@@ -543,10 +548,14 @@ for (const [id, code] of [['volume-down', 0], ['volume-up', 1], ['minimize', 3],
   for (const name of ['pointerup', 'pointercancel', 'lostpointercapture', 'blur']) button.addEventListener(name, () => { clearTimeout(repeatTimer); clearInterval(repeatInterval); });
 }
 
-if (scannedKey) {
-  if (supported) {
-    $('session-key').value = scannedKey;
+function joinInvitation(key) {
+  if (key && supported && !ws) {
+    $('session-key').value = key;
     $('join-form').requestSubmit();
   }
-  scannedKey = null;
 }
+// Camera/browser links can reuse this document with a fragment-only navigation.
+// Always scrub the invitation, without replacing an already connected viewer.
+window.addEventListener('hashchange', () => joinInvitation(takeJoinFragment()));
+joinInvitation(scannedKey);
+scannedKey = null;
