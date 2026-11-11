@@ -17,7 +17,8 @@
     "usb": "Edge on Android 17 initially stalled at 5s without output; software H.264 unavailable. Bounded flush plus fresh IDR now stays connected with fresh decode ACKs; user confirms picture stays visible for 20 seconds.",
     "usb_picture_and_keyboard": "PASS: user confirms video remains visible for 20 seconds and phone keyboard input; controlled 789 typing independently read in Mac Calculator accessibility state. USB stream left running.",
     "audio": "Unresolved; no pass claimed for current USB candidate",
-    "ui_observations": "PASS for the supplied Edge/Android phone: real portrait and landscape/fullscreen keyboard screenshots verify corrected fitting and compact controls. Aspect-ratio margins remain, and keyboard-open landscape desktop is necessarily small."
+    "ui_observations": "PASS for the supplied Edge/Android phone: real portrait and landscape/fullscreen keyboard screenshots verify corrected fitting and compact controls. Aspect-ratio margins remain, and keyboard-open landscape desktop is necessarily small.",
+    "options_review": "Latest landscape Options screenshot shows a correctly open menu and reachable Close/Hide. Options consumes about a third of width; lower content and Disconnect require scrolling. Remaining medium UI polish: compact help and keep Close/Disconnect visible during scrolling."
   },
   "limitations": [
     "Flushing stalled platform decoders may reduce FPS and increase IDR traffic; not a 60fps qualification",
