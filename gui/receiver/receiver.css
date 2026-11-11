@@ -54,10 +54,12 @@ canvas { display: block; grid-area: 1 / 1; z-index: 1; max-width: 100%; max-heig
 #touch[aria-pressed="true"] .state-off, #audio[aria-pressed="true"] .sound-off, #audio[aria-pressed="false"] .sound-on, #fullscreen .exit-screen { display: none; }
 #fullscreen[aria-label="Exit full screen"] .enter-screen { display: none; }
 #fullscreen[aria-label="Exit full screen"] .exit-screen { display: block; }
+#pause .resume-mark, #pause[aria-pressed="true"] .pause-mark, #drag-mode .select-mark, #drag-mode[aria-pressed="true"] .scroll-mark { display: none; }
+#pause[aria-pressed="true"] .resume-mark, #drag-mode[aria-pressed="true"] .select-mark { display: block; }
 #toolbar button:focus-visible { outline-offset: 1px; }
 #toolbar button[aria-expanded="true"] { background: #24404e; border-color: #64d9fa; }
 #rail-scroll-hint { flex-shrink: 0; margin: 0; text-align: center; height: 16px; line-height: 1; }
-#hide-controls { margin-block-start: auto; }
+#disconnect { margin-block-start: auto; }
 #control-panels { flex-shrink: 0; min-height: 0; min-width: 0; max-height: min(60%, 24rem); overflow-y: auto; overscroll-behavior: contain; scroll-padding-block: 8px; }
 #keyboard-controls, #more-controls { margin-block-start: 8px; padding: 12px; background: #101b22; border: 1px solid #405461; border-radius: 12px; }
 #keyboard-controls { display: grid; grid-template-columns: minmax(0, 1fr) 44px; align-items: center; gap: 6px; padding: 6px; }
@@ -97,6 +99,6 @@ summary { min-height: 44px; padding: 10px 12px; border: 1px solid #405461; borde
 
 @media (min-width: 40rem) {
   #workspace { flex-direction: row; }
-  #control-panels { width: clamp(13rem, 28vw, 18rem); max-height: 100%; margin-inline-start: 8px; }
+  #control-panels { width: 13rem; max-width: 40%; max-height: 100%; margin-inline-start: 8px; }
   #keyboard-controls, #more-controls { margin-block-start: 0; }
 }

@@ -36,21 +36,17 @@
             <p id="keyboard-help" class="sr-only">Text goes to the active Mac window. Browser and system shortcuts may stay on this device.</p>
           </section>
           <section id="more-controls" hidden aria-label="Stream options">
-            <div class="panel-heading"><h2>Options</h2><button id="close-options" type="button" aria-label="Close options">Close</button></div>
-            <button id="pause" type="button" aria-label="Pause video" aria-pressed="false">Pause</button>
+            <div class="panel-heading"><h2>Options</h2><button id="close-options" type="button" aria-label="Close options" title="Close options" ><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 6 12 12M6 18 18 6"/></svg><span class="sr-only" id="close-options-label">Close options</span></button></div>
             <details id="volume"><summary>Computer volume</summary><div id="volume-controls" class="quick-controls">
-              <button id="volume-down" type="button" title="Lower computer volume. Hold to repeat.">Volume −</button>
-              <button id="volume-up" type="button" title="Raise computer volume. Hold to repeat.">Volume +</button>
+              <button id="volume-down" type="button" aria-label="Lower computer volume" title="Lower computer volume" ><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4Zm5 7h6"/></svg><span class="sr-only" id="volume-down-label">Lower computer volume</span></button>
+              <button id="volume-up" type="button" aria-label="Raise computer volume" title="Raise computer volume" ><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4Zm5 7h6m-3-3v6"/></svg><span class="sr-only" id="volume-up-label">Raise computer volume</span></button>
             </div></details>
             <details id="window"><summary>Active window</summary><div id="window-controls" class="quick-controls">
-              <button id="minimize" type="button">Minimize window</button>
-              <button id="maximize" type="button">Maximize / restore</button>
+              <button id="minimize" type="button" aria-label="Minimize active window" title="Minimize active window" ><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7 16h10"/></svg><span class="sr-only" id="minimize-label">Minimize active window</span></button>
+              <button id="maximize" type="button" aria-label="Maximize or restore active window" title="Maximize or restore active window" ><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/></svg><span class="sr-only" id="maximize-label">Maximize or restore active window</span></button>
             </div></details>
-            <button id="drag-mode" type="button" aria-pressed="false">Drag: scroll</button>
-            <p class="subtle">Tap to click. One or two fingers scroll. Choose Drag: select to select text or move items; two fingers still scroll.</p>
-            <p class="subtle">Turn Touch off to view only. Close and Lock are unavailable.</p>
-            <p id="stats" class="subtle">Waiting for the first decoded frame…</p>
-            <button id="disconnect" type="button">Disconnect</button>
+            <details id="touch-help"><summary>Touch help</summary><p class="subtle">Tap to click. One or two fingers scroll. Use the selection icon to select text or drag items; two fingers still scroll.</p></details>
+            <details id="connection-details"><summary>Connection details</summary><p id="stats" class="subtle">Waiting for the first decoded frame…</p></details>
           </section>
         </div>
       </div>
@@ -61,10 +57,14 @@
             <button id="keyboard" type="button" aria-expanded="false" aria-controls="keyboard-controls" hidden aria-label="Keyboard" title="Keyboard"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M6 9h.01M10 9h.01M14 9h.01M18 9h.01M6 12h.01M10 12h.01M14 12h.01M18 12h.01M7 16h10"/></svg><span class="sr-only" id="keyboard-label">Keyboard</span></button>
             <button id="audio" type="button" aria-label="Audio off" aria-pressed="false" title="Audio off"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4Z"/><path class="sound-on" d="M15 8a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14"/><path class="sound-off" d="m16 9 6 6m0-6-6 6"/></svg><span class="sr-only" id="audio-label">Audio off</span></button>
             <button id="fullscreen" type="button" title="Open full screen in landscape" aria-label="Full screen"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path class="enter-screen" d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/><path class="exit-screen" d="M3 8h5V3m8 0v5h5M8 21v-5H3m13 5v-5h5"/></svg><span class="sr-only" id="fullscreen-label">Full screen</span></button>
+            <button id="pause" type="button" aria-label="Pause video" title="Pause video" aria-pressed="false"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path class="pause-mark" d="M8 5v14M16 5v14"/><path class="resume-mark" d="m8 5 11 7-11 7Z"/></svg><span class="sr-only" id="pause-label">Pause video</span></button>
+            <button id="drag-mode" type="button" aria-label="Scroll gestures" title="Scroll gestures" aria-pressed="false"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path class="scroll-mark" d="m8 5 4-3 4 3m-4-3v20m-4-3 4 3 4-3"/><g class="select-mark"><path d="M3 8V3h5m8 0h5v5M3 16v5h5m13-5v5h-5"/><path d="m10 9 3 8 2-3 3-2Z"/></g></svg><span class="sr-only" id="drag-mode-label">Scroll gestures</span></button>
             <button id="more" type="button" aria-expanded="false" aria-controls="more-controls" aria-label="Options" title="Options"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg><span class="sr-only" id="more-label">Options</span></button>
+            <button id="hide-controls" type="button" aria-label="Hide controls" title="Hide controls"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 5 7 7-7 7m11-14v14"/></svg><span class="sr-only" id="hide-controls-label">Hide controls</span></button>
           </div>
           <p id="rail-scroll-hint" class="subtle" hidden><span class="sr-only">Scroll controls to see more</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 8 6-6 6 6m-12 8 6 6 6-6"/></svg></p>
-          <button id="hide-controls" type="button" aria-label="Hide controls" title="Hide controls"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 5 7 7-7 7m11-14v14"/></svg><span class="sr-only" id="hide-controls-label">Hide controls</span></button>
+
+          <button id="disconnect" type="button" aria-label="Disconnect" title="Disconnect" ><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2v10M6 5a9 9 0 1 0 12 0"/></svg><span class="sr-only" id="disconnect-label">Disconnect</span></button>
         </nav>
       </div>
       <button id="show-controls" type="button" aria-label="Show controls" title="Show controls" hidden>

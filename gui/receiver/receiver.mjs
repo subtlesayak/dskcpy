@@ -35,7 +35,7 @@ let resumeAllowed = true;
 let audioGeneration = 0, fullscreenAttempt = 0, playbackAttempt = 0;
 const mediaAcks = createMediaAcknowledger(send);
 const controlTrays = [
-  { trigger: 'more', panel: 'more-controls', first: 'pause' },
+  { trigger: 'more', panel: 'more-controls', first: 'close-options' },
 ];
 let openControlTray = null;
 let selectDrag = false, touchGesture = null;
@@ -124,7 +124,7 @@ function disconnect() {
   setRailLabel('audio', 'Audio off'); $('audio').setAttribute('aria-pressed', 'false');
   $('audio').disabled = false;
   $('pause').setAttribute('aria-pressed', 'false');
-  $('pause').textContent = 'Pause'; $('pause').setAttribute('aria-label', 'Pause video');
+  setRailLabel('pause', 'Pause video'); $('pause').setAttribute('aria-label', 'Pause video');
   $('audio').setAttribute('aria-label', 'Audio off');
   setControlTray(); $('show-controls').hidden = true;
   if (!document.hidden) $('session-key').focus();
@@ -231,7 +231,7 @@ function connect(key = null, requestedMode = preferredMode) {
         viewOnly = message.viewOnly === true;
         keyboardSupported = message.keyboard === true && !viewOnly;
         $('keyboard').hidden = !keyboardSupported;
-        touchEnabled = !viewOnly; $('touch').disabled = viewOnly;
+        touchEnabled = !viewOnly; $('touch').disabled = viewOnly; $('drag-mode').disabled = viewOnly;
         setRailLabel('touch', viewOnly ? 'Window · view only' : 'Touch on');
         $('touch').setAttribute('aria-pressed', String(touchEnabled));
         for (const id of ['volume', 'window']) $(id).hidden = viewOnly;
@@ -415,7 +415,7 @@ function updatePause() {
 }
 $('pause').addEventListener('click', () => {
   paused = !paused; updatePause();
-  $('pause').textContent = paused ? 'Resume' : 'Pause'; $('pause').setAttribute('aria-pressed', String(paused));
+  setRailLabel('pause', paused ? 'Resume video' : 'Pause video'); $('pause').setAttribute('aria-pressed', String(paused));
   $('pause').setAttribute('aria-label', paused ? 'Resume video' : 'Pause video');
 });
 document.addEventListener('visibilitychange', () => {
@@ -512,8 +512,9 @@ canvas.addEventListener('wheel', (event) => {
 }, { passive: false });
 canvas.addEventListener('contextmenu', (event) => { if (touchEnabled && !paused) event.preventDefault(); });
 $('drag-mode').addEventListener('click', () => {
+  if (viewOnly) return;
   releaseTouches(); selectDrag = !selectDrag;
-  $('drag-mode').textContent = selectDrag ? 'Drag: select' : 'Drag: scroll';
+  setRailLabel('drag-mode', selectDrag ? 'Select and drag' : 'Scroll gestures');
   $('drag-mode').setAttribute('aria-pressed', String(selectDrag));
 });
 $('disconnect').addEventListener('click', disconnect);

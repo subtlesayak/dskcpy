@@ -168,7 +168,7 @@ test('Options groups secondary actions and Close/Escape restore focus to the rig
   const h = receiver(t);
   h.$('more').emit('click');
   assert.equal(h.$('more-controls').hidden, false);
-  assert.equal(h.document.activeElement, h.$('pause'));
+  assert.equal(h.document.activeElement, h.$('close-options'));
   h.$('volume-down').emit('click'); h.$('volume-up').emit('click');
   h.$('minimize').emit('click'); h.$('maximize').emit('click');
   assert.deepEqual(h.socket.sent.filter(data => Buffer.isBuffer(data) && data[0] === 5).slice(-4).map(data => data[1]), [0, 1, 3, 4]);
@@ -224,7 +224,7 @@ test('two-finger scroll emits no touch-down and never clicks with the remaining 
 
 test('select-drag is explicit; adding a second finger cancels the pressed contact before scrolling', (t) => {
   const h = receiver(t); h.$('drag-mode').emit('click');
-  assert.equal(h.$('drag-mode').textContent, 'Drag: select');
+  assert.equal(h.$('drag-mode').attrs.get('aria-label'), 'Select and drag');
   pointer(h, 'pointerdown', 1, 100, 200); pointer(h, 'pointermove', 1, 100, 180);
   pointer(h, 'pointerdown', 2, 200, 180); pointer(h, 'pointermove', 2, 200, 140);
   assert.deepEqual(inputs(h).map((data) => data[0] === 3 ? data[1] : 'scroll'), [0, 2, 3, 'scroll']);
@@ -402,6 +402,8 @@ test('window view-only policy disables touch, keyboard, audio and desktop window
   const h = receiver(t, { keyboard: true, viewOnly: true, webRtc: true, webCodecs: false });
   assert.equal(h.$('keyboard').hidden, true); assert.equal(h.$('touch').disabled, true);
   assert.equal(h.$('audio').disabled, true); assert.equal(h.$('window').hidden, true);
+  assert.equal(h.$('drag-mode').disabled, true); h.$('drag-mode').emit('click');
+  assert.notEqual(h.$('drag-mode').attrs.get('aria-pressed'), 'true');
   h.$('touch').emit('click'); h.$('keyboard').emit('click'); await h.$('audio').emit('click');
   pointer(h, 'pointerdown', 1, 100, 100); pointer(h, 'pointerup', 1, 100, 100);
   assert.equal(inputs(h).length, 0);
@@ -481,4 +483,22 @@ test('host capture denial explains the Mac recovery action instead of requesting
   assert.match(h.$('error').textContent, /allow Screen & System Audio Recording/);
   assert.match(h.$('error').textContent, /restart dskcpy/);
   assert.match(h.$('status').textContent, /^Disconnected/);
+});
+
+
+test('rail pause/resume releases typing and retains an explicit accessible playback state', (t) => {
+  const h = receiver(t, { keyboard: true });
+  h.$('keyboard').emit('click');
+  h.$('keyboard-input').emit('keydown', { code: 'ControlLeft', key: 'Control', ctrlKey: true });
+  h.$('pause').emit('click');
+  assert.equal(h.$('keyboard-controls').hidden, true);
+  assert.equal(h.$('pause').attrs.get('aria-label'), 'Resume video');
+  assert.equal(h.$('pause').attrs.get('aria-pressed'), 'true');
+  assert.equal(h.socket.sent.filter(p => Buffer.isBuffer(p) && p[0] === 8).at(-1)[1], 2);
+  h.$('pause').emit('click');
+  assert.equal(h.$('pause').attrs.get('aria-label'), 'Pause video');
+  assert.equal(h.$('pause').attrs.get('aria-pressed'), 'false');
+  const commands = h.socket.sent.filter(p => Buffer.isBuffer(p) && p[0] === 5).map(p => p[1]);
+  assert.ok(commands.includes(7)); assert.equal(commands.at(-1), 8);
+  h.$('disconnect').emit('click');
 });

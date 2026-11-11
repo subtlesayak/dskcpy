@@ -22,7 +22,7 @@ Physical phone screenshots supplied after the initial synthetic review reveal th
 | HIGH | Layout | `gui/receiver/receiver.css`, `#stream-panel:fullscreen` | Fullscreen height is 100%; only the outer main uses the visual viewport height | Implemented an inner viewport with visible height/offset; actual fullscreen synthetic check and real-phone portrait/landscape repeat pass | The landscape soft keyboard covers the lower desktop/control area |
 | MEDIUM | Layout | Receiver typing panel and right rail, portrait and landscape | Large panel, help text and text-button rail consume much of the remaining view | Implemented a one-row input strip and 56px icon rail; 44px targets and 200% text sizing verified | The desktop becomes too small to read comfortably while typing |
 | LOW | UI | Receiver textarea | Native resize handle is visible on a touch-first remote-input field | Implemented a non-resizable single-row field that grows with enlarged text | Resizing competes with the remote screen for scarce space |
-| MEDIUM | Layout | Landscape Options panel, latest real-phone screenshot | A wide menu and expanded help push lower controls/Disconnect below the visible region | Follow-up: collapse secondary help and keep Close/Disconnect visible while the body scrolls | More of the desktop and the end-session action should remain easy to reach |
+| MEDIUM | Layout | Landscape Options panel, latest real-phone screenshot | A wide menu and expanded help push lower controls/Disconnect below the visible region | Implemented quick-action rail icons, pinned Disconnect, collapsed help and a narrower secondary menu; rendered checks pass; phone refresh pending | More of the desktop and the end-session action should remain easy to reach |
 
 Repairs implemented during this review include moving controls to the right, placing secondary actions in Options, restoring trigger focus on Close/Escape, revealing the typing-panel parent before focusing its field, and improving the input boundary from 2.44:1 to 4.44:1 contrast. USB now opens the authorized phone browser with a one-use automatic invitation; manual entry is a fallback disclosure.
 
@@ -30,7 +30,7 @@ Repairs implemented during this review include moving controls to the right, pla
 
 Passed:
 
-- `cd gui && npm test`: 175 passed, zero failed, seven optional platform/native-fixture skips. This includes decoder recovery, stale callback isolation, typed input lifecycle, panel focus, authorized USB auto-open, early phone authentication, manual fallback and launcher configuration reuse checks.
+- `cd gui && npm test`: 176 passed, zero failed, seven optional platform/native-fixture skips. This includes decoder recovery, stale callback isolation, typed input lifecycle, panel focus, authorized USB auto-open, early phone authentication, manual fallback and launcher configuration reuse checks.
 - `cd gui && npm run build`: TypeScript and Vite production build passed.
 - Actual synthetic video in the browser at 320×640 and 844×390: no horizontal overflow, controls at least 44px, 16px focused typing field visible, Options and typing panels mutually exclusive. Typing now uses a compact row below the video.
 - Actual fullscreen and hide/show controls: Exit full screen was exposed; the Show controls target stayed outside the video. Temporary viewport override reset afterward.
@@ -52,4 +52,4 @@ The native binary is SHA-256 `b083ecfd69cf350e7cf831b767c1ebf36640c5e728ac79579f
 
 ## Verdict
 
-Approve for the inspected interface and supplied Edge/Android physical portrait/landscape keyboard states. No HIGH interface finding remains in that scope; the additional MEDIUM Options-space/reachability finding remains as follow-up work. USB video and native phone typing passed; audio, VoiceOver, browser zoom and unverified device scenarios remain overall qualification gates.
+Approve for the inspected interface and supplied Edge/Android physical portrait/landscape keyboard states. No HIGH interface finding remains in that scope; the additional MEDIUM Options-space/reachability finding is repaired in source/rendered preview and awaits the user-chosen phone refresh. USB video and native phone typing passed; audio, VoiceOver, browser zoom and unverified device scenarios remain overall qualification gates.

@@ -1,11 +1,11 @@
 {
-  "checked_at": "2026-11-11T11:18:49.983651+00:00",
+  "checked_at": "2026-11-11T11:31:35.490966+00:00",
   "base_commit": "49d6b3a96328b3abc97240337cd214fd06427637",
   "native_sha256": "b083ecfd69cf350e7cf831b767c1ebf36640c5e728ac79579f1fcc4c73331955",
   "scope": "Right receiver rail, accessible typing/options panels, automatic authorized Android USB browser opening, bounded WebCodecs output drain",
   "checks": {
     "backend": {
-      "passed": 175,
+      "passed": 176,
       "failed": 0,
       "optional_skips": 7
     },
@@ -18,7 +18,7 @@
     "usb_picture_and_keyboard": "PASS: user confirms video remains visible for 20 seconds and phone keyboard input; controlled 789 typing independently read in Mac Calculator accessibility state. USB stream left running.",
     "audio": "Unresolved; no pass claimed for current USB candidate",
     "ui_observations": "PASS for the supplied Edge/Android phone: real portrait and landscape/fullscreen keyboard screenshots verify corrected fitting and compact controls. Aspect-ratio margins remain, and keyboard-open landscape desktop is necessarily small.",
-    "options_review": "Latest landscape Options screenshot shows a correctly open menu and reachable Close/Hide. Options consumes about a third of width; lower content and Disconnect require scrolling. Remaining medium UI polish: compact help and keep Close/Disconnect visible during scrolling."
+    "options_review": "User requested nav icons. Source now moves quick actions into the rail, pins Disconnect, collapses help and narrows the secondary menu; rendered/automated checks pass; phone confirmation pending."
   },
   "limitations": [
     "Flushing stalled platform decoders may reduce FPS and increase IDR traffic; not a 60fps qualification",
@@ -28,9 +28,9 @@
     "WebRTC audio-clock fix merged to master is not yet in this isolated runtime"
   ],
   "source_sha256": {
-    "gui/receiver/index.html": "3d9c2f2877d4b452c1058d64aea29cd6de2de454924a6dd138a6ef4cffdb4e35",
-    "gui/receiver/receiver.css": "31a8835a964db448e6f12ee954f05c4ccf11ddb0feeaf00509e50d5eee320df7",
-    "gui/receiver/receiver.mjs": "758a640b95c958bd29b1edd0d5eff899612fd693650c61249e3bb2617d9c8451",
+    "gui/receiver/index.html": "cb7c365e07a89dfb417ea62e22270013d0bdb3f67f8fb77727eb5338c7e11b70",
+    "gui/receiver/receiver.css": "502e6917b1f8d671f6a1774c4a6909617da61ca7959a06c14b0a3eeea291bbce",
+    "gui/receiver/receiver.mjs": "872276c3617fef0afd41c379cc6c01d23ac39eb3d8eea992551844cf747885ad",
     "gui/receiver/video.mjs": "cc25e3fc28b96c5c7f772e5a9f51cab8e7c4a3a6f6c882a472542fde968295e7",
     "gui/scripts/launch.mjs": "79e2340b25c4e19ffb767bff208515bf1b1b45958c67f20e885c64593f189a5e",
     "gui/server/browser-session.mjs": "1011f96e0f26ed472b68ff7dbd7ee1f4de1cb5d9b6bc97489dcdfe813c6e65ce",
@@ -102,5 +102,21 @@
       "No VoiceOver or Safari/iOS qualification",
       "200% text-size check is separate from full browser-zoom qualification"
     ]
+  },
+  "navigation_icons": {
+    "implemented": [
+      "Pause/resume and scroll/select-drag move into icon rail",
+      "Disconnect pinned outside the scrolling actions",
+      "Volume and window actions use labeled icons in compact expandable groups",
+      "Touch instructions and connection diagnostics collapsed; secondary panel width 208px on wider views"
+    ],
+    "verification": [
+      "176 backend tests pass; seven optional skips; TypeScript/Vite and diff checks pass",
+      "Actual synthetic browser Pause/Resume and Select/drag accessible states verified",
+      "844x390 no horizontal overflow; pinned Disconnect 52x44 at bottom 382",
+      "Simulated keyboard visible height 180: Disconnect bottom 172 and typing field bottom 165 remain visible",
+      "Pinned Disconnect tested on synthetic session; live user session untouched"
+    ],
+    "physical": "Pending user-chosen receiver refresh; preceding phone keyboard/layout pass remains tied to the previous assets"
   }
 }
