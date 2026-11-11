@@ -1,5 +1,5 @@
 {
-  "checked_at": "2026-11-11T11:13:23.002596+00:00",
+  "checked_at": "2026-11-11T11:18:49.983651+00:00",
   "base_commit": "49d6b3a96328b3abc97240337cd214fd06427637",
   "native_sha256": "b083ecfd69cf350e7cf831b767c1ebf36640c5e728ac79579f1fcc4c73331955",
   "scope": "Right receiver rail, accessible typing/options panels, automatic authorized Android USB browser opening, bounded WebCodecs output drain",
@@ -17,7 +17,7 @@
     "usb": "Edge on Android 17 initially stalled at 5s without output; software H.264 unavailable. Bounded flush plus fresh IDR now stays connected with fresh decode ACKs; user confirms picture stays visible for 20 seconds.",
     "usb_picture_and_keyboard": "PASS: user confirms video remains visible for 20 seconds and phone keyboard input; controlled 789 typing independently read in Mac Calculator accessibility state. USB stream left running.",
     "audio": "Unresolved; no pass claimed for current USB candidate",
-    "ui_observations": "Phone screenshots exposed fullscreen keyboard overlap and oversized typing controls. Source fix now passes independent rendered synthetic viewport checks; real-phone repeat remains pending."
+    "ui_observations": "PASS for the supplied Edge/Android phone: real portrait and landscape/fullscreen keyboard screenshots verify corrected fitting and compact controls. Aspect-ratio margins remain, and keyboard-open landscape desktop is necessarily small."
   },
   "limitations": [
     "Flushing stalled platform decoders may reduce FPS and increase IDR traffic; not a 60fps qualification",
@@ -95,7 +95,7 @@
       "Visible primary controls measure 44x44; Close 44x44; Hide at least 44px",
       "Close/Escape focus restoration, scrollable Options and non-overlapping RTL Show controls checked"
     ],
-    "physical": "Awaiting authorized phone reload and actual OS-keyboard/fullscreen repeat; previous USB picture and 789 typing pass apply to preceding assets only",
+    "physical": "PASS: user refreshed existing USB receiver and confirms entire Mac picture, typing field and Close fit above the real OS keyboard in portrait and landscape fullscreen. Supplied phone screenshots independently show desktop edges and controls above the keyboard. No new native binary/controller restart.",
     "limits": [
       "The synthetic viewport shim is a fixture, not a physical OS keyboard",
       "No VoiceOver or Safari/iOS qualification",

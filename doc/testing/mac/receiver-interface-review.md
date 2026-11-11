@@ -7,7 +7,7 @@ Inspected the receiver's connect → stream → right-side controls → typing f
 | Domain | Evidence inspected | Result |
 | --- | --- | --- |
 | Accessibility | Receiver labels, native disclosures, focus-visible styling, Close/Escape focus restoration; keyboard lifecycle unit tests and actual typing-panel focus | Clear in inspected states; VoiceOver walk not verified |
-| Layout | `receiver.css`, stage/control panels and hidden-controls gutter; rendered 320×640 and 844×390 layouts | Physical findings repaired in source; rendered RTL/200% text-size checks pass; real-phone repeat and browser zoom pending |
+| Layout | `receiver.css`, stage/control panels and hidden-controls gutter; rendered 320×640 and 844×390 layouts | Physical findings repaired in source; rendered RTL/200% text-size checks pass; real-phone portrait/landscape repeat passes; full browser zoom remains pending |
 | Writing | Connect, USB auto-open, keyboard, Options and permission-recovery messages | Clear in inspected flow |
 | Typography | System font, wrapping, button line-height and computed 16px typing field | Clear in inspected states; translated expansion not verified |
 | Colors | Computed text, input boundaries and focus-ring contrast | Clear in measured combinations |
@@ -15,11 +15,11 @@ Inspected the receiver's connect → stream → right-side controls → typing f
 
 ## Findings
 
-Physical phone screenshots supplied after the initial synthetic review reveal the following remaining findings. The earlier synthetic-only approval is superseded. These findings are repaired in source and rendered preview; physical requalification remains open.
+Physical phone screenshots supplied after the initial synthetic review reveal the following remaining findings. The earlier synthetic-only approval is superseded. These findings are repaired in source, rendered preview and the supplied physical phone repeat.
 
 | Severity | Domain | Location | Before | After | Why |
 | --- | --- | --- | --- | --- | --- |
-| HIGH | Layout | `gui/receiver/receiver.css`, `#stream-panel:fullscreen` | Fullscreen height is 100%; only the outer main uses the visual viewport height | Implemented an inner viewport with visible height/offset; actual fullscreen synthetic check passes; phone repeat pending | The landscape soft keyboard covers the lower desktop/control area |
+| HIGH | Layout | `gui/receiver/receiver.css`, `#stream-panel:fullscreen` | Fullscreen height is 100%; only the outer main uses the visual viewport height | Implemented an inner viewport with visible height/offset; actual fullscreen synthetic check and real-phone portrait/landscape repeat pass | The landscape soft keyboard covers the lower desktop/control area |
 | MEDIUM | Layout | Receiver typing panel and right rail, portrait and landscape | Large panel, help text and text-button rail consume much of the remaining view | Implemented a one-row input strip and 56px icon rail; 44px targets and 200% text sizing verified | The desktop becomes too small to read comfortably while typing |
 | LOW | UI | Receiver textarea | Native resize handle is visible on a touch-first remote-input field | Implemented a non-resizable single-row field that grows with enlarged text | Resizing competes with the remote screen for scarce space |
 
@@ -39,10 +39,11 @@ Passed:
 - New actual fullscreen preview with a deliberately smaller visual viewport: outer height 390px; visible inner frame 180px at top offset 12px. Video, typing field, Close and Hide all remained inside the expected visible bounds.
 - RTL plus 200% root text size at 320px: 32px input text fits a 66px-high field with no internal or page overflow. This is a text-resize check, not a full browser-zoom or screen-reader pass.
 
+- Real phone: user refreshed the USB receiver and reports everything fits. Supplied portrait and landscape/fullscreen screenshots show the complete Mac image, input and Close control above the OS keyboard. Aspect-ratio margins remain; the keyboard reduces available desktop size. Earlier screenshots remain the failing baseline.
+
 Not verified:
 
 - IME/non-Latin layouts, VoiceOver traversal, pseudo-localization and 200% browser zoom.
-- Real-phone soft-keyboard/fullscreen repeat of the newly fixed assets remains pending. Earlier phone screenshots are the failing baseline.
 - Safari/iPhone/iPad behavior, current candidate audio smoothness, long-session performance and physical recovery regressions.
 
 
@@ -50,4 +51,4 @@ The native binary is SHA-256 `b083ecfd69cf350e7cf831b767c1ebf36640c5e728ac79579f
 
 ## Verdict
 
-Block pending real-phone fullscreen/soft-keyboard repeat verification of the implemented source fix. USB video and native phone typing passed; audio and unverified accessibility/device scenarios remain qualification gates.
+Approve for the inspected interface and supplied Edge/Android physical portrait/landscape keyboard states. No HIGH interface finding remains in that scope. USB video and native phone typing passed; audio, VoiceOver, browser zoom and unverified device scenarios remain overall qualification gates.
