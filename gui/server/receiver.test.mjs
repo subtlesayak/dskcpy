@@ -13,7 +13,7 @@ const parameters = new Uint8Array([0, 0, 1, 0x67, 0x64, 0, 0x28, 0, 0, 1, 0x68, 
 // delayed browser callbacks; rendered/device QA is separate from this harness.
 function receiver(t, { portrait = false, lockFails = false, webRtc = false, webCodecs = true, qrKey = '' } = {}) {
   const timers = new Set(), sockets = [], decoders = [], orientation = [];
-  const locationState = { protocol: 'https:', host: 'receiver.test', pathname: '/', search: '', hash: qrKey ? `#connect=${qrKey}` : '' };
+  const locationState = { protocol: 'https:', host: 'receiver.test', pathname: qrKey ? '/join' : '/', search: '', hash: qrKey ? `#connect=${qrKey}` : '' };
   const historyChanges = [];
   class Target {
     listeners = new Map(); attrs = new Map(); hidden = false; value = ''; textContent = ''; style = {};
@@ -339,7 +339,7 @@ test('a current browser playback denial still mutes audio and offers a retry', a
 
 test('scanning a QR invitation removes the fragment before opening the authenticated socket', (t) => {
   const key = 'z'.repeat(32), h = receiver(t, { webRtc: true, webCodecs: false, qrKey: key });
-  assert.deepEqual(h.historyChanges, ['/']);
+  assert.deepEqual(h.historyChanges, ['/join']);
   assert.equal(h.socket.fragmentAtConnect, '');
   assert.equal(h.socket.sent[0], key);
   assert.equal(h.$('session-key').value, '');

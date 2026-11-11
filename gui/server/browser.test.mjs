@@ -69,6 +69,19 @@ test('receiver origin accepts explicit HTTPS origins, no paths or credentials; d
     'https://user@desktop.example.ts.net', 'https://desktop.example.ts.net/?key=secret']) assert.throws(() => receiverOrigin(value));
 });
 
+test('dedicated QR join page forces a document load without putting credentials in requests', async (t) => {
+  const f = await fixture(t);
+  const page = await fetch(new URL('/join', f.invitation.url));
+  assert.equal(page.status, 200);
+  assert.equal(page.headers.get('cache-control'), 'no-store');
+  const html = await page.text();
+  assert.match(html, /src="\/receiver.mjs"/);
+  assert.ok(!html.includes(f.invitation.key));
+  assert.equal(f.calls(), 0);
+  assert.equal(f.receiver.status().waiting, true);
+  assert.equal((await fetch(new URL('/join/unexpected', f.invitation.url))).status, 404);
+});
+
 test('SRD parser accepts arbitrarily fragmented media and zero-length unavailable status', () => {
   const frames = [];
   const parser = new SrdParser((data, first) => frames.push([data, first]));

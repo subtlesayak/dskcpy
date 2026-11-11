@@ -17,7 +17,7 @@ test('independently decoded QR contains the exact one-use invitation in a fragme
   const decoded = jsQR(rgba, width, width);
   assert.equal(decoded.data, join);
   const url = new URL(decoded.data);
-  assert.equal(url.pathname + url.search, '/');
+  assert.equal(url.pathname + url.search, '/join');
   assert.equal(parseJoinFragment(url.hash), key);
 });
 

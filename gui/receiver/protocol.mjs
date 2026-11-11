@@ -6,6 +6,9 @@ export function browserJoinUrl(address, key) {
       || url.search || url.hash || url.pathname !== '/') throw new Error('Invalid receiver address.');
   // Fragments are not sent in HTTP requests. The receiver clears this from
   // the current history entry before authentication; never persist this URL.
+  // A distinct path forces a document load when a scanner reuses an older
+  // receiver tab that predates automatic fragment handling.
+  url.pathname = '/join';
   url.hash = `connect=${key}`;
   return url.href;
 }

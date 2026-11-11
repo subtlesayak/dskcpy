@@ -9,6 +9,7 @@ import { createBrowserSession } from './browser-session.mjs';
 
 const assets = new Map([
   ['/', ['index.html', 'text/html; charset=utf-8']],
+  ['/join', ['index.html', 'text/html; charset=utf-8']],
   ['/receiver.mjs', ['receiver.mjs', 'text/javascript; charset=utf-8']],
   ['/rtc.mjs', ['rtc.mjs', 'text/javascript; charset=utf-8']],
   ['/video.mjs', ['video.mjs', 'text/javascript; charset=utf-8']],

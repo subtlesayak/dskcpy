@@ -26,6 +26,9 @@ The QR is generated locally and includes the code in a URL fragment. The receive
 removes the fragment from the current history entry before authentication;
 fragments are not sent in HTTP requests. The ordinary receiver link contains no
 code. No code is written to application logs, browser storage or saved settings.
+QR links use a dedicated `/join` page so an older open root receiver tab loads
+the current connection handler. Update and restart the desktop service before
+creating these links; an older service does not serve this route.
 Reopening a QR in an existing receiver tab also clears the fragment and connects;
 it leaves an already connected viewer running. Malformed invitations are cleared
 without attempting authentication.
