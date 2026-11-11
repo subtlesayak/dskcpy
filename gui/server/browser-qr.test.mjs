@@ -17,8 +17,22 @@ test('independently decoded QR contains the exact one-use invitation in a fragme
   const decoded = jsQR(rgba, width, width);
   assert.equal(decoded.data, join);
   const url = new URL(decoded.data);
-  assert.equal(url.pathname + url.search, '/join');
+  assert.match(url.pathname, /^\/join\/[a-f0-9]{32}$/);
+  assert.equal(url.search, '');
   assert.equal(parseJoinFragment(url.hash), key);
+});
+
+test('reopening an invitation changes the document URL without exposing any part of its key', () => {
+  const key = 'x'.repeat(32);
+  const first = new URL(browserJoinUrl('http://127.0.0.1:27200/', key));
+  const second = new URL(browserJoinUrl('http://127.0.0.1:27200/', key));
+  assert.notEqual(first.pathname, second.pathname, 'A new launch must not be only a fragment navigation in an old receiver tab');
+  for (const url of [first, second]) {
+    assert.match(url.pathname, /^\/join\/[a-f0-9]{32}$/);
+    assert.equal(url.search, '');
+    assert.ok(!url.pathname.includes(key));
+    assert.equal(parseJoinFragment(url.hash), key);
+  }
 });
 
 test('QR join rejects invalid keys, unsafe destinations and ambiguous fragment fields', () => {

@@ -86,7 +86,10 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
     res.setHeader('X-Frame-Options', 'DENY');
     res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
     res.setHeader('Content-Security-Policy', "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
-    const asset = assets.get(req.url);
+    // Public per-launch document paths prevent fragment-only reuse of stale
+    // receiver scripts. They grant no access; authentication stays in /stream.
+    const asset = assets.get(req.url)
+      || (/^\/join\/[a-f0-9]{32}$/.test(req.url) ? assets.get('/join') : undefined);
     if (!allowedHost(req.headers.host)) { res.writeHead(403).end(); return; }
     if (req.url === '/stream/session' && req.method === 'GET') {
       const resumable = mayResume(req);

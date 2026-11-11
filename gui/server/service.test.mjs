@@ -251,7 +251,7 @@ test('USB browser mode owns one non-rebinding tunnel and removes only that tunne
   const open = commands.find(args => args.includes('android.intent.action.VIEW'));
   assert.deepEqual(open.slice(0, 5), ['-s', 'test-usb', 'shell', 'am', 'start']);
   const join = new URL(open.at(-1));
-  assert.equal(join.hostname, '127.0.0.1'); assert.equal(join.pathname, '/join');
+  assert.equal(join.hostname, '127.0.0.1'); assert.match(join.pathname, /^\/join\/[a-f0-9]{32}$/);
   assert.equal(join.hash, `#connect=${result.body.key}`);
   assert.ok(!JSON.stringify(f.publicState()).includes(result.body.key));
   assert.equal(f.children.length, 0);

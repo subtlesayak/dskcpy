@@ -31,11 +31,11 @@
     "source_commit": "b93df9ad2edb26fe856b87709d60e5b3cf4ab408",
     "sha256": "c6085c8622e5a279e06c56922df04b27e4fcd52c12a629e78df2e068566df2b8",
     "independent_checks": "5934 payload hashes verified; clean source manifest; system-only libraries; help capabilities; 20 assertion tests pass",
-    "activation": "not activated; needs controlled stream-switch agreement"
+    "activation": "Historical c608 candidate was activated and failed; preserved separately after corrected f837 switch"
   },
   "limits": [
     "Unit regression models AudioDecoder/AudioContext and is not audible device verification",
-    "Combined candidate audible playback/mute/route/background and longer USB/Wi-Fi/private-route sessions remain open",
+    "Corrected native f837 has a short USB tone/mute pass; longer playback, background/return, route and Wi-Fi/private-route checks remain open",
     "Experimental unsigned arm64 macOS 13-target native is not clean-OS/signing/notarization or full desktop-app qualification",
     "Native protocol/ACK IDs unchanged"
   ],
@@ -52,5 +52,20 @@
     "evidence": "Live Resume then fresh Opus creation at 160-180ms intervals; native drop counters zero; reproduction compiled actual control block fails",
     "native_fix_owner": "Separate P1 native task; actual native worktree not edited here; minimal proposal shared",
     "pending": "Newly hashed idempotent native Resume candidate and another agreed physical test"
+  },
+  "resume_candidate": {
+    "native_source_commit": "4ec8e7fcaec7b4d558220afecdd54b494d6795aa",
+    "native_sha256": "f837ddf4a81139b360b47ab22fedc18af8de96102f741fb380d7c47f8a2d0bcc",
+    "receiver_source": "1d303ab5; receiver.mjs unchanged from 78d7bbb2",
+    "transport": "USB / WebCodecs",
+    "physical_result": "Human confirms continuous tone and phone mute/resume work after explicit phone reload and fresh source replay",
+    "native_evidence": "Packets progress beyond 12000 instead of restarting every 160-180ms; later stale/capture-drop counters become nonzero and are retained in local evidence",
+    "pending": [
+      "Home/return confirmation",
+      "Longer audible soak",
+      "Wi-Fi/private-route audio",
+      "Output-device changes"
+    ],
+    "qualification_limit": "Short audible result only; encoder counters are not a substitute for listening"
   }
 }
