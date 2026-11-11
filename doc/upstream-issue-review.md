@@ -1,5 +1,34 @@
 # Upstream issue review
 
+## Native bounds and timeout fixes — 2026-11-11
+
+Original implementations now reject native media packet lengths outside
+1–64 MiB before allocation or payload reads, keep UTF-8 cut searches inside
+the supplied buffer, and correct timeout worker publication, cancellation and
+partial initialization cleanup. Valid UTF-8 boundary behavior is preserved;
+this utility remains a truncation helper rather than a full UTF-8 validator.
+Timeout callbacks run outside the mutex and may call Stop. Stop suppresses an
+expiration that the worker has not claimed; Join waits for an already claimed
+callback to finish. Timeout instances remain single use after initialization.
+
+These changes address the findings from the upstream assessment without copying
+or cherry-picking upstream implementation. Prior source review means this is not
+a formal source-isolated clean-room certification. The changes preserve custom
+session headers, reverse framing, Mac capture/audio/keyboard and browser receiving.
+
+All 20 native tests pass normally and with AddressSanitizer/UndefinedBehaviorSanitizer.
+Six focused regressions fail against the prior source: oversized allocation,
+UTF-8 pre-buffer access, timeout initialization cleanup, worker publication,
+pre-start cancellation and cancellation at timed-wait return. Fixtures cover
+allocation/read ordering, payload/PTS/keyframe/config behavior, truncated bodies,
+spurious wakeups, thread creation failure and real SDL worker execution.
+The full backend suite passes 162 tests with six optional skips; TypeScript/Vite
+production build passes. See [qualification record](testing/native-bounds-timeout.json).
+No physical stream was started or interrupted, and the candidate binary remains
+separate from the working native artifact. The overall hardware/audio gates stay open.
+
+## Historical review — 2026-09-05
+
 Reviewed 2026-09-05 against scrcpy 4.1. This is a focused review of recent
 open reports, not a review of every upstream issue. No upstream issues were
 closed or reported as fixed on affected devices.

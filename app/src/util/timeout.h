@@ -30,6 +30,9 @@ sc_timeout_init(struct sc_timeout *timeout);
 void
 sc_timeout_destroy(struct sc_timeout *timeout);
 
+// Single use after Init. Stop cancels an unclaimed expiration; a callback
+// already claimed by the worker may finish until Join returns. Callbacks run
+// without the timeout mutex and may themselves call Stop.
 bool
 sc_timeout_start(struct sc_timeout *timeout, sc_tick deadline,
                  const struct sc_timeout_callbacks *cbs, void *cbs_userdata);
