@@ -26,7 +26,7 @@ const pendingAudioAcks = [];
 let generation = 0;
 let sessionExpected = false, retryTimer, connectionTimer, resumeDeadline = 0, probing = false;
 let resumeAllowed = true;
-let audioGeneration = 0, fullscreenAttempt = 0;
+let audioGeneration = 0, fullscreenAttempt = 0, playbackAttempt = 0;
 const mediaAcks = createMediaAcknowledger(send);
 const controlTrays = [
   { trigger: 'volume', panel: 'volume-controls', first: 'volume-down' },
@@ -64,6 +64,7 @@ function releaseTouches() {
 }
 function fail(message) { $('error').textContent = message; disconnect(); }
 function clearMedia() {
+  playbackAttempt++;
   rtcReceiver?.close(); rtcReceiver = null;
   rtcDisplay.hidden = true; document.body.classList.remove('rtc-stream');
   stopAudio(); pendingAudioAcks.length = 0;
@@ -313,14 +314,21 @@ function configureAudio() {
 }
 $('audio').addEventListener('click', async () => {
   if (mediaMode === 'webrtc') {
+    const mine = generation, attempt = ++playbackAttempt;
+    const updateButton = () => {
+      $('audio').textContent = muted ? 'Audio off' : 'Audio on';
+      $('audio').setAttribute('aria-label', $('audio').textContent);
+      $('audio').setAttribute('aria-pressed', String(!muted));
+    };
     muted = !muted; rtcDisplay.muted = muted; action(muted ? 11 : 10);
+    updateButton();
     if (!muted) try { await rtcDisplay.play(); } catch {
+      if (mine !== generation || attempt !== playbackAttempt || !authenticated) return;
       muted = true; rtcDisplay.muted = true; action(11);
       $('error').textContent = 'Audio could not start. Tap Audio off to try again.';
     }
-    $('audio').textContent = muted ? 'Audio off' : 'Audio on';
-    $('audio').setAttribute('aria-label', $('audio').textContent);
-    $('audio').setAttribute('aria-pressed', String(!muted)); return;
+    if (mine !== generation || attempt !== playbackAttempt || !authenticated) return;
+    updateButton(); return;
   }
   if (!('AudioDecoder' in window)) { $('error').textContent = 'WebCodecs Opus audio is unavailable in this browser. Video still works.'; return; }
   if (!muted) { muted = true; stopAudio(); drainAudioAcks(true); action(11); }
@@ -346,8 +354,13 @@ function updatePause() {
   if (document.hidden) resumeDeadline ||= Date.now() + 120000;
   else resumeDeadline = 0;
   if (mediaMode === 'webrtc') {
+    const mine = generation, attempt = ++playbackAttempt;
     if (document.hidden || paused) { rtcDisplay.muted = true; rtcDisplay.pause?.(); }
-    else { rtcDisplay.muted = muted; void rtcDisplay.play?.().catch(() => { $('error').textContent = 'Tap Resume to restart browser playback.'; }); }
+    else { rtcDisplay.muted = muted; void rtcDisplay.play?.().catch(() => {
+      if (mine === generation && attempt === playbackAttempt && authenticated) {
+        $('error').textContent = 'Tap Resume to restart browser playback.';
+      }
+    }); }
   }
   if (mediaMode !== 'webrtc' && !document.hidden && !muted && audioContext?.state !== 'running') {
     // Mobile browsers may suspend audio independently of the video connection.

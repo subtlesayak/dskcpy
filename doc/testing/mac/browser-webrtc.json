@@ -1,24 +1,24 @@
 {
-  "checked_at": "2026-11-11T08:49:10.961905+00:00",
+  "checked_at": "2026-11-11T08:57:13.635193+00:00",
   "baseline": "ac221b1a85fe92f53221f90bc1dbb5832bbb5486",
   "scope": "Private browser WebRTC, QR invitations, bounded legacy decoder recovery and Mac browser launcher",
   "source_sha256": {
     "app/src/reverse_display_macos.m": "a28e97dbdc87d49f7d2d86fc323505e822b074717ee1485ef1ec5f4dbaca0e29",
     "gui/src/BrowserHostPanel.tsx": "5724fde5585a7915fffad5ef3962451214d94e65e456d73b05823d11f3ba1d53",
     "gui/receiver/protocol.mjs": "39391339e58a40a2517b6e127fa2658e76cb33d73f2bcef6a19f58c65223bc50",
-    "gui/receiver/receiver.mjs": "ed4880b146c9c9e7526f58f31bb9402c5ccf8ad0adb666360b237030b22ba83c",
+    "gui/receiver/receiver.mjs": "abebb932294cc890ad6909cc9bb83371ea55eeffe09db849cd1a0c3300bb82a9",
     "gui/receiver/rtc.mjs": "8a92285ca12a04bbf23c4cd2a97a94122f3ad8d09fca2f3c979654cc6702bb07",
     "gui/receiver/video.mjs": "a77bf3fa521979497322081f147c8d726a52187fcf6379c6afcd9f3f9323df38",
     "gui/server/browser-rtc.mjs": "fab7a2c5e1e5ed8afd0d7b4f9a3d70b2f47fc06ef7fce21e6913e9c2eb1451c6",
     "gui/server/browser-session.mjs": "c5a3c3de6a4c39990e5c8a65da10414d99908afc561afbfa97a3c69ed5107167",
     "gui/server/browser.mjs": "ac24449f040d0cca5fc91e6e9d5a75eccaca109ce94e77fe0f971ee67d71ff63",
     "gui/scripts/start-browser-macos.mjs": "b05c8a2d020a6ac4b58e69b77070d4ae7660ab652c4f2a9318f10d17514b42ca",
-    "gui/package-lock.json": "48638861e7b8dcf66a0e9595e84ef1acb0eb74407c470b35819cd896cebafe18"
+    "gui/package-lock.json": "fa9f497209ea77cdd3a1c30cd32edb7eb26b335de2a497c9cdf927a4d9b17266"
   },
   "native_binary_sha256": "58874abf11bb8f147fab8495e3454e9a01fb3c4b307f80e331d898edaf42d2c4",
   "verification": {
     "backend": {
-      "passed": 136,
+      "passed": 141,
       "skipped": 6,
       "failed": 0
     },
@@ -26,10 +26,11 @@
       "passed": 16,
       "failed": 0
     },
-    "production_build": "TypeScript and Vite passed",
+    "production_build": "TypeScript and Vite 8.2.4 passed",
     "qr": "Independent jsQR decoding plus initial/reused-tab fragment removal before authentication; malformed fragments and live-viewer preservation tested.",
     "transport": "Real loopback ICE/DTLS/SRTP H.264 and Opus packets",
-    "browser": "Real browser synthetic 640x360 WebRTC video from initial and reused-tab QR invitations; fragment and code field cleared; reload resumed; Disconnect revoked resume; used invitation rejected. No desktop capture or audible audio in this fixture."
+    "browser": "Real browser synthetic 640x360 WebRTC video from initial and reused-tab QR invitations; fragment and code field cleared; reload resumed; Disconnect revoked resume; used invitation rejected. No desktop capture or audible audio in this fixture.",
+    "audio_lifecycle": "Five simulated playback-promise regressions: Disconnect, superseded mute, return-to-tab teardown, backgrounded enable intent and genuine denial. First two reproduced failures before the fix. Audible device audio remains untested."
   },
   "physical_status": "Different-network phone QR retry pending user result; Safari/iOS, desktop video, touch and audible browser audio remain unqualified on this candidate",
   "limits": [
@@ -37,5 +38,5 @@
     "Local Homebrew runtime targets macOS 27; this binary is not a portable macOS 13 release",
     "Android sustained audio stutter and display-socket startup stall remain open; no Android changes"
   ],
-  "followup_baseline": "1e85a17bebf094ce58de849e9e99b3621e4598e7"
+  "followup_baseline": "98ae141efbd77ddec20fef7132d5b175772a37e4"
 }

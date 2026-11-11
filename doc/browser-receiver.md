@@ -182,6 +182,9 @@ available, use USB, private Tailscale HTTPS, or the native Android receiver.
   not the computer's output volume.
   A reload, or the browser suspending its audio engine, may require another tap
   on Audio off to resume sound.
+  Delayed playback callbacks from an earlier mute, pause, background transition
+  or disconnected session cannot change the current audio controls or show a
+  stale error. A current playback denial restores mute and offers a retry.
 - Close and Lock are deliberately not exposed in this experimental browser
   receiver. Desktop keyboard forwarding is not implemented yet.
 - Disconnect and Stop end capture. USB cleanup removes only the tunnel created

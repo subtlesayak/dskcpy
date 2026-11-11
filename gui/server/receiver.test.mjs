@@ -268,6 +268,75 @@ test('browser-native mode connects without WebCodecs and forwards explicit audio
   h.$('disconnect').emit('click');
 });
 
+test('late browser audio rejection cannot change a disconnected receiver', async (t) => {
+  const h = receiver(t, { webRtc: true, webCodecs: false });
+  let rejectPlay;
+  h.$('rtc-display').play = () => new Promise((_resolve, reject) => { rejectPlay = reject; });
+  const enabling = h.$('audio').emit('click');
+  h.$('disconnect').emit('click');
+  rejectPlay(new Error('Playback interrupted by teardown'));
+  await enabling;
+  assert.equal(h.$('error').textContent, '');
+  assert.equal(h.$('audio').textContent, 'Audio off');
+});
+
+test('a superseded audio enable cannot report an error after the user mutes again', async (t) => {
+  const h = receiver(t, { webRtc: true, webCodecs: false });
+  let rejectPlay;
+  h.$('rtc-display').play = () => new Promise((_resolve, reject) => { rejectPlay = reject; });
+  const enabling = h.$('audio').emit('click');
+  await h.$('audio').emit('click');
+  rejectPlay(new Error('Playback interrupted by mute'));
+  await enabling;
+  assert.equal(h.$('error').textContent, '');
+  assert.equal(h.$('audio').textContent, 'Audio off');
+  assert.equal(h.$('rtc-display').muted, true);
+  h.$('disconnect').emit('click');
+});
+
+test('late return-to-tab playback failure cannot report into a disconnected receiver', async (t) => {
+  const h = receiver(t, { webRtc: true, webCodecs: false });
+  h.document.hidden = true; h.document.emit('visibilitychange');
+  let rejectPlay;
+  h.$('rtc-display').play = () => new Promise((_resolve, reject) => { rejectPlay = reject; });
+  h.document.hidden = false; h.document.emit('visibilitychange');
+  h.$('disconnect').emit('click');
+  rejectPlay(new Error('Playback interrupted after return'));
+  await new Promise(setImmediate);
+  assert.equal(h.$('error').textContent, '');
+  assert.match(h.$('status').textContent, /^Disconnected/);
+});
+
+test('hiding during audio enable preserves mute intent and its accessible button state on return', async (t) => {
+  const h = receiver(t, { webRtc: true, webCodecs: false });
+  let rejectPlay;
+  h.$('rtc-display').play = () => new Promise((_resolve, reject) => { rejectPlay = reject; });
+  const enabling = h.$('audio').emit('click');
+  h.document.hidden = true; h.document.emit('visibilitychange');
+  rejectPlay(new Error('Playback interrupted by backgrounding'));
+  await enabling;
+  h.$('rtc-display').play = () => Promise.resolve();
+  h.document.hidden = false; h.document.emit('visibilitychange');
+  assert.equal(h.$('audio').textContent, 'Audio on');
+  assert.equal(h.$('audio').attrs.get('aria-pressed'), 'true');
+  assert.equal(h.$('rtc-display').muted, false);
+  assert.equal(h.$('error').textContent, '');
+  h.$('disconnect').emit('click');
+});
+
+test('a current browser playback denial still mutes audio and offers a retry', async (t) => {
+  const h = receiver(t, { webRtc: true, webCodecs: false });
+  h.$('rtc-display').play = () => Promise.reject(new Error('Playback denied'));
+  await h.$('audio').emit('click');
+  assert.equal(h.$('audio').textContent, 'Audio off');
+  assert.equal(h.$('audio').attrs.get('aria-pressed'), 'false');
+  assert.equal(h.$('rtc-display').muted, true);
+  assert.match(h.$('error').textContent, /Audio could not start/);
+  const commands = h.socket.sent.filter(data => Buffer.isBuffer(data) && data[0] === 5).map(data => data[1]);
+  assert.deepEqual(commands.slice(-2), [10, 11]);
+  h.$('disconnect').emit('click');
+});
+
 test('scanning a QR invitation removes the fragment before opening the authenticated socket', (t) => {
   const key = 'z'.repeat(32), h = receiver(t, { webRtc: true, webCodecs: false, qrKey: key });
   assert.deepEqual(h.historyChanges, ['/']);
