@@ -583,3 +583,59 @@ test('large status snapshots drain and coalesce without disconnecting the dashbo
   await waitFor(() => events.some(event => event.logs.at(-1)?.message === 'later status marker'));
   res.destroy();
 });
+
+test('Mac window catalog stays local and does not start capture; selection enables view-only native window arguments', async (t) => {
+  const features = { macWindowCapture: true, browserKeyboard: true };
+  const f = await fixture(t, { platform: 'darwin', readinessProbe: async () => ({ ...ready, features }),
+    commandRunner: async (_exe, args) => {
+      assert.deepEqual(args, ['--list-reverse-windows']);
+      return { stdout: 'scrcpy fixture\nDSKCPY_WINDOWS [{"id":17,"ownerPid":123,"title":"Private fixture title","application":"Test app"}]\n' };
+    } });
+  const catalog = await f.request('/api/browser/windows', {});
+  assert.equal(catalog.code, 200); assert.equal(catalog.body.windows[0].id, 17);
+  assert.equal(f.children.length, 0); assert.equal(JSON.stringify(f.publicState()).includes('Private fixture title'), false);
+  const invitation = await f.request('/api/browser/invite', { windowId: 17, windowOwnerPid: 123 });
+  assert.equal(invitation.code, 201);
+  const ws = new WebSocket(invitation.body.url.replace('http:', 'ws:') + 'stream', { origin: invitation.body.url.slice(0, -1) });
+  ws.on('error', () => {}); t.after(() => ws.terminate());
+  await once(ws, 'open'); ws.send(invitation.body.key);
+  await waitFor(() => f.children.length === 1);
+  assert.ok(f.children[0].args.includes('--reverse-window=17')); assert.ok(f.children[0].args.includes('--no-audio'));
+  assert.equal(f.children[0].args.includes('--reverse-keyboard'), false);
+  await f.request('/api/stream/stop', {});
+});
+
+test('older hosts reject window selection and never receive new keyboard arguments', async (t) => {
+  const f = await fixture(t, { platform: 'darwin' });
+  assert.equal((await f.request('/api/browser/invite', { windowId: 17, windowOwnerPid: 123 })).code, 400);
+  assert.equal(f.children.length, 0);
+  assert.equal((await f.request('/api/browser/windows', {})).code, 400);
+});
+
+test('same-computer preview omits keyboard self-injection even on a capable Mac host', async (t) => {
+  const f = await fixture(t, { platform: 'darwin', readinessProbe: async () => ({ ...ready,
+    features: { macWindowCapture: true, browserKeyboard: true } }) });
+  const { body } = await f.request('/api/browser/invite', {});
+  const ws = new WebSocket(body.url.replace('http:', 'ws:') + 'stream', { origin: body.url.slice(0, -1) });
+  ws.on('error', () => {}); t.after(() => ws.terminate());
+  await once(ws, 'open'); ws.send(body.key); await waitFor(() => f.children.length === 1);
+  assert.equal(f.children[0].args.includes('--reverse-keyboard'), false);
+  await f.request('/api/stream/stop', {});
+});
+
+test('private remote Mac desktop session opts into keyboard support only after authentication', async (t) => {
+  const reservation = net.createServer(); reservation.listen(0, '127.0.0.1'); await once(reservation, 'listening');
+  const browserPort = reservation.address().port; await new Promise((resolve) => reservation.close(resolve));
+  const origin = 'https://viewer.example.test';
+  const f = await fixture(t, { platform: 'darwin', browserPort,
+    environment: { ...process.env, SCRCPY_GUI_BINARY: process.execPath, DSKCPY_VIEWER_ORIGIN: origin },
+    readinessProbe: async () => ({ ...ready, features: { macWindowCapture: true, browserKeyboard: true } }) });
+  const { body, code } = await f.request('/api/browser/invite', { browserTransport: 'wifi' });
+  assert.equal(code, 201); assert.equal(f.children.length, 0);
+  // Model the configured HTTPS proxy reaching the loopback-only receiver.
+  const ws = new WebSocket(`ws://127.0.0.1:${browserPort}/stream`, { origin, headers: { Host: 'viewer.example.test' } });
+  ws.on('error', () => {}); t.after(() => ws.terminate());
+  await once(ws, 'open'); ws.send(body.key); await waitFor(() => f.children.length === 1);
+  assert.ok(f.children[0].args.includes('--reverse-keyboard'));
+  await f.request('/api/stream/stop', {});
+});

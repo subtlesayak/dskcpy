@@ -126,3 +126,15 @@ test('mutation requests reject cross-origin sites and simple form posts', () => 
   }
   assert.equal(isAllowedMutation({ 'content-type': 'text/plain' }, 27183), false);
 });
+
+test('explicit window selection is strict, browser-only and never silently becomes desktop capture', () => {
+  for (const windowId of [0, -1, '17', 1.5, 0x100000000]) {
+    assert.throws(() => sanitizeStreamConfig({ connection: 'browser', windowId }), /window/);
+  }
+  assert.throws(() => sanitizeStreamConfig({ connection: 'usb', windowId: 17 }), /window/);
+  const config = sanitizeStreamConfig({ connection: 'browser', windowId: 17 });
+  assert.equal(config.windowId, 17);
+  const args = buildScrcpyArgs({ ...config, browserKeyboard: true }, 1234);
+  assert.ok(args.includes('--reverse-window=17')); assert.ok(args.includes('--no-audio'));
+  assert.equal(args.includes('--reverse-keyboard'), false);
+});

@@ -46,7 +46,20 @@ export class SrdParser {
   }
 }
 
-export function validBrowserInput(data, width, height) {
+export function validBrowserInput(data, width, height, { keyboard = false } = {}) {
+  if (data[0] === 8) {
+    if (!keyboard || data.length !== 5 || data[1] > 2) return false;
+    const usage = data.readUInt16BE(2);
+    return data[1] === 2 ? usage === 0 && data[4] === 0
+      : (usage >= 4 && usage <= 0x73) || (usage >= 0xe0 && usage <= 0xe7);
+  }
+  if (data[0] === 9) {
+    if (!keyboard || data.length < 4 || data.length > 515 || data.readUInt16BE(1) !== data.length - 3) return false;
+    try {
+      const text = new TextDecoder('utf-8', { fatal: true }).decode(data.subarray(3));
+      return text.length > 0 && !/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(text);
+    } catch { return false; }
+  }
   if (data.length === 9 && [4, 6].includes(data[0])) return true;
   // Close and Lock are deliberately not exposed by the experimental receiver.
   if (data.length === 2 && data[0] === 5) return [0, 1, 2, 3, 4, 7, 8, 9, 10, 11].includes(data[1]);

@@ -61,11 +61,13 @@ export async function inspectReadiness(runtime, runCommand) {
   let loaded = false;
   let supported = false;
   let macBackend = false;
+  let nativeHelp = '';
   if (executable) {
     try {
       // Loads the actual dependency chain, including transitive DLLs. Never starts capture.
       const { stdout } = await runCommand(executable, ['--help'], { env, cwd: repoDir });
       loaded = true;
+      nativeHelp = stdout;
       supported = stdout.includes('--reverse-display') && stdout.includes('--reverse-socket');
       macBackend = supported && stdout.includes('ScreenCaptureKit/VideoToolbox');
     } catch { /* Do not reflect environment paths from loader errors into readiness. */ }
@@ -97,5 +99,8 @@ export async function inspectReadiness(runtime, runCommand) {
     const failed = checks.filter((check) => required.includes(check.id) && !check.ready);
     return [connection, { ready: failed.length === 0, message: failed[0]?.message || 'Local components are ready.', required }];
   }));
-  return { checks, transports, checkedAt: new Date().toISOString() };
+  return { checks, transports, features: {
+    browserKeyboard: platform === 'darwin' && macBackend && nativeHelp.includes('--reverse-keyboard'),
+    macWindowCapture: platform === 'darwin' && macBackend && nativeHelp.includes('--list-reverse-windows') && nativeHelp.includes('--reverse-window-owner'),
+  }, checkedAt: new Date().toISOString() };
 }

@@ -1,6 +1,7 @@
 import { avcCodec, avcParameters, touchPacket, scrollPacket, takeDecodedTimestamps, fitDisplay, createMediaAcknowledger, needsControlsRow, parseJoinFragment } from './protocol.mjs';
 import { createRtcReceiver } from './rtc.mjs';
 import { createVideoReceiver } from './video.mjs';
+import { createBrowserKeyboard } from './keyboard.mjs';
 
 const $ = (id) => document.getElementById(id);
 function takeJoinFragment() {
@@ -15,6 +16,7 @@ let scannedKey = takeJoinFragment();
 const canvas = $('display');
 const rtcDisplay = $('rtc-display');
 let rtcReceiver, mediaMode = 'webcodecs';
+let keyboardSupported = false, keyboardOpen = false, viewOnly = false;
 const preferredMode = 'RTCPeerConnection' in window ? 'webrtc' : 'webcodecs';
 const context = canvas.getContext('2d', { alpha: false, desynchronized: true });
 let ws, video, audio, audioContext, videoConfig, configBytes, audioConfig;
@@ -35,6 +37,18 @@ const controlTrays = [
 ];
 let openControlTray = null;
 let selectDrag = false, touchGesture = null;
+const keyboardInput = createBrowserKeyboard({ field: $('keyboard-input'), send,
+  canSend: () => keyboardSupported && authenticated && header && !paused && !document.hidden && touchEnabled && !viewOnly,
+  onError: (message) => { $('error').textContent = message; } });
+function hideKeyboard() {
+  keyboardOpen = false; keyboardInput.setEnabled(false);
+  $('keyboard-controls').hidden = true; $('keyboard').setAttribute('aria-expanded', 'false');
+}
+$('keyboard').addEventListener('click', () => {
+  if (!keyboardSupported || viewOnly || paused || document.hidden || !touchEnabled) return;
+  keyboardOpen = !keyboardOpen; $('keyboard-controls').hidden = !keyboardOpen;
+  $('keyboard').setAttribute('aria-expanded', String(keyboardOpen)); keyboardInput.setEnabled(keyboardOpen);
+});
 
 function send(bytes) {
   if (!authenticated || !header || ws?.readyState !== WebSocket.OPEN) return false;
@@ -56,7 +70,8 @@ function audioUnavailable() {
   $('audio').setAttribute('aria-pressed', 'false');
   $('error').textContent = 'Opus audio is unavailable in this browser. Video can continue.';
 }
-function releaseTouches() {
+function releaseTouches(includeKeyboard = true) {
+  if (includeKeyboard) keyboardInput.release();
   cancelSentTouches();
   pointers.clear();
   touchGesture = null;
@@ -85,6 +100,7 @@ function disconnect() {
   releaseTouches(); stopAudio(); drainAudioAcks(true);
   ws?.close(4000, 'Disconnected by viewer'); ws = null;
   clearMedia();
+  hideKeyboard(); keyboardSupported = false; viewOnly = false; $('keyboard').hidden = true;
   if (audioContext) void audioContext.close().catch(() => {}); audioContext = null;
   authenticated = false; header = false; muted = true; paused = false;
   videoConfig = null; configBytes = null; audioConfig = null; frames = 0;
@@ -198,6 +214,14 @@ function connect(key = null, requestedMode = preferredMode) {
         mediaMode = message.mediaMode || 'webcodecs';
         if (mediaMode === 'webcodecs' && !('VideoDecoder' in window)) throw new Error('This connection needs WebCodecs. Use the private VPN link for browser-native video.');
         authenticated = true; sessionExpected = true;
+        viewOnly = message.viewOnly === true;
+        keyboardSupported = message.keyboard === true && !viewOnly;
+        $('keyboard').hidden = !keyboardSupported;
+        touchEnabled = !viewOnly; $('touch').disabled = viewOnly;
+        $('touch').textContent = viewOnly ? 'Window · view only' : 'Touch on';
+        $('touch').setAttribute('aria-pressed', String(touchEnabled));
+        for (const id of ['volume', 'window']) $(id).hidden = viewOnly;
+        $('audio').disabled = viewOnly;
         $('status').textContent = 'Connected · waiting for video';
         $('join-panel').hidden = true; $('stream-panel').hidden = false;
         document.body.classList.add('is-streaming');
@@ -224,6 +248,7 @@ function connect(key = null, requestedMode = preferredMode) {
         $('audio').disabled = true; return;
       }
       if (flags === 4) {
+        stopAudio(); // A fresh codec configuration also discards the old route's scheduled audio.
         audioConfig = payload.slice(); $('audio').disabled = false;
         $('audio').textContent = muted ? 'Audio off' : 'Audio on';
         $('audio').setAttribute('aria-label', $('audio').textContent);
@@ -313,6 +338,7 @@ function configureAudio() {
   catch { audioUnavailable(); }
 }
 $('audio').addEventListener('click', async () => {
+  if (viewOnly) return;
   if (mediaMode === 'webrtc') {
     const mine = generation, attempt = ++playbackAttempt;
     const updateButton = () => {
@@ -347,6 +373,7 @@ $('audio').addEventListener('click', async () => {
 function updatePause() {
   if (!authenticated || !header || ws?.readyState !== WebSocket.OPEN) return;
   releaseTouches(); stopAudio();
+  if (paused || document.hidden) hideKeyboard();
   suspendDecoder();
   if (!document.hidden && !paused) video?.resume();
   ws.send(document.hidden ? 'suspend' : 'resume');
@@ -391,7 +418,9 @@ window.addEventListener('pagehide', () => {
 window.addEventListener('pageshow', () => { updatePause(); void resumeSession(); });
 void resumeSession();
 $('touch').addEventListener('click', () => {
+  if (viewOnly) return;
   releaseTouches(); touchEnabled = !touchEnabled;
+  if (!touchEnabled) hideKeyboard();
   $('touch').textContent = touchEnabled ? 'Touch on' : 'Touch off'; $('touch').setAttribute('aria-pressed', String(touchEnabled));
 });
 function point(event) {
@@ -518,6 +547,7 @@ for (const { trigger } of controlTrays) {
   $(trigger).addEventListener('click', () => setControlTray(openControlTray === trigger ? null : trigger, true));
 }
 function setControlsVisible(visible) {
+  if (!visible) hideKeyboard();
   setControlTray();
   document.body.classList.toggle('controls-hidden', !visible);
   $('show-controls').hidden = visible;
@@ -527,7 +557,7 @@ function setControlsVisible(visible) {
 $('hide-controls').addEventListener('click', () => setControlsVisible(false));
 $('show-controls').addEventListener('click', () => setControlsVisible(true));
 function fitCanvas() {
-  releaseTouches();
+  releaseTouches(false); // Soft-keyboard viewport changes must not cancel typing or composition.
   const panel = $('stream-panel'), padding = getComputedStyle(panel);
   const fullHeight = panel.clientHeight - parseFloat(padding.paddingTop) - parseFloat(padding.paddingBottom);
   const fullWidth = panel.clientWidth - parseFloat(padding.paddingLeft) - parseFloat(padding.paddingRight);

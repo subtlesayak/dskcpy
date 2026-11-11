@@ -193,6 +193,31 @@ No microphone permission or microphone output is requested. The capture callback
 retains a bounded four-entry audio FIFO, rejects oversized chunks, and never
 performs network I/O. Separate audio acknowledgements cannot unblock the video window.
 
+## Audio output-route recovery
+
+The host listens for changes to the default CoreAudio output device while system
+audio capture is active. A route event clears queued old samples and starts a new
+audio epoch, discarding resampler delay and partial Opus frames. It refreshes the
+existing ScreenCaptureKit configuration without enabling audio, restarting video
+or altering permissions. Audio remains muted if the receiver muted it.
+
+The worker supports bounded mono/stereo float32 and signed16 PCM, planar or
+interleaved, from 32–192 kHz, and converts it to 48 kHz stereo. The original
+48 kHz stereo float path remains intact. Unsupported audio retries at most three
+times after the initial failure, at one-second intervals, then remains unavailable
+until a mute/enable cycle or route change. Video continues when audio is unavailable.
+This uses the existing FFmpeg resampling dependency and never requests microphone
+capture or switches the user's output device.
+
+Synthetic CoreMedia tests cover rate/channel/layout/format transitions, bounded
+output and converter resets; they do not prove audible route recovery. Test a
+quiet owned clip with each available output, mute before switching, switch back,
+repeat while paused and confirm no stale audio tail. Record the exact candidate
+and transport. Sustained Android audio stutter remains an open hardware gate.
+
+See [browser window/keyboard setup](browser-receiver.md#mac-window-sharing-and-desktop-keyboard)
+for the new view-only window path and opt-in full-desktop typing controls.
+
 ## 5. Then test wireless modes
 
 - **Wi-Fi / Connect IP:** use Android 11+ Wireless debugging on the same LAN.

@@ -189,9 +189,66 @@ available, use USB, private Tailscale HTTPS, or the native Android receiver.
   or disconnected session cannot change the current audio controls or show a
   stale error. A current playback denial restores mute and offers a retry.
 - Close and Lock are deliberately not exposed in this experimental browser
-  receiver. Desktop keyboard forwarding is not implemented yet.
+  receiver. Full-desktop Mac sessions can advertise the optional keyboard
+  capability described below; Windows keyboard forwarding remains unavailable.
 - Disconnect and Stop end capture. USB cleanup removes only the tunnel created
   by this session; it refuses to overwrite existing ADB mappings.
+
+## Mac window sharing and desktop keyboard
+
+Build the native host and dashboard from this revision. The local dashboard
+shows **Choose what to share** when the Mac binary advertises the new options.
+**Refresh windows** reads the current local catalog without starting capture.
+Select the exact window before creating an invitation. Titles remain in the
+picker; they are not stored in status, logs or performance exports. Selection
+also binds the current owning process, and native capture revalidates it. A missing
+selection never silently falls back to the desktop.
+
+Window sharing is a deliberately separate view-only mode with audio off.
+ScreenCaptureKit captures only the selected window, including when another
+window covers it. Resizing letterboxes into the original output canvas.
+Minimizing, hiding or closing the window ends the session; create a fresh
+invitation after selecting an available window. Touch, keyboard, host volume
+and desktop-window actions are rejected at both bridge and native boundaries.
+Target-relative window control and live target switching remain future work.
+
+For a full-desktop Mac session on a receiving device, select **Keyboard** and keep **Type on the
+computer** focused. Physical navigation/function keys and shortcuts use paired
+key events; ordinary text and completed IME composition use bounded Unicode
+messages. The typing field supports up to 512 UTF-16 code units per commit,
+split into UTF-8 packets of at most 512 bytes. Nothing reads the clipboard or
+saves typed text. Explicit browser paste goes through the same input limits.
+Browser/OS-reserved shortcuts may remain local; protected Mac input fields may
+reject synthetic input. These restrictions are not bypassed.
+The **This computer** preview omits keyboard forwarding to prevent injected keys
+from feeding back into its own focused typing field. Use a separate receiver
+for keyboard tests; avoid opening its typing field on the host computer.
+
+Blur, Touch off, pause, page hiding, connection replacement and Stop release
+held keys. The native host also checks Accessibility and session/display state.
+If permission is revoked, input is blocked; pending releases are attempted after
+permission returns. Actual held-key/permission recovery still requires hardware
+verification. Windows and older hosts do not advertise this keyboard capability.
+
+The optional native input extension keeps existing message IDs and media framing
+unchanged: ID 8 is five bytes (type, down/up/cancel action, big-endian USB keyboard
+usage, modifier bits); ID 9 is type, big-endian 16-bit UTF-8 length, and 1–512 text
+bytes. Existing Android companions are unchanged. The browser bridge admits the
+extension only for a native-capable authorized desktop session.
+
+For a separate candidate build without replacing the launcher's working binary:
+
+```sh
+meson setup build-macos-features -Dcompile_server=false -Dreverse_macos=true -Dusb=false -Dbuildtype=debug
+meson compile -C build-macos-features
+meson test -C build-macos-features --print-errorlogs
+```
+
+When your current session can stop, launch the existing Mac browser script with
+`SCRCPY_GUI_BINARY` pointing to that candidate's `app/scrcpy`. The script preserves
+the configured private route. Window selection is also available through
+`--list-reverse-windows` and `--reverse-display --reverse-window=<id>`; IDs are
+ephemeral local choices, not remembered identities.
 
 ## Bounded WebCodecs recovery
 
@@ -261,4 +318,5 @@ desktop capture, audible playback or a physical mobile/VPN test.
 
 Safari on actual iPhone/iPad, Android browser audio/input and different-network
 operation require separate physical results. Capability checks do not prove every
-brand, model or browser. Desktop keyboard/IME remains a separate roadmap milestone.
+brand, model or browser. Mac desktop keyboard/IME has source and automated
+coverage; actual keyboard layouts, soft keyboards and IMEs remain device gates.

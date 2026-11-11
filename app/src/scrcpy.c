@@ -320,6 +320,9 @@ set_terminal_title_with_prefix(const char *value) {
 
 enum scrcpy_exit_code
 scrcpy(struct scrcpy_options *options) {
+#ifdef HAVE_REVERSE_MACOS
+    if (options->list_reverse_windows) return sc_reverse_display_macos_list_windows();
+#endif
     static struct scrcpy scrcpy;
 #ifndef NDEBUG
     // Detect missing initializations

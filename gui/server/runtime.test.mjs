@@ -110,3 +110,15 @@ test('ADB SDK discovery supports SDK_ROOT while keeping explicit ADB and ANDROID
   assert.equal(resolveRuntime(dir, { ADB: '/missing-adb', ANDROID_HOME: sdk }).adb, null);
   assert.equal(resolveRuntime(dir, { PATH: path.dirname(adb) }).adb, adb);
 });
+
+test('window and keyboard features require the real Mac backend and explicit native help flags', async (t) => {
+  const { dir, binary } = await files(t);
+  const runtime = resolveRuntime(dir, { SCRCPY_GUI_BINARY: binary }, 'darwin');
+  const probe = (extra) => async () => ({ stdout: `--reverse-display --reverse-socket ScreenCaptureKit/VideoToolbox ${extra}` });
+  let status = await inspectReadiness(runtime, probe(''));
+  assert.deepEqual(status.features, { browserKeyboard: false, macWindowCapture: false });
+  status = await inspectReadiness(runtime, probe('--reverse-keyboard --reverse-window --reverse-window-owner --list-reverse-windows'));
+  assert.deepEqual(status.features, { browserKeyboard: true, macWindowCapture: true });
+  runtime.platform = 'win32'; status = await inspectReadiness(runtime, probe('--reverse-keyboard --reverse-window --reverse-window-owner --list-reverse-windows'));
+  assert.deepEqual(status.features, { browserKeyboard: false, macWindowCapture: false });
+});

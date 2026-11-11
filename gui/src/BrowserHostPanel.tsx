@@ -13,6 +13,7 @@ const modes = [
   { id: 'local', label: 'This computer', detail: 'Try it here before connecting a phone', icon: Monitor },
 ];
 const setupGuide = 'https://github.com/subtlesayak/dskcpy/blob/master/doc/browser-receiver.md';
+const windowKey = (window: { id: number; ownerPid: number }) => `${window.id}:${window.ownerPid}`;
 
 export default function BrowserHostPanel({ status, config, online, onStatus }: {
   status: BridgeStatus; config: StreamConfig; online: boolean; onStatus: (status: BridgeStatus) => void;
@@ -24,6 +25,9 @@ export default function BrowserHostPanel({ status, config, online, onStatus }: {
   const [copied, setCopied] = useState('');
   const [error, setError] = useState('');
   const [transport, setTransport] = useState('local');
+  const [windows, setWindows] = useState<{ id: number; ownerPid: number; title: string; application: string }[]>([]);
+  const [selectedWindow, setSelectedWindow] = useState('');
+  const [windowBusy, setWindowBusy] = useState(false);
   const keyTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const invitationHeading = useRef<HTMLHeadingElement>(null);
   const createButton = useRef<HTMLButtonElement>(null);
@@ -54,7 +58,8 @@ export default function BrowserHostPanel({ status, config, online, onStatus }: {
           : !readiness ? 'Restart the desktop service to load browser support, then reload this page.'
             : !readiness.ready ? readiness.message
               : mode === 'usb' && adbCheck && !adbCheck.ready ? adbCheck.message
-                : needsSetup ? 'Set up a secure link, or choose USB cable or This computer.' : '';
+                : selectedWindow && !windows.some((w) => windowKey(w) === selectedWindow) ? 'Select an available window before creating the invitation.'
+                  : needsSetup ? 'Set up a secure link, or choose USB cable or This computer.' : '';
 
   useEffect(() => {
     if (browser?.connected) { setKey(''); setMessage(''); setCopied(''); clearTimeout(keyTimer.current); }
@@ -65,6 +70,19 @@ export default function BrowserHostPanel({ status, config, online, onStatus }: {
   }, [active, busy]);
   useEffect(() => () => clearTimeout(keyTimer.current), []);
 
+  async function refreshWindows() {
+    if (windowBusy || busy || active) return;
+    setWindowBusy(true); setError('');
+    try {
+      const response = await fetch('/api/browser/windows', { method: 'POST',
+        headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Could not list windows.');
+      setWindows(result.windows);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not list windows.'); }
+    finally { setWindowBusy(false); }
+  }
+
   async function invite() {
     if (busy || active || blockedReason) return;
     setBusy(true); setError(''); setMessage(''); setCopied(''); setKey('');
@@ -72,6 +90,8 @@ export default function BrowserHostPanel({ status, config, online, onStatus }: {
     try {
       const response = await fetch('/api/browser/invite', { method: 'POST',
         headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...config,
+          windowId: windows.find((window) => windowKey(window) === selectedWindow)?.id,
+          windowOwnerPid: windows.find((window) => windowKey(window) === selectedWindow)?.ownerPid,
           browserTransport: mode, browserSerial: config.connection === 'usb' ? config.serial : undefined }) });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || 'Could not create a link. Try again.');
@@ -119,6 +139,23 @@ export default function BrowserHostPanel({ status, config, online, onStatus }: {
         </label>)}
       </div>
     </fieldset>
+
+    {status.hostPlatform === 'macOS' && status.readiness?.features?.macWindowCapture && <fieldset disabled={active || busy || windowBusy}>
+      <legend>Choose what to share</legend>
+      <label htmlFor="browser-capture-target">Capture target</label>
+      <select id="browser-capture-target" value={selectedWindow} onChange={(event) => setSelectedWindow(event.target.value)}>
+        <option value="">Entire desktop · video, audio and control</option>
+        {selectedWindow && !windows.some((w) => windowKey(w) === selectedWindow)
+          && <option value={selectedWindow} disabled>Selected window is no longer available</option>}
+        {windows.map((window) => <option key={windowKey(window)} value={windowKey(window)}>{window.application} — {window.title}</option>)}
+      </select>
+      <button type="button" className="secondary-button" onClick={refreshWindows} aria-busy={windowBusy}>
+        {windowBusy ? 'Refreshing windows…' : 'Refresh windows'}
+      </button>
+      <p className="action-note">{selectedWindow
+        ? 'Only this window is captured. Window mode is view-only with audio off; minimizing, hiding or closing it ends the stream. Resize keeps a fixed video canvas.'
+        : 'Refresh to choose a single window. Window names stay in this local picker.'}</p>
+    </fieldset>}
 
     <div className="browser-step">
       <h3><span className="browser-step-number" aria-hidden="true">2</span>{active ? 'Connection prepared' : 'Create a link and code'}</h3>

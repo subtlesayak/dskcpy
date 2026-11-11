@@ -13,6 +13,7 @@ const assets = new Map([
   ['/receiver.mjs', ['receiver.mjs', 'text/javascript; charset=utf-8']],
   ['/rtc.mjs', ['rtc.mjs', 'text/javascript; charset=utf-8']],
   ['/video.mjs', ['video.mjs', 'text/javascript; charset=utf-8']],
+  ['/keyboard.mjs', ['keyboard.mjs', 'text/javascript; charset=utf-8']],
   ['/protocol.mjs', ['protocol.mjs', 'text/javascript; charset=utf-8']],
   ['/receiver.css', ['receiver.css', 'text/css; charset=utf-8']],
 ]);
@@ -40,6 +41,7 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
   let invitation = null;
   let session = null;
   let expiresAt = null;
+  let inputPolicy = { keyboard: false, viewOnly: false };
   let expiryTimer;
   let failures = 0;
   let pendingCleanup = Promise.resolve();
@@ -150,7 +152,7 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
         for (const other of sockets) if (other !== ws) other.terminate();
         const token = Buffer.from(req.resumeToken);
         const active = createBrowserSession({ socket: ws, onConnect, resumeMs, lifetimeMs,
-          mediaMode, rtcBind, onChange, onClose: () => {
+          mediaMode, rtcBind, ...inputPolicy, onChange, onClose: () => {
           token.fill(0);
           pendingCleanup = Promise.all([pendingCleanup, active.cleanup]).then(() => {});
           if (session === active) session = null;
@@ -164,7 +166,7 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
   };
   server.on('upgrade', upgrade);
 
-  async function invite(connection = 'local') {
+  async function invite(connection = 'local', policy = {}) {
     if (invitation || session) throw new Error('A browser session is already open. Stop it first.');
     if (!['local', 'usb', 'wifi', 'ip', 'internet'].includes(connection)) throw new Error('Choose a browser connection method.');
     if (!['local', 'usb'].includes(connection) && !remoteOrigin) {
@@ -191,6 +193,7 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
       secureServer = secure;
     }
     mode = connection;
+    inputPolicy = { keyboard: policy.keyboard === true && policy.viewOnly !== true, viewOnly: policy.viewOnly === true };
     invitation = randomBytes(24);
     failures = 0;
     expiresAt = new Date(Date.now() + invitationMs).toISOString();
