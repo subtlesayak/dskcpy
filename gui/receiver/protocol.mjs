@@ -1,3 +1,19 @@
+export function browserJoinUrl(address, key) {
+  if (!/^[A-Za-z0-9_-]{32}$/.test(key)) throw new Error('Invalid browser invitation.');
+  const url = new URL(address);
+  const local = url.protocol === 'http:' && ['127.0.0.1', 'localhost'].includes(url.hostname);
+  if ((!local && url.protocol !== 'https:') || url.username || url.password
+      || url.search || url.hash || url.pathname !== '/') throw new Error('Invalid receiver address.');
+  // Fragments are not sent in HTTP requests. The receiver clears this from
+  // the current history entry before authentication; never persist this URL.
+  url.hash = `connect=${key}`;
+  return url.href;
+}
+
+export function parseJoinFragment(fragment) {
+  return /^#connect=([A-Za-z0-9_-]{32})$/.exec(fragment)?.[1] || null;
+}
+
 export function ack(type, timestamp) {
   const bytes = new Uint8Array(9);
   bytes[0] = type;

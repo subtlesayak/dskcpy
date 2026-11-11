@@ -3,15 +3,18 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 import * as protocol from '../receiver/protocol.mjs';
+import { createVideoReceiver } from '../receiver/video.mjs';
 import { validBrowserInput } from './browser-protocol.mjs';
 
-const source = (await readFile(new URL('../receiver/receiver.mjs', import.meta.url), 'utf8')).replace(/^import .*;\r?\n/, '');
+const source = (await readFile(new URL('../receiver/receiver.mjs', import.meta.url), 'utf8')).replace(/^import .*;\r?\n/gm, '');
 const parameters = new Uint8Array([0, 0, 1, 0x67, 0x64, 0, 0x28, 0, 0, 1, 0x68, 42]);
 
 // Deterministic lifecycle tests against the actual receiver script. These model
 // delayed browser callbacks; rendered/device QA is separate from this harness.
-function receiver(t, { portrait = false, lockFails = false } = {}) {
+function receiver(t, { portrait = false, lockFails = false, webRtc = false, webCodecs = true, qrKey = '' } = {}) {
   const timers = new Set(), sockets = [], decoders = [], orientation = [];
+  const locationState = { protocol: 'https:', host: 'receiver.test', pathname: '/', search: '', hash: qrKey ? `#connect=${qrKey}` : '' };
+  const historyChanges = [];
   class Target {
     listeners = new Map(); attrs = new Map(); hidden = false; value = ''; textContent = ''; style = {};
     width = 640; height = 480; clientWidth = 800; clientHeight = 500;
@@ -22,12 +25,15 @@ function receiver(t, { portrait = false, lockFails = false } = {}) {
     }
     addEventListener(name, fn) { const list = this.listeners.get(name) || []; list.push(fn); this.listeners.set(name, list); }
     emit(name, event = {}) { let result; for (const fn of this.listeners.get(name) || []) result = fn({ preventDefault() {}, ...event }); return result; }
+    requestSubmit() { return this.emit('submit'); }
     setAttribute(name, value) { this.attrs.set(name, value); }
     removeAttribute(name) { this.attrs.delete(name); }
     focus() { document.activeElement = this; }
     setPointerCapture() {}
     getBoundingClientRect() { return { left: 0, top: 0, width: 800, height: 500 }; }
     getContext() { return { drawImage() {}, clearRect() {} }; }
+    play() { this.paused = false; return Promise.resolve(); }
+    pause() { this.paused = true; }
     async requestFullscreen() { document.fullscreenElement = this; orientation.push('fullscreen'); document.emit('fullscreenchange'); }
   }
   const elements = new Map();
@@ -36,34 +42,41 @@ function receiver(t, { portrait = false, lockFails = false } = {}) {
   document.exitFullscreen = async () => { document.fullscreenElement = null; document.emit('fullscreenchange'); };
   class Socket extends Target {
     static OPEN = 1; readyState = 1; sent = [];
-    constructor() { super(); sockets.push(this); }
+    constructor(url) { super(); this.url = url; this.fragmentAtConnect = locationState.hash; sockets.push(this); }
     send(data) { this.sent.push(typeof data === 'string' ? data : Buffer.from(data)); }
     close(code) { this.readyState = 3; this.emit('close', { code }); }
   }
   class Decoder extends Target {
+    static async isConfigSupported() { return { supported: true }; }
     state = 'unconfigured'; decodeQueueSize = 0; chunks = [];
     constructor(callbacks) { super(); this.callbacks = callbacks; decoders.push(this); }
-    configure() { this.state = 'configured'; }
+    configure(config) { this.config = config; this.state = 'configured'; }
     decode(chunk) { this.decodeQueueSize++; this.chunks.push(chunk); }
     reset() { this.decodeQueueSize = 0; }
     close() { this.state = 'closed'; }
     output(timestamp) { this.decodeQueueSize = Math.max(0, this.decodeQueueSize - 1); this.callbacks.output({ timestamp, close() {} }); }
   }
-  const window = new Target(); window.isSecureContext = true; window.VideoDecoder = Decoder; window.EncodedVideoChunk = true;
-  const context = vm.createContext({ ...protocol, window, document, WebSocket: Socket, VideoDecoder: Decoder,
+  const window = new Target(); window.isSecureContext = true;
+  if (webCodecs) { window.VideoDecoder = Decoder; window.EncodedVideoChunk = true; }
+  if (webRtc) window.RTCPeerConnection = true;
+  window.history = { replaceState(_state, _title, url) { locationState.hash = ''; historyChanges.push(url); } };
+  const context = vm.createContext({ ...protocol,
+    createVideoReceiver: (options) => createVideoReceiver({ ...options, Decoder }),
+    window, document, WebSocket: Socket, VideoDecoder: Decoder,
     EncodedVideoChunk: class { constructor(value) { Object.assign(this, value); } },
     ResizeObserver: class { observe() {} }, getComputedStyle: () => ({ paddingTop: '0', paddingRight: '0', paddingBottom: '0', paddingLeft: '0' }),
-    location: { protocol: 'https:', host: 'receiver.test' }, performance: { now: () => 2000 }, AbortSignal,
+    location: locationState, performance: { now: () => 2000 }, AbortSignal,
     innerWidth: portrait ? 390 : 844, innerHeight: portrait ? 844 : 390,
     screen: { orientation: { async lock(value) { orientation.push(value); if (lockFails) throw new Error('Unsupported'); }, unlock() { orientation.push('unlock'); } } },
     fetch: async () => ({ ok: true, json: async () => ({ resumable: false }) }),
-    setTimeout: (fn, ms) => { const timer = setTimeout(fn, ms); timers.add(timer); return timer; }, clearTimeout, setInterval, clearInterval,
+    setTimeout: (fn, ms) => { const timer = setTimeout(fn, ms); timers.add(timer); return timer; }, clearTimeout,
+    setInterval: (fn, ms) => { const timer = setInterval(fn, ms); timers.add(timer); return timer; }, clearInterval,
   });
   vm.runInContext(source, context, { filename: 'receiver.mjs' });
   t.after(() => { for (const timer of timers) clearTimeout(timer); });
-  $('session-key').value = 'x'.repeat(32); $('join-form').emit('submit');
+  if (!qrKey) { $('session-key').value = 'x'.repeat(32); $('join-form').emit('submit'); }
   const socket = sockets[0]; socket.emit('open');
-  socket.emit('message', { data: JSON.stringify({ type: 'authenticated' }) });
+  socket.emit('message', { data: JSON.stringify({ type: 'authenticated', mediaMode: webRtc ? 'webrtc' : 'webcodecs' }) });
   const header = new ArrayBuffer(16), view = new DataView(header);
   view.setUint32(0, 0x53524431); view.setUint32(4, 1); view.setUint32(8, 640); view.setUint32(12, 480);
   socket.emit('message', { data: header });
@@ -73,22 +86,39 @@ function receiver(t, { portrait = false, lockFails = false } = {}) {
     new Uint8Array(bytes, 16).set(payload); socket.emit('message', { data: bytes });
   }
   media(0, 1, parameters);
-  return { $, document, window, socket, decoders, media, orientation };
+  return { $, document, window, socket, decoders, media, orientation, historyChanges };
 }
 
-test('suspension drains queued frames and ignores stale decoder callbacks after resume', (t) => {
+test('suspension drains queued frames and ignores stale decoder callbacks after resume', async (t) => {
   const h = receiver(t);
+  await new Promise(setImmediate);
   h.media(10, 2); const old = h.decoders.at(-1);
   h.document.hidden = true; h.document.emit('visibilitychange');
   assert.equal(old.state, 'closed');
   h.media(20, 0); old.output(10);
   h.document.hidden = false; h.document.emit('visibilitychange');
+  await new Promise(setImmediate);
   old.callbacks.error(new Error('Delayed closed decoder error'));
   assert.equal(h.socket.readyState, 1);
   h.media(30, 2); h.decoders.at(-1).output(30);
   assert.equal(h.$('status').textContent, 'Streaming');
   const acks = h.socket.sent.filter((data) => Buffer.isBuffer(data) && data[0] === 4).map((data) => Number(data.readBigUInt64BE(1)));
   assert.deepEqual(acks, [10, 20, 30]);
+  h.$('disconnect').emit('click');
+});
+
+test('WebCodecs recovery keeps the authorized socket and requests a fresh host keyframe', async (t) => {
+  const h = receiver(t); await new Promise(setImmediate);
+  const old = h.decoders[0]; h.media(10, 2);
+  old.state = 'closed'; old.callbacks.error({ name: 'EncodingError' });
+  h.media(20, 0); await new Promise(setImmediate);
+  assert.equal(h.socket.readyState, 1);
+  assert.equal(h.decoders.at(-1).config.hardwareAcceleration, 'prefer-software');
+  h.media(30, 2); h.decoders.at(-1).output(30);
+  assert.equal(h.$('status').textContent, 'Streaming');
+  const acks = h.socket.sent.filter((data) => Buffer.isBuffer(data) && data[0] === 4).map((data) => Number(data.readBigUInt64BE(1)));
+  assert.deepEqual(acks, [10, 20, 30]);
+  assert.ok(h.socket.sent.filter((data) => Buffer.isBuffer(data) && data[0] === 5 && data[1] === 8).length >= 3);
   h.$('disconnect').emit('click');
 });
 
@@ -215,4 +245,34 @@ test('scroll framing validates signed deltas, dimensions and bounds; secondary t
   packet.writeInt32BE(-121, 17); assert.equal(validBrowserInput(packet, 640, 480), false);
   packet.writeInt32BE(0, 17); packet.writeUInt32BE(640, 1); assert.equal(validBrowserInput(packet, 640, 480), false);
   for (const action of [5, 6]) assert.equal(validBrowserInput(Buffer.from(protocol.touchPacket(action, 1, 20, 20, 640, 480)), 640, 480), true);
+});
+
+test('browser-native mode connects without WebCodecs and forwards explicit audio mute intent', async (t) => {
+  const h = receiver(t, { webRtc: true, webCodecs: false });
+  assert.match(h.socket.url, /\/stream\/webrtc$/);
+  assert.equal(h.decoders.length, 0);
+  assert.equal(h.$('stream-panel').hidden, false);
+  await h.$('audio').emit('click');
+  assert.equal(h.$('audio').textContent, 'Audio on');
+  assert.equal(h.$('rtc-display').muted, false);
+  h.document.hidden = true; h.document.emit('visibilitychange');
+  assert.equal(h.$('rtc-display').muted, true);
+  assert.equal(h.$('rtc-display').paused, true);
+  h.document.hidden = false; h.document.emit('visibilitychange');
+  assert.equal(h.$('rtc-display').paused, false);
+  await h.$('audio').emit('click');
+  assert.equal(h.$('audio').textContent, 'Audio off');
+  assert.equal(h.$('rtc-display').muted, true);
+  const commands = h.socket.sent.filter((data) => Buffer.isBuffer(data) && data[0] === 5).map((data) => data[1]);
+  assert.ok(commands.includes(10)); assert.equal(commands.at(-1), 11);
+  h.$('disconnect').emit('click');
+});
+
+test('scanning a QR invitation removes the fragment before opening the authenticated socket', (t) => {
+  const key = 'z'.repeat(32), h = receiver(t, { webRtc: true, webCodecs: false, qrKey: key });
+  assert.deepEqual(h.historyChanges, ['/']);
+  assert.equal(h.socket.fragmentAtConnect, '');
+  assert.equal(h.socket.sent[0], key);
+  assert.equal(h.$('session-key').value, '');
+  h.$('disconnect').emit('click');
 });

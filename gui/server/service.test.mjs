@@ -92,6 +92,22 @@ test('Mac encode-submission telemetry updates the live dashboard', async (t) => 
   assert.equal(f.publicState().latencyMs, 12.5);
 });
 
+test('Mac browser launch selects compatible video and reports send RTT without decode latency', async (t) => {
+  const f = await fixture(t, { platform: 'darwin' });
+  const { body } = await f.request('/api/browser/invite', {});
+  const ws = new WebSocket(body.url.replace('http:', 'ws:') + 'stream/webrtc', {
+    origin: body.url.slice(0, -1),
+  });
+  ws.on('error', () => {}); t.after(() => ws.terminate());
+  await once(ws, 'open'); ws.send(body.key);
+  await waitFor(() => f.children.length === 1);
+  assert.equal(f.children[0].spawnOptions.env.DSKCPY_MAC_BROWSER_COMPAT, '1');
+  f.children[0].child.stderr.write('DEBUG: Reverse display encode-submission-to-decode round-trip: 12.5 ms\n');
+  assert.equal(f.publicState().latencyMs, null);
+  assert.match(f.publicState().logs.at(-1).message, /encode-submission-to-WebRTC-send round-trip: 12.5 ms/);
+  await f.request('/api/stream/stop', {});
+});
+
 test('Mac capability follows the binary probe and rejects incompatible encoders before spawn', async (t) => {
   const f = await fixture(t, { platform: 'darwin', readinessProbe: async () => ({ ...ready,
     checks: [...ready.checks, { id: 'capture', ready: true }] }) });

@@ -26,7 +26,7 @@
     </section>
     <p id="error" role="alert"></p>
     <section id="stream-panel" hidden aria-label="Remote desktop">
-      <div id="stage"><canvas id="display" aria-label="Streamed desktop. Touch to control; desktop keyboard forwarding is not yet supported."></canvas></div>
+      <div id="stage"><video id="rtc-display" autoplay playsinline muted hidden aria-label="Streamed desktop video"></video><canvas id="display" aria-label="Streamed desktop. Touch to control; desktop keyboard forwarding is not yet supported."></canvas></div>
       <div id="control-dock">
       <p id="orientation-help" class="subtle" role="status" hidden></p>
       <section id="volume-controls" class="quick-controls" aria-label="Computer volume" hidden>

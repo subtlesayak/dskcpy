@@ -1,4 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import QRCode from 'qrcode';
+import { browserJoinUrl } from '../receiver/protocol.mjs';
 import { Check, Copy, ExternalLink, Globe2, Link2, Monitor, RefreshCw, Square, Usb, Wifi } from 'lucide-react';
 import type { BridgeStatus, StreamConfig } from './types';
 import { fetchStatus, stopStream } from './api';
@@ -32,6 +34,17 @@ export default function BrowserHostPanel({ status, config, online, onStatus }: {
   const mode = active ? browser!.mode : transport;
   const remote = ['wifi', 'ip', 'internet'].includes(mode);
   const needsSetup = remote && !browser?.remoteAvailable;
+  const qr = useMemo(() => {
+    if (!key || !url || mode === 'local' || browser?.connected) return null;
+    try {
+      const modules = QRCode.create(browserJoinUrl(url, key), { errorCorrectionLevel: 'M' }).modules;
+      let path = '';
+      for (let y = 0; y < modules.size; y++) for (let x = 0; x < modules.size; x++) {
+        if (modules.data[y * modules.size + x]) path += `M${x + 4} ${y + 4}h1v1h-1z`;
+      }
+      return { path, size: modules.size + 8 };
+    } catch { return null; }
+  }, [key, url, mode, browser?.connected]);
   const readiness = status.readiness?.transports.browser;
   const adbCheck = status.readiness?.checks.find((check) => check.id === 'adb');
   const blockedReason = !online ? 'The desktop service is offline. Start dskcpy, then reload this page.'
@@ -128,15 +141,21 @@ export default function BrowserHostPanel({ status, config, online, onStatus }: {
             {busy ? 'Creating link…' : 'Create link and code'}
           </button>
         </div>
-        <p id="browser-create-hint" className="action-note">{blockedReason || 'Your screen is shared only after the connection code is entered in the receiver.'}</p>
+        <p id="browser-create-hint" className="action-note">{blockedReason || 'Your screen is shared after someone scans the invitation or enters its code in the receiver.'}</p>
       </> : <p className="browser-ready"><Check size={16} aria-hidden="true" />{browser?.connected ? 'Your browser is connected.' : 'Link created. Your screen is not being shared yet.'}</p>}
     </div>
 
     {key && browser?.waiting && <div className="browser-step browser-invitation">
-      <h3 ref={invitationHeading} tabIndex={-1}><span className="browser-step-number" aria-hidden="true">3</span>{mode === 'local' ? 'Open the link in another tab' : 'Open the link on your receiving device'}</h3>
-      <p>{mode === 'usb' ? 'On the connected Android phone, open this link in Chrome or Edge. Keep the USB cable connected.'
+      <h3 ref={invitationHeading} tabIndex={-1}><span className="browser-step-number" aria-hidden="true">3</span>{mode === 'local' ? 'Open the link in another tab' : 'Scan to connect'}</h3>
+      <p>{mode === 'usb' ? 'Scan the QR with the connected Android phone’s camera and open it in Chrome or Edge. Keep the USB cable connected.'
         : mode === 'local' ? 'Open the receiver below, paste the connection code, then select Connect.'
-          : 'Send the link to your phone, tablet, or other computer. Open it in Chrome or Edge, paste the code, then select Connect.'}</p>
+          : 'Point your phone’s camera at the QR code and open the link. It connects using this one-use invitation. Keep Tailscale connected for Internet / VPN.'}</p>
+      {qr && <div className="browser-qr">
+        <svg role="img" aria-label="Scan this QR code to view and control this computer" viewBox={`0 0 ${qr.size} ${qr.size}`} shapeRendering="crispEdges">
+          <rect width={qr.size} height={qr.size} fill="white" /><path d={qr.path} fill="black" />
+        </svg>
+        <p>Scan with your phone’s camera. No copying needed.<br /><span className="action-note">Anyone with this invitation can view and control your screen. It expires after five minutes or its first use.</span></p>
+      </div>}
       <div className="browser-copy-field">
         <label htmlFor="browser-link">Receiver link</label>
         <div><input id="browser-link" value={url} readOnly spellCheck={false} autoComplete="off" />

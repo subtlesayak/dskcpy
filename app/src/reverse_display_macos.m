@@ -254,8 +254,13 @@ static bool mac_encoder(SCMacState *owner, const struct scrcpy_options *options)
         LOGE("The experimental Mac host supports auto or h264_videotoolbox, not the selected Windows/software encoder");
         return false;
     }
-    NSDictionary *spec = @{(__bridge NSString *)kVTVideoEncoderSpecification_RequireHardwareAcceleratedVideoEncoder: @YES,
-        (__bridge NSString *)kVTVideoEncoderSpecification_EnableLowLatencyRateControl: @YES};
+    char *compat_setting = sc_get_env("DSKCPY_MAC_BROWSER_COMPAT");
+    bool browser_compat = compat_setting && !strcmp(compat_setting, "1");
+    free(compat_setting);
+    NSMutableDictionary *spec = [@{(__bridge NSString *)kVTVideoEncoderSpecification_RequireHardwareAcceleratedVideoEncoder: @YES} mutableCopy];
+    // WebRTC's mandatory H.264 profile is constrained baseline. Apple's special
+    // low-latency mode requires High, so preserve it for native receivers only.
+    if (!browser_compat) spec[(__bridge NSString *)kVTVideoEncoderSpecification_EnableLowLatencyRateControl] = @YES;
     OSStatus result = VTCompressionSessionCreate(NULL, s->width, s->height, kCMVideoCodecType_H264,
         (__bridge CFDictionaryRef)spec, NULL, NULL, mac_encoded, (__bridge void *)owner, &s->encoder);
     if (result != noErr) { LOGE("Could not create the hardware VideoToolbox encoder (%d)", (int)result); return false; }
@@ -264,7 +269,9 @@ static bool mac_encoder(SCMacState *owner, const struct scrcpy_options *options)
         (__bridge NSString *)kVTCompressionPropertyKey_AllowFrameReordering: @NO,
         // Apple's low-latency rate control requires High profile and an
         // infinite GOP. Request recovery IDRs explicitly in the worker.
-        (__bridge NSString *)kVTCompressionPropertyKey_ProfileLevel: (__bridge NSString *)kVTProfileLevel_H264_High_AutoLevel,
+        (__bridge NSString *)kVTCompressionPropertyKey_ProfileLevel: browser_compat
+            ? (__bridge NSString *)kVTProfileLevel_H264_Baseline_AutoLevel
+            : (__bridge NSString *)kVTProfileLevel_H264_High_AutoLevel,
         (__bridge NSString *)kVTCompressionPropertyKey_ExpectedFrameRate: @(s->fps),
         (__bridge NSString *)kVTCompressionPropertyKey_AverageBitRate: @(options->video_bit_rate),
     };

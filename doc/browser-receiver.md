@@ -1,8 +1,9 @@
 # Browser receiving (experimental)
 
-dskcpy can send the native desktop H.264 stream to a browser using WebCodecs and
-WebSocket. Optional Opus audio and authenticated touch input share the same
-connection. This is a media receiver, separate from the localhost dashboard.
+dskcpy can send native desktop H.264 video and Opus audio to a browser using
+WebRTC. Signaling and authenticated input use the existing WebSocket connection.
+The WebCodecs/WebSocket media path remains available for older clients and the
+Android USB browser tunnel. This receiver is separate from the localhost dashboard.
 No APK is needed for this receiver. Native iOS software is not included.
 
 ## Start
@@ -16,11 +17,17 @@ npm start --prefix gui
 ```
 
 Open the displayed control address on the computer. Under **Connect → Browser
-receiver**, choose how to connect, then **Create link and code**. Use **Copy link**
-to open the receiver on the receiving device, then **Copy code** and paste it into
-the receiver’s **Connection code** field. Select **Connect**. The code (session key)
-expires after five minutes, permits one connection, and is never put in a URL,
-log, browser storage, or saved settings. Capture starts only after authentication.
+receiver**, choose how to connect, then **Create link and code**. On a phone,
+scan the displayed QR with the camera and open its link to connect automatically.
+You can also open **Receiver link**, paste **Connection code**, and select
+**Connect**. Local computer tests use the manual fields.
+The code (session key) expires after five minutes and permits one connection.
+The QR is generated locally and includes the code in a URL fragment. The receiver
+removes the fragment from the current history entry before authentication;
+fragments are not sent in HTTP requests. The ordinary receiver link contains no
+code. No code is written to application logs, browser storage or saved settings.
+Treat the QR like the code: anyone who scans it can view and control this computer.
+Capture starts only after authentication.
 The approved browser can reconnect automatically after a refresh or a brief
 absence (up to two minutes). Disconnect, desktop Stop, host shutdown, or expiry
 requires a fresh code.
@@ -33,11 +40,45 @@ requires a fresh code.
 | Direct IP | Connect to the configured HTTPS IP address, including its port. The certificate must cover that IP and be trusted by the receiving device. Plain HTTP is not a supported fallback. |
 | Internet / VPN | Use a reachable private VPN and trusted HTTPS receiver address, for example Tailscale Serve. No ADB is used. Carrier NAT/public mobile IP alone is not enough. |
 
-These modes change how the browser reaches the receiver; they do not change the
-native codec or bypass authentication. USB browser tunneling is Android-specific;
+These modes change how the browser reaches the receiver and never bypass
+authentication. USB browser tunneling is Android-specific;
 it is **not iPhone USB support**. Safari/iPhone/iPad media, gestures and background
-behavior still require physical-device testing. Browsers without WebCodecs fail
-with a visible capability message instead of a black video surface.
+behavior still require physical-device testing. Modern browsers use native WebRTC
+playback without requiring WebCodecs. A browser lacking both playback paths gets
+a visible capability message.
+
+## Mac browser sharing over an existing private VPN
+
+After building the native host and GUI, run `bash tools/macos-browser-start.sh` in
+Terminal on the Mac. It reads the connected Tailscale account, selects its private
+IPv4 interface for media, and verifies a trusted HTTPS Serve route on port 8443
+forwarding only to the receiver on loopback port 27180. It does not change accounts,
+create shares, install Tailscale or modify Serve. Use
+`bash tools/macos-browser-start.sh --check` for a read-only readiness check.
+
+The receiving device needs access through the same authorized tailnet or an
+accepted machine share. With different accounts, share the Mac to the recipient
+account and accept the invitation there. A VPN installation alone does not grant
+access. Keep Tailscale connected on both devices.
+
+After inspecting existing Serve configuration, a separate private HTTPS mapping
+can be added deliberately with
+`tailscale serve --bg --https=8443 http://127.0.0.1:27180`. Preserve unrelated
+mappings and do not enable Funnel. The launcher refuses a missing or mismatched
+route rather than replacing it. Custom tailnet rules must permit the HTTPS route
+and private WebRTC UDP traffic; firewall/access rules are not modified automatically.
+
+Choose **Connect → Browser receiver → Internet / VPN**, create a link and one-use
+code, then scan the QR on the receiving device while Tailscale is connected.
+Alternatively, open the receiver link and enter its code there.
+Tap Audio off to explicitly enable sound. Touch on enables pointer/touch input.
+The host still requires Screen & System Audio Recording and control permissions.
+
+For a manually managed deployment, `DSKCPY_VIEWER_RTC_BIND` selects one private IPv4
+interface for WebRTC. Its default is loopback for local tests. There is no public
+STUN/TURN server or all-interface media listener. The receiving browser must reach
+that interface over the authorized private network. The HTTPS configuration below
+still applies to signaling and receiver assets.
 
 ## Private Internet/VPN with Tailscale Serve
 
@@ -143,15 +184,46 @@ available, use USB, private Tailscale HTTPS, or the native Android receiver.
 - Disconnect and Stop end capture. USB cleanup removes only the tunnel created
   by this session; it refuses to overwrite existing ADB mappings.
 
+## Bounded WebCodecs recovery
+
+The WebCodecs path checks the host's H.264 profile and stream dimensions before
+allocating a decoder. A hardware decoding error permits one software retry only
+when the browser reports support for the same configuration. Decoder reclamation
+and stalled output can recover on the existing authorized connection, with a
+maximum of three automatic recovery attempts per connection. Pause/resume does
+not reset that budget or switch a software decoder back to hardware.
+
+Recovery retains codec configuration, discards pending frames with cumulative
+acknowledgements, and requests a fresh host keyframe; it does not replay pixels.
+At most three submitted frame timestamps are retained. Capability checks and
+the first decoded output each have a five-second deadline. Unsupported formats,
+exhausted retries and recovery timeouts end the session with a visible error.
+Suspension, replacement configuration and Stop invalidate late callbacks.
+
+The WebRTC sender requests keyframes only for routed PLI/new FIR feedback, with
+the existing request throttle. Bitrate feedback does not interrupt delta frames.
+These behaviors have automated lifecycle and local transport coverage; they do
+not establish physical Safari, device or different-network compatibility.
+
 ## Latency and validation boundaries
 
 There is no re-encoding in the Node bridge, no video recording, and no public relay.
+WebRTC packetizes native H.264/Opus into DTLS-SRTP media. Mac browser sessions
+select hardware H.264 Baseline without B-frame reordering for interoperability;
+native receivers retain their existing High-profile low-latency mode. Rebuild
+the Mac host as well as the GUI. This is not completion of the separate native
+datagram roadmap phase.
 Native video pacing remains bounded; browser decoder queues and audio scheduling
 are bounded too. Stalled sockets fail closed instead of buffering indefinitely.
-WebSocket uses TCP: loss and relay paths can increase latency. This is not a
-zero-latency or WebRTC implementation.
+WebRTC retains at most one video frame and one audio packet being sent; dropping
+video requests a new keyframe. Close, expiry, reconnect and shutdown revoke the
+media peer, without queued-frame replay. The legacy WebSocket media path uses
+TCP. Neither path guarantees zero latency.
 
-The dashboard metric measures video decode acknowledgement, not physical
+WebRTC native acknowledgements mean RTP send completion or intentional drop,
+not browser decoding. The controller does not show them as decode RTT; Activity
+labels them as WebRTC-send measurements. No physical latency is claimed.
+For WebCodecs, the dashboard metric measures video decode acknowledgement, not physical
 motion-to-photon latency. Opus can adjust decoded timestamps for pre-skip; audio
 acknowledgements use the original packet timestamp as input leaves the bounded
 decode queue and do not contribute to the video latency metric.
@@ -169,3 +241,15 @@ and limitations. A desktop test does not prove Safari or mobile-network behavior
 Protocol references: [WebCodecs](https://www.w3.org/TR/webcodecs/),
 [H.264 registration](https://www.w3.org/TR/webcodecs-avc-codec-registration/), and
 [Opus registration](https://www.w3.org/TR/webcodecs-opus-codec-registration/).
+
+## WebRTC verification boundary
+
+The November 2026 candidate passes real private loopback ICE/DTLS/SRTP H.264 and
+Opus packet tests, authentication/control isolation tests and receiver lifecycle
+regressions. The actual browser receiver rendered a synthetic 640×360 H.264 pattern
+locally and recovered after reload and Pause/Resume. Synthetic media is not Mac
+desktop capture, audible playback or a physical mobile/VPN test.
+
+Safari on actual iPhone/iPad, Android browser audio/input and different-network
+operation require separate physical results. Capability checks do not prove every
+brand, model or browser. Desktop keyboard/IME remains a separate roadmap milestone.

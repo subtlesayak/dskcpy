@@ -1,0 +1,4 @@
+#!/bin/bash
+set -euo pipefail
+cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+exec node gui/scripts/start-browser-macos.mjs "$@"

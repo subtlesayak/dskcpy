@@ -30,8 +30,8 @@ async function fixture(t, options = {}) {
   }, ...options });
   t.after(async () => { native?.destroy(); await receiver.shutdown(); });
   const invitation = await receiver.invite();
-  const open = async (origin = invitation.url.slice(0, -1), cookie) => {
-    const ws = new WebSocket(invitation.url.replace('http:', 'ws:') + 'stream', { origin, headers: cookie ? { Cookie: cookie } : {} });
+  const open = async (origin = invitation.url.slice(0, -1), cookie, route = 'stream') => {
+    const ws = new WebSocket(invitation.url.replace('http:', 'ws:') + route, { origin, headers: cookie ? { Cookie: cookie } : {} });
     ws.received = [];
     ws.on('upgrade', (response) => { ws.cookie = response.headers['set-cookie']?.[0]; });
     ws.on('message', (data, binary) => ws.received.push({ data, binary }));
@@ -234,6 +234,10 @@ test('receiver serves only fixed assets, rejects Host rebinding, no control rout
   assert.match(html, /<label for="session-key">Connection code<\/label>/);
   assert.match(html, /Create link and code/);
   assert.match(html, /prepared Android USB connection/);
+  const videoModule = await fetch(f.invitation.url + 'video.mjs');
+  assert.equal(videoModule.status, 200);
+  assert.match(videoModule.headers.get('content-type'), /javascript/);
+  assert.match(await videoModule.text(), /export function createVideoReceiver/);
   for (const route of ['api/status', 'api/stream/start', 'receiver.mjs?key=anything', '../server/service.mjs']) {
     assert.equal((await fetch(f.invitation.url + route)).status, 404);
   }
@@ -322,4 +326,29 @@ test('direct TLS validates its certificate and carries authenticated WSS without
   const ended = once(ws, 'close'); ws.close(); await ended;
   for (let i = 0; i < 100 && receiver.status().connected; i++) await new Promise((resolve) => setTimeout(resolve, 5));
   assert.equal(receiver.status().connected, false);
+});
+
+test('WebRTC signaling requires the one-use code and retains authenticated input isolation', async (t) => {
+  const f = await fixture(t);
+  const ws = await f.open(undefined, undefined, 'stream/webrtc');
+  assert.equal(f.calls(), 0);
+  assert.equal(ws.received.length, 0);
+  ws.send(f.invitation.key);
+  await until(() => ws.received.some((entry) => entry.binary));
+  assert.equal(f.calls(), 1);
+  const authenticated = ws.received.filter((entry) => !entry.binary).map((entry) => JSON.parse(entry.data.toString()));
+  assert.equal(authenticated[0].mediaMode, 'webrtc');
+  f.native().write(packet(0, 1, Buffer.from('000000016742c01e0102030000000168ce3c80', 'hex')));
+  await until(() => ws.received.some((entry) => !entry.binary && JSON.parse(entry.data.toString()).type === 'rtc-offer'));
+  assert.equal(f.receiver.status().mediaMode, 'webrtc');
+  const input = Buffer.from(touchPacket(0, 0, 20, 30, 640, 480));
+  const received = [];
+  f.native().on('data', (chunk) => received.push(chunk));
+  ws.send(input);
+  await until(() => Buffer.concat(received).includes(input));
+  // Neither arbitrary JSON commands nor forged video acknowledgements are input.
+  const closed = once(ws, 'close');
+  ws.send(JSON.stringify({ type: 'rtc-answer', description: { type: 'offer', sdp: 'invalid' } }));
+  await closed;
+  assert.equal(f.receiver.status().connected, false);
 });
