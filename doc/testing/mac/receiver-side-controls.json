@@ -5,7 +5,7 @@
   "scope": "Right receiver rail, accessible typing/options panels, automatic authorized Android USB browser opening, bounded WebCodecs output drain",
   "checks": {
     "backend": {
-      "passed": 181,
+      "passed": 186,
       "failed": 0,
       "optional_skips": 7
     },
@@ -16,7 +16,7 @@
     "prior_private_browser_baseline": "User confirmed visible video 20s and Calculator 123 from phone taps; audio stutters",
     "usb": "Edge on Android 17 initially stalled at 5s without output; software H.264 unavailable. Bounded flush plus fresh IDR now stays connected with fresh decode ACKs; user confirms picture stays visible for 20 seconds.",
     "usb_picture_and_keyboard": "PASS: user confirms video remains visible for 20 seconds and phone keyboard input; controlled 789 typing independently read in Mac Calculator accessibility state. USB stream left running.",
-    "audio": "Unresolved; no pass claimed for current USB candidate",
+    "audio": "FAIL: new combined candidate still beeps; native duplicate Resume epoch/encoder restart reproduced; correction pending with native owner",
     "ui_observations": "PASS for the supplied Edge/Android phone: real portrait and landscape/fullscreen keyboard screenshots verify corrected fitting and compact controls. Aspect-ratio margins remain, and keyboard-open landscape desktop is necessarily small.",
     "options_review": "User requested nav icons. Source now moves quick actions into the rail, pins Disconnect, collapses help and narrows the secondary menu; rendered/automated checks pass; phone confirmation pending."
   },
@@ -39,7 +39,7 @@
     "tools/macos-usb-browser-start.sh": "d0bc038cb42a047aa678034c8eb843143c6b0d56e0ef9c97f229a8d9bc39e732"
   },
   "standards_reference": "https://www.w3.org/TR/webcodecs/#dom-videodecoder-flush",
-  "merged_master": "bedf40bcc190d8eff6b5458f6df4a182d5e5b9b4",
+  "merged_master": "e5e8c6e3",
   "runtime_note": "Master source merged after the live USB stream began; native artifact and loaded service remain unchanged. WebRTC audio fix loads on a future authorized launcher restart.",
   "compact_typing": {
     "source": "Inner receiver viewport fitted to visible height and offset; compact one-row typing strip; 56px icon rail with accessible labels; native text resizing retained; no forced scrollIntoView during keyboard resize",
