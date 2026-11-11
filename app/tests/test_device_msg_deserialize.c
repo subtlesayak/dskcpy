@@ -3,6 +3,7 @@
 #include <assert.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "device_msg.h"
@@ -193,6 +194,44 @@ static void test_reverse_keyboard(void) {
     sc_device_msg_destroy(&msg);
 }
 
+static void test_bounded_message_vectors(void) {
+    const uint8_t types[] = {DEVICE_MSG_TYPE_CLIPBOARD, DEVICE_MSG_TYPE_ACK_CLIPBOARD,
+        DEVICE_MSG_TYPE_UHID_OUTPUT, DEVICE_MSG_TYPE_REVERSE_TOUCH, DEVICE_MSG_TYPE_REVERSE_KEY,
+        DEVICE_MSG_TYPE_REVERSE_TEXT, DEVICE_MSG_TYPE_REVERSE_SCROLL,
+        DEVICE_MSG_TYPE_REVERSE_FRAME_ACK, DEVICE_MSG_TYPE_REVERSE_AUDIO_ACK,
+        DEVICE_MSG_TYPE_REVERSE_SYSTEM_ACTION};
+    uint32_t state = UINT32_C(0x5ad15);
+    // Exact-sized allocations make truncated reads visible under ASan. Every
+    // successful parse must consume only available bytes and remain destroyable.
+    // Fixed seed and work bound make any failure reproducible in ordinary CI.
+    for (unsigned i = 0; i < 8192; ++i) {
+        size_t length = i % 65;
+        uint8_t *input = length ? malloc(length) : NULL;
+        assert(!length || input);
+        for (size_t j = 0; j < length; ++j) {
+            state = state * UINT32_C(1664525) + UINT32_C(1013904223);
+            input[j] = (uint8_t) (state >> 24);
+        }
+        if (length) input[0] = types[i % (sizeof(types) / sizeof(*types))];
+        // Also exercise complete small variable messages, not just random huge
+        // length advertisements. Their payload remains adversarial UTF-8/data.
+        if (length >= 5 && i % 3 == 0) {
+            if (input[0] == DEVICE_MSG_TYPE_CLIPBOARD) {
+                input[1] = input[2] = input[3] = 0; input[4] = (uint8_t) (length - 5);
+            } else if (input[0] == DEVICE_MSG_TYPE_UHID_OUTPUT) {
+                input[3] = 0; input[4] = (uint8_t) (length - 5);
+            } else if (input[0] == DEVICE_MSG_TYPE_REVERSE_TEXT) {
+                input[1] = 0; input[2] = (uint8_t) (length - 3);
+            }
+        }
+        struct sc_device_msg msg = {0};
+        ssize_t consumed = sc_device_msg_deserialize(input, length, &msg);
+        assert(consumed >= -1 && (consumed <= 0 || (size_t) consumed <= length));
+        if (consumed > 0) sc_device_msg_destroy(&msg);
+        free(input);
+    }
+}
+
 int main(int argc, char *argv[]) {
     (void) argc;
     (void) argv;
@@ -206,5 +245,6 @@ int main(int argc, char *argv[]) {
     test_deserialize_reverse_system_action();
     test_deserialize_reverse_scroll();
     test_reverse_keyboard();
+    test_bounded_message_vectors();
     return 0;
 }

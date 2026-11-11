@@ -64,9 +64,10 @@ jobs:
         env:
           MSYS2_PATH_TYPE: inherit
           SCRCPY_LOG_PIPE_TEST_BINARY: .tmp/ci-native/app/log-pipe-fixture.exe
+          SCRCPY_WINDOWS_RUNTIME_TEST_BINARY: .tmp/ci-native/app/scrcpy.exe
         run: |
           npm ci --prefix gui --ignore-scripts
-          node --test gui/server/telemetry.test.mjs
+          node --test gui/server/telemetry.test.mjs gui/server/windows-runtime-native.test.mjs
 
   native-macos:
     runs-on: macos-15
