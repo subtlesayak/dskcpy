@@ -1,10 +1,18 @@
 # On Windows
 
+> [!NOTE]
+> This retained page describes upstream-style **Android-to-computer** use.
+> Use [Windows host setup](windows-host.md) to stream a Windows desktop.
+> Upstream releases and package-manager installs do not include dskcpy hosting.
+> Versioned 4.1 download links below are historical pins, not current-release claims;
+> use [upstream releases](https://github.com/Genymobile/scrcpy/releases/latest)
+> if you want current upstream scrcpy.
+
 ## Install
 
-### From the official release
+### Historical upstream 4.1 release
 
-Download the [latest release]:
+The retained upstream 4.1 downloads are:
 
  - [`scrcpy-win64-v4.1.zip`][direct-win64] (64-bit)  
    <sub>SHA-256: `5b12172b3264b2889f4583ee64752ce832e29bc8b1089dca81093459697165db`</sub>
@@ -49,7 +57,7 @@ _See [build.md](build.md) to build and install the app manually._
 
 ## Run
 
-_Make sure that your device meets the [prerequisites](/README.md#prerequisites)._
+_Make sure that your device meets the [prerequisites](https://github.com/Genymobile/scrcpy#prerequisites)._
 
 Scrcpy is a command line application: it is mainly intended to be executed from
 a terminal with command line arguments.
@@ -70,7 +78,7 @@ scrcpy --no-audio --record=file.mkv
 
 Documentation for command line arguments is available:
  - `scrcpy --help`
- - on [github](/README.md)
+ - on [github](https://github.com/Genymobile/scrcpy)
 
 If you plan to always use the same arguments, create a file `myscrcpy.bat`
 (enable [show file extensions] to avoid confusion) containing your command, For

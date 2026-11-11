@@ -22,6 +22,11 @@ separate Windows Indirect Display Driver (IddCx).
 
 ## Quick start
 
+First build and configure this fork using [Windows setup](windows-host.md) or
+[Mac setup](macos-host.md). For a webpage on the receiving device, follow
+[browser receiving](browser-receiver.md) instead of the Android app flow below.
+The CLI examples assume the fork's binary and matching assets are available.
+
 Enable USB debugging, connect the device, then run:
 
 ```bash
@@ -41,13 +46,13 @@ choices, encoder presets, device discovery, generated commands, live logs, and
 capture-to-decode telemetry:
 
 ```bash
-cd gui
-npm ci
-npm run build
-npm start
+node gui/scripts/launch.mjs
 ```
 
-Open <http://127.0.0.1:27183>. The service binds to localhost and launches the
+Run that launcher from the checkout root in the configured platform terminal;
+it requires the built dashboard and correct native/runtime settings.
+On Mac, the complete-build launcher is `bash tools/macos-start.sh`.
+Open <http://127.0.0.1:27183> on the computer. The service binds to localhost and launches the
 native process without a shell.
 
 The default reverse-display bitrate is tuned for desktop text (about 12 Mbps
@@ -128,7 +133,7 @@ One bounded capture buffer and four unacknowledged 10 ms packets prevent growing
 queues. Mute/background transitions discard partial samples, including rapid
 pause/resume cycles. Audio failure reports unavailable while video can continue;
 `--no-audio` disables Mac audio capture. Audible playback still needs a physical
-Mac test; see the [Mac audio checklist](macos-host.md#testing-mac-desktop-audio).
+Mac test; see the [Mac audio checklist](macos-host.md#audio-and-recovery-checks).
 
 Protected/exclusive-mode content or an unavailable output device may not be
 capturable. Decoder/output failures disable audio without intentionally stopping

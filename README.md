@@ -1,284 +1,222 @@
-<!-- generated-by: gsd-doc-writer -->
 # dskcpy
 
-**Stream your desktop to Android or a browser. Control it with touch.**
+**Stream your Windows or Mac desktop to Android or a browser.**
 
-dskcpy is an experimental fork of [scrcpy](https://github.com/Genymobile/scrcpy)
-that adds the reverse direction: Windows or macOS desktop video on your Android
-phone, tablet or authenticated browser, with input sent back to the computer. Desktop audio forwarding
-is implemented on Windows and experimental on macOS. Use USB, a local wireless
-connection, or a private VPN network.
+View desktop video, forward system audio, and send touch or mouse input back to
+the computer over USB, a local network, or a private VPN. dskcpy is a free,
+open-source fork of [scrcpy](https://github.com/Genymobile/scrcpy) that adds this
+reverse direction. The original Android-to-computer mode remains available.
 
-[Quick start](#quick-start) · [Connections](#connection-options) ·
-[macOS setup](doc/macos-host.md) · [Browser receiver](doc/browser-receiver.md) · [Documentation](#documentation)
+[Get started](#quick-start) · [Windows setup](doc/windows-host.md) ·
+[Mac setup](doc/macos-host.md) · [Browser receiving](doc/browser-receiver.md) ·
+[Troubleshooting](FAQ.md) · [Documentation](#documentation)
 
 > [!IMPORTANT]
-> This is **dskcpy**, not an official Genymobile release. Get this fork's source
-> from [subtlesayak/dskcpy](https://github.com/subtlesayak/dskcpy).
-> Standard scrcpy downloads do not include these desktop-to-Android features.
-> Reverse display installs a companion Android app and currently requires a
-> source build; there is no signed, ready-to-install dskcpy desktop release.
+> Get dskcpy source from [this repository](https://github.com/subtlesayak/dskcpy).
+> It currently requires a source build; there is no signed, ready-to-install
+> dskcpy desktop release. Upstream scrcpy downloads and package-manager installs
+> do not include dskcpy's desktop-hosting features. Mac hosting and browser
+> receiving are experimental; sustained Mac audio and device qualification remain open.
 
 ## What it does
 
-- **Desktop video:** low-buffering H.264 streaming with hardware encoding where
-  available, a visible cursor, and adjustable resolution, frame rate and bitrate.
-- **Touch control:** native multi-touch injection on Windows; click, drag and
-  two-finger scrolling on the experimental Mac host.
-- **Desktop audio on Android:** Windows system playback and experimental Mac
-  system audio over USB, LAN or Internet, with a separate phone-playback mute control.
-- **Flexible connections:** USB, paired ADB Wi-Fi, direct IP, and experimental
-  Tailscale-backed Internet sessions without ADB after app installation.
-- **Leave and return:** background the Android app and return to the same
-  session on Android 6+, while the sender pauses video and audio while away.
-- **Controls within reach:** volume tap/hold, mute, window actions, lock,
-  touch enable/disable, Stop, and hide/show controls. Hold an icon for its hint.
-- **Local browser dashboard:** Connect, Device, Performance and Activity views;
-  wireless pairing/discovery, encoder selection, logs and live decode-ack metrics.
-- **Experimental browser receiver:** WebRTC H.264/Opus, one-use QR invitations,
-  touch and mouse input, plus a WebCodecs path for Android USB browser tunnels.
-  Wi-Fi/direct IP and Internet/VPN require explicitly configured trusted HTTPS
-  and a reachable private media interface; no public relay is provisioned.
-- **Mac window sharing:** explicitly select one window in the local browser
-  dashboard. Window mode is view-only with audio off, retains a fixed output
-  canvas on resize, and ends when the target is hidden, minimized or closed.
-- **Mac browser keyboard:** opt in with **Keyboard**, then focus the typing
-  field for Unicode/IME text, navigation keys and shortcuts. Input is released
-  on blur, suspension and disconnect; the native host requires Accessibility.
-- **Mac audio-route recovery:** bounded PCM conversion and output-change
-  recovery discard stale audio while preserving mute and video state. Sustained
-  audible playback and physical route changes still need candidate testing.
-- **Bounded recovery:** optional, limited retries for USB/LAN sessions. Internet
-  sessions deliberately require a fresh secret after disconnection.
+- **Desktop video:** H.264 capture with hardware encoding where available,
+  a visible cursor, and adjustable size, frame rate and bitrate.
+- **Desktop control:** native touch on Windows; click, drag and two-finger
+  scrolling on Mac. Receiver controls include volume, mute, window actions and Stop.
+- **System audio:** Windows playback capture and experimental Mac system audio,
+  with receiver playback mute separate from computer mute.
+- **Android receiving:** a companion app with USB, paired ADB Wi-Fi, direct-IP
+  and private VPN connections. On Android 6+, leaving and returning can retain
+  the session; stopping ends it.
+- **Browser receiving:** authenticated WebRTC H.264/Opus and one-use QR
+  invitations, plus a WebCodecs path for Android USB browser tunnels.
+- **Mac window sharing:** select one window; view-only with audio off, a fixed
+  canvas on resize, and session end when the target is hidden, minimized or closed.
+- **Mac browser typing:** opt-in full-desktop keyboard and Unicode/IME input,
+  gated by native support and Accessibility permission.
+- **Local dashboard:** connection setup, wireless discovery, performance settings,
+  activity logs, and optional bounded USB/LAN reconnect attempts.
 
-The Android app uses Material 3 navigation and adapts its streaming controls to
-available letterbox space. No root access is required. The project is free and
-open source, and USB/LAN streaming does not require a dskcpy account.
+USB/LAN operation needs no dskcpy account or root access. Private Internet/VPN
+operation uses an external VPN such as Tailscale and its access controls.
 
 ## Platform support
 
-| Host → receiver | Status |
+| Host → receiver | Status and limits |
 | --- | --- |
-| Windows → Android | Implemented: video, native touch and system audio. Physical-device testing covers USB and authenticated VPN sessions. |
-| macOS → Android | Experimental source build. Earlier artifacts have physical video, mouse/scroll and selected display/permission recovery evidence. ScreenCaptureKit → Opus audio and route recovery are implemented; sustained audible playback and current-candidate hardware qualification remain open. |
-| Linux → Android | Reverse hosting is not implemented. |
-| Desktop → iPhone/iPad | No native iOS receiver. Experimental browser path exists; Safari/iOS compatibility is not yet verified. USB browser tunneling is Android-only. |
-| Desktop → browser | Experimental private WebRTC and WebCodecs paths. Real loopback WebRTC and synthetic browser lifecycle checks pass. Mac window mode and desktop keyboard are implemented; current-candidate Safari/iOS, device, audible audio and different-network qualification remain pending. Windows browser keyboard is not advertised. |
+| Windows → Android | Video, native touch and system audio implemented; physical USB/VPN results are recorded in the validation notes. |
+| Mac → Android | Experimental Apple-silicon source build. Earlier snapshots have physical video/input/recovery results; sustained audio and final-candidate qualification remain open. |
+| Windows/Mac → browser | Experimental private WebRTC and WebCodecs paths. Mac window sharing and desktop typing are implemented; Windows browser typing is unavailable. |
+| Desktop → iPhone/iPad browser | Safari/iOS compatibility needs physical qualification; no native iOS receiver or iPhone USB tunnel is provided. |
+| Linux desktop hosting | Not implemented. Linux can still use the inherited Android-to-computer mode. |
 
-The original Android-to-computer scrcpy mode remains in the codebase. Its
-platform support and features are separate from dskcpy's reverse mode.
-
-Build the native host and dashboard from the same revision to use the Mac
-window picker or keyboard. Older native hosts retain their existing connection
-paths and do not advertise these additional capabilities. See the
-[browser guide](doc/browser-receiver.md) for candidate setup and limitations.
+A source implementation or automated pass is not a physical-device pass. See
+[validation notes](doc/reverse-display-validation.md), the
+[Mac testing record](doc/testing/mac/README.md), and the [roadmap](doc/roadmap.md).
 
 ## Prerequisites
 
-- **Windows host:** Windows 10+ with Desktop Duplication and an available H.264
-  encoder. The sender tries supported hardware encoders before software fallback.
-- **Mac host:** Apple silicon, macOS 13+, and an opt-in build using ScreenCaptureKit
-  and VideoToolbox. Screen Recording and Accessibility permissions are needed
-  for capture and input respectively.
-- **Android receiver:** Android 5.0+ (API 21) with H.264 decoding. Background/return
-  session retention requires Android 6+. Use Android 11+ for USB-free ADB pairing.
-- **Dashboard:** Node.js 22.12+ and npm, plus the compiled native host.
-- **USB/LAN:** Android SDK platform-tools (`adb`) and authorized debugging access.
-- **Internet mode:** Tailscale on both devices, permitted peer connectivity, and
-  the companion already installed. This mode does not need USB debugging.
+- **Windows host:** Windows 10+, an interactive desktop, and an H.264 encoder.
+- **Mac host:** Apple silicon, macOS 13+, Apple's Command Line Tools, and
+  Screen Recording permission. Input additionally needs Accessibility.
+  Local dependency builds can require a newer OS; the source minimum is not
+  a guarantee that a Homebrew-linked binary runs on every macOS 13+ machine.
+- **Dashboard:** Node.js 22.12+ and npm, with this fork's compiled native host.
+- **Android app receiver:** Android 5.0+ with H.264 decoding; Android 6+ for
+  retained background sessions. A matching companion APK is required.
+- **Browser receiver:** no companion APK. Android USB mode needs authorized
+  debugging and ADB; Wi-Fi/direct-IP/VPN mode needs trusted HTTPS and private
+  media reachability. Chrome and Edge are the initial targets; Safari/iOS needs testing.
 
 ## Get the source
 
-```bash
+```sh
 git clone https://github.com/subtlesayak/dskcpy.git
 cd dskcpy
 ```
 
-Do not substitute an upstream `scrcpy` executable or an unrelated companion APK.
-Build the sender and companion from the same checkout. Android updates require
-the same signing key; do not uninstall an existing app just to bypass a signing
-error if you need to keep its settings.
+Build the native host, dashboard and Android companion from a matching revision.
+An APK upgrade also needs the same signing key; preserve an existing installation
+and its data when resolving a signature mismatch.
 
 ### Windows build
 
-Install the native dependencies described in [MSYS2 build setup](doc/build.md#in-msys2),
-Node.js, JDK 17+, and Android SDK platform 36/build-tools 36.0.0. Make Java and
-ADB available on `PATH`, and set `ANDROID_HOME` to your Android SDK directory.
-
-From an **MSYS2 MinGW64 terminal** in this checkout:
-
-```bash
-meson setup x-reverse --buildtype=debug
-meson compile -C x-reverse
-meson test -C x-reverse --print-errorlogs
-```
-
-The build produces `x-reverse/app/scrcpy.exe`,
-`x-reverse/server/scrcpy-server` and `x-reverse/server/reverse-display.apk`.
-The signed companion is required for reverse mode. Keep the MinGW runtime
-libraries available when launching the executable.
+Follow [Windows host setup](doc/windows-host.md). It covers the UCRT64 native
+build, Android companion, dashboard, and explicit runtime-library configuration.
+Use a new build directory when changing compiler/runtime families.
 
 ### Mac build
 
-Follow the [Mac setup guide](doc/macos-host.md) for dependencies and permissions.
-From a **Git checkout**, build the companion first with JDK 17+ and Android SDK
-platform 36 configured, or use a complete source test bundle containing it:
-
-```bash
-./gradlew :server:assembleDebug
-bash tools/macos-build.sh
-bash tools/macos-start.sh
-```
-
-If a source bundle already contains `companion/reverse-display.apk`, skip the
-Gradle command. The Mac script builds and tests the opt-in host and dashboard;
-an ordinary Homebrew scrcpy installation cannot replace this build.
+Follow [Mac host setup](doc/macos-host.md). Choose Git-checkout or complete-bundle
+instructions. The Mac build script expects an existing companion APK, even if
+only testing browser receiving; a native-only browser build is documented separately.
 
 ## Quick start
 
-After building the Windows host:
+First complete the [Windows](doc/windows-host.md) or [Mac](doc/macos-host.md)
+build and start the dashboard **on the host computer**. Keep its terminal open.
+Choose the receiver you want to use:
 
-1. On Android, enable USB debugging, connect a data-capable cable, unlock the
-   phone and approve the computer's debugging prompt.
-2. Prepare the dashboard once, from the checkout folder in PowerShell:
+### Receive in the Android app
 
-   ```powershell
-   npm.cmd ci --prefix gui
-   npm.cmd run build --prefix gui
-   ```
+1. Connect Android with a data-capable USB cable, enable USB debugging, unlock
+   the device, and approve the computer's authorization prompt.
+2. In the computer dashboard, choose **USB**, select the authorized device,
+   and select **Start streaming**. The host installs/opens the matching companion.
+3. Grant the Mac capture/input permissions if requested. Check readable video,
+   a harmless tap/drag, and two-finger scrolling on Mac.
+4. Use **Stop session** to end the connection. Leaving the app temporarily is
+   different from stopping it.
 
-3. Double-click **`start-dskcpy.cmd`** in the checkout folder. Keep its terminal
-   open while using dskcpy. It checks local components, opens the dashboard and
-   reuses an already-running dashboard without interrupting its stream.
-4. In [the dashboard](http://127.0.0.1:27183) **on the computer**, choose **USB**,
-   select the authorized phone if necessary, and click **Start streaming**.
-   The host installs and opens the companion for ADB-based connections.
-5. Touch the desktop on Android. Use **Stop session** to disconnect; leaving the
-   app temporarily is different from stopping it. On Mac, use the Mac launcher
-   above and follow the permission prompts before expecting video or input.
+Then try [wireless pairing](gui/README.md#cable-free-android-setup) or
+[native Android Internet mode](doc/internet-mode.md).
 
-The dashboard discovers the local Windows `x-reverse` build automatically.
-For another build location, configure `SCRCPY_GUI_BINARY` and the matching
-assets as described in the [dashboard guide](gui/README.md).
-For a check without starting a service or capture, run
-`node gui/scripts/launch.mjs --check`. The launcher does not install dependencies,
-enable network access or replace the source-build requirement.
+### Receive in a browser
+
+1. In the computer dashboard, open **Browser receiver** and choose **USB cable**
+   for an authorized Android device, or **This computer** for a local preview.
+2. Select **Create link and code**. On Android USB, scan the QR using that
+   connected device. For local preview, open the receiver link and paste its code.
+3. Wi-Fi, direct IP and Internet/VPN need the
+   [secure-link setup](doc/browser-receiver.md#choose-a-connection) first.
+4. In the receiver, select **Disconnect**, or select **Stop browser stream** in
+   the dashboard, to end sharing.
+
+The dashboard and receiver are different pages. The dashboard's localhost
+address is for the computer; use the generated receiver address on the phone.
+A browser invitation is generated on the computer; a native Android Internet
+secret is generated in the phone app. They are separate connection flows.
 
 ## Connection options
 
-| Mode | Setup | Needs USB? |
+| Connection | Android app receiver | Browser receiver |
 | --- | --- | --- |
-| **USB** | Enable USB debugging and authorize the computer. | Yes, while streaming. |
-| **Wi-Fi** | Pair using Android 11+ Wireless debugging, then select a discovered wireless device. | No, with wireless pairing. |
-| **Connect IP** | Enter the phone's reachable LAN IP and ADB **connection** port. | No, when wireless debugging is already paired/enabled. |
-| **Internet** | Select a reachable Tailscale Android peer and enter its temporary dskcpy session secret. | No, after companion installation. |
+| USB | Authorized debugging, ADB and matching companion; cable stays connected. | Android-only ADB reverse tunnel; no companion APK. |
+| Same LAN / direct IP | Pair/connect using Android Wireless debugging and its connection port. | Trusted HTTPS receiver address and a reachable private media interface; no ADB pairing. |
+| Internet / VPN | Reachable Android VPN peer and a temporary phone-generated secret. | Reachable host VPN peer, trusted HTTPS, private media traffic and a computer-generated invitation. |
+| This computer | Not an Android-app mode. | Loopback preview; no certificate. Keyboard forwarding is omitted to avoid input feedback. |
 
-**Wireless pairing:** choose **Wi-Fi → Pair a phone without USB**. Enter the
-address and six-digit code from Android's **Pair device with pairing code**
-dialog. After pairing, use the connection address on the main **Wireless
-debugging** screen. The pairing and connection ports are different, and ports
-can change. Both devices must be reachable on the LAN. Older Android versions
-need initial USB setup for the ADB TCP/IP workflow.
-
-**Mobile data or separate networks:** a carrier IP alone is not an Internet
-connection method. Use [Internet mode](doc/internet-mode.md) with Tailscale.
-Different accounts can connect through a permitted device share or tailnet
-invitation. No account enrollment or access-policy change is performed for you.
-
-The phone can generate a **12-word passphrase**, **26-character alphanumeric
-key**, or **3-word short passphrase**, with a copy button. The three-word option
-is substantially weaker; prefer the longer formats, especially with other users.
-Never post a session secret in an issue or screenshot.
+Pairing and connection ports are different and may change. Use the connection
+address on Android's main Wireless debugging screen after pairing. Android 11+
+can pair without USB; older ADB wireless workflows need initial USB setup.
+A carrier IP alone is not an Internet connection method.
 
 ## Usage examples
 
-The binary is still named `scrcpy`. Once your build and runtime assets are
-configured, the CLI can start reverse display without the dashboard:
+The native binary is still named `scrcpy`. These commands require **this fork's
+binary**, matching assets, and an already authorized Android connection:
 
-```bash
-# USB: a practical starting point for desktop text
+```sh
+# USB, with settings suitable as a starting point for desktop text
 scrcpy --reverse-display --connection=usb --max-size=1920 --max-fps=60 --video-bit-rate=12M
 
-# An already-authorized wireless ADB device
+# An existing authorized ADB wireless transport
 scrcpy --reverse-display --connection=wifi
-
-# An already-authorized LAN endpoint (replace this example IP and port)
-scrcpy --reverse-display --connection=ip:192.168.1.20:5555
 ```
 
-Use `--no-audio` to disable Windows audio capture. Select a Windows monitor with
-`--reverse-display-index=1` (zero-based), or a supported host encoder with
-`--video-encoder=h264_nvenc`. On Mac, use Auto or `h264_videotoolbox`.
-Internet authentication is handled by the dashboard, not by putting secrets
-into a CLI command. See [reverse-display options](doc/reverse-display.md).
+Use the dashboard for Internet authentication and browser invitations. Native
+options and encoder/monitor selection are in the
+[reverse-display reference](doc/reverse-display.md).
 
 ## Must-know tips
 
-- Start with **1920 / 60 FPS / 12 Mbps**, then tune for your connection and device.
-  Dashboard setting changes apply to the **next** stream: stop and restart.
-- Prefer USB when diagnosing latency. Hardware encoding and a stable local
-  network help; a VPN relay or congested link can add delay.
-- On Mac, use **two fingers to scroll**. Windows uses native touch injection.
-- Phone-playback mute and computer mute are separate. Windows playback is not
-  automatically silenced when audio is forwarded to Android.
-- **Performance is not a glass-to-glass benchmark.** The number measures the
-  host-to-decode acknowledgement round trip, not physical display scan-out.
-  On Mac it starts at encode submission and excludes capture wait.
-- If Mac video works but Performance stays on Connecting, rebuild and restart
-  the updated native host. A browser refresh cannot replace the old binary.
-- Open the dashboard on the **host computer**. It binds to localhost; entering
-  its URL on the phone will not open the computer's dashboard.
+- Build the native host and dashboard together for Mac window/keyboard controls;
+  older binaries do not advertise those capabilities.
+- Start with **1920 / 60 FPS / 12 Mbps**, then tune for your device and connection.
+  Performance changes apply to the next stream.
+- Mac window mode is view-only with audio off. Select the entire desktop for input/audio.
+- Computer volume and receiver playback mute are separate controls.
+- Decode-acknowledgement round trip is not physical touch-to-display latency.
+  WebRTC send acknowledgements are not browser decode measurements either.
+- Before rebuilding, changing native artifacts, or restarting a service, end the
+  active session deliberately. A browser refresh cannot replace a native binary.
 
 ## Limits and security
 
-This mirrors an existing desktop display. It does **not** add a virtual monitor
-or Windows Extend mode. Stylus pressure/Windows Ink, a native iOS receiver and a
-packaged Tauri desktop wrapper are not implemented. Browser receiving is
-experimental; Safari/iOS still needs physical-device verification.
-There is no zero-latency or fixed-latency guarantee.
+The host mirrors an existing desktop; it does not add a virtual monitor or
+Windows Extend mode. Stylus pressure/Windows Ink, native iOS software, packaged
+Tauri apps and signed desktop distribution remain [roadmap work](doc/roadmap.md).
 
-ADB grants powerful access to a device: authorize only trusted computers and
-never expose debugging ports to the public Internet. In Internet mode, Tailscale
-provides network encryption; dskcpy adds temporary-session authentication, not
-its own replacement for VPN encryption. This protocol is experimental and has
-not undergone an independent security audit. Read the
-[security boundary](doc/internet-mode.md#security-boundary-and-protocol).
+Authorize only trusted ADB computers. Keep debugging ports and the controller
+private. Remote browser receiving uses a separate authenticated endpoint;
+public relays, router forwarding and Funnel are not part of this setup.
+Anyone with a live invitation can view/control the shared desktop within the
+selected capture policy. Share it only with the intended receiver.
 
-The dashboard does not upload logs or diagnostics automatically. Session secrets
-are not saved in dashboard settings or generated commands. Review logs before
-sharing them: remove keys, device identifiers, addresses, personal paths and
-private screen content.
+Diagnostics are not uploaded automatically. Before sharing logs or screenshots,
+remove credentials, invitation codes, device/network identifiers, personal paths
+and private desktop content. Read the [Internet security boundary](doc/internet-mode.md#security-boundary-and-protocol).
 
 ## Documentation
 
-- [Reverse display, desktop controls and audio](doc/reverse-display.md)
-- [Remaining implementation and validation work](doc/roadmap.md)
-- [Dashboard setup, runtime configuration and reconnection](gui/README.md)
-- [Mac build, permissions and manual test checklist](doc/macos-host.md)
-- [Internet mode, shared devices and authentication](doc/internet-mode.md)
-- [Regression tests and physical-device validation notes](doc/reverse-display-validation.md)
-- [Native build reference](doc/build.md) — inherited scrcpy instructions; clone
-  this fork and use the reverse-mode setup above.
-- [Upstream Android-to-computer documentation](https://github.com/Genymobile/scrcpy#user-documentation)
+| Task | Guide |
+| --- | --- |
+| Build and run a Windows host | [Windows setup](doc/windows-host.md) |
+| Build and run a Mac host | [Mac setup and permissions](doc/macos-host.md) |
+| Receive desktop video in a browser | [Browser setup and controls](doc/browser-receiver.md) |
+| Use native Android desktop controls/audio | [Reverse-display reference](doc/reverse-display.md) |
+| Pair, discover or reconnect an Android device | [Dashboard guide](gui/README.md) |
+| Connect the native Android app over a VPN | [Internet mode](doc/internet-mode.md) |
+| Resolve setup or streaming failures | [FAQ](FAQ.md) |
+| Build the inherited Android-to-computer mode | [Native build reference](doc/build.md) |
+| Check remaining work and actual evidence | [Roadmap](doc/roadmap.md), [validation notes](doc/reverse-display-validation.md) |
 
-For development, the dashboard uses `npm test` and `npm run build` from `gui/`.
-Native tests run in a debug Meson build with `meson test -C x-reverse`.
-Android tests use `./gradlew :server:testDebugUnitTest`. A passing build or mock
-test does not establish physical Mac, audio, input or network performance.
+Development checks are `npm test --prefix gui`, `npm run build --prefix gui`,
+`meson test -C <debug-build-directory>`, and `./gradlew :server:testDebugUnitTest`
+(`.\gradlew.bat` on Windows). See the
+[upstream user documentation](https://github.com/Genymobile/scrcpy#user-documentation)
+for the original Android-to-computer features; upstream binaries do not host dskcpy.
 
-Fixes and improvements are welcome through
-[pull requests to this fork](https://github.com/subtlesayak/dskcpy/pulls).
-Keep reverse-display bug reports separate from upstream scrcpy issues and include
-the host OS, connection mode, reproduction steps and sanitized diagnostics.
+Report dskcpy bugs to [this fork](https://github.com/subtlesayak/dskcpy/issues),
+with the host OS, receiver, source revision, connection mode, reproduction steps
+and sanitized diagnostics.
 
 ## Credits and license
 
 Built on [scrcpy](https://github.com/Genymobile/scrcpy) by Genymobile, Romain
-Vimont and its contributors. dskcpy's README follows upstream's feature-first,
-quick-start structure; reverse-display changes belong to this fork.
-
-Licensed under [Apache License 2.0](LICENSE). Existing upstream copyright and
-license notices are retained. The passphrase vocabulary has its own
-[MIT license notice](server/src/main/assets/internet-words-LICENSE.txt).
+Vimont and its contributors. Existing notices are retained.
+Licensed under [Apache License 2.0](LICENSE). The passphrase vocabulary has a
+separate [MIT notice](server/src/main/assets/internet-words-LICENSE.txt).
 
 Copyright (C) 2018 Genymobile. Copyright (C) 2018–2026 Romain Vimont.
