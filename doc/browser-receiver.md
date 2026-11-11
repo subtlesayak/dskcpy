@@ -320,3 +320,10 @@ Safari on actual iPhone/iPad, Android browser audio/input and different-network
 operation require separate physical results. Capability checks do not prove every
 brand, model or browser. Mac desktop keyboard/IME has source and automated
 coverage; actual keyboard layouts, soft keyboards and IMEs remain device gates.
+
+The native hosts emit 10 ms Opus packets. WebRTC uses a 48 kHz sample clock with
+at least 480 ticks per packet, including packets dropped during an in-flight send;
+native enqueue/ACK timestamps are not audio sampling timestamps. Larger mute or
+route-change gaps remain gaps. Automated burst/wraparound regressions pass, but
+audible device audio and route recovery still require physical qualification.
+See `doc/testing/mac/browser-audio-clock.json`.

@@ -41,16 +41,17 @@ jobs:
           node-version: '24'
       - uses: msys2/setup-msys2@v2
         with:
-          msystem: MINGW64
+          # MINGW64 is deprecated; libusb is now published for UCRT64.
+          msystem: UCRT64
           update: true
           install: >-
-            mingw-w64-x86_64-gcc
-            mingw-w64-x86_64-meson
-            mingw-w64-x86_64-ninja
-            mingw-w64-x86_64-pkgconf
-            mingw-w64-x86_64-ffmpeg
-            mingw-w64-x86_64-sdl3
-            mingw-w64-x86_64-libusb
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-meson
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-pkgconf
+            mingw-w64-ucrt-x86_64-ffmpeg
+            mingw-w64-ucrt-x86_64-sdl3
+            mingw-w64-ucrt-x86_64-libusb
       - name: Configure clean native test build
         run: meson setup .tmp/ci-native --buildtype=debug -Dcompile_server=false
       - name: Compile and run native tests
