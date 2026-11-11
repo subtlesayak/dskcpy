@@ -41,6 +41,7 @@
 #define REVERSE_DISPLAY_TOUCH_CONTACT_RADIUS 2
 #define REVERSE_DISPLAY_MAX_TOUCHES 10
 #define REVERSE_DISPLAY_NO_PRIMARY UINT64_MAX
+#define REVERSE_DISPLAY_TOUCH_KEEPALIVE_US 100000
 #define REVERSE_DISPLAY_VIDEO_SEND_BUFFER (64 * 1024)
 #define REVERSE_DISPLAY_MAX_FRAMES_IN_FLIGHT 2
 
@@ -106,6 +107,8 @@ struct reverse_display_state {
 
     struct reverse_capture capture;
     struct sc_receiver receiver;
+    sc_mutex touch_mutex;
+    int64_t last_touch_inject_us;
     struct reverse_touch_contact touch_contacts[REVERSE_DISPLAY_MAX_TOUCHES];
     unsigned touch_contact_count;
     uint64_t primary_pointer_id;
@@ -1644,6 +1647,37 @@ reverse_inject_mouse_frame(struct reverse_display_state *state,
 }
 
 static bool
+reverse_recover_touch_contacts(struct reverse_display_state *state,
+                               unsigned skip_index, int64_t now) {
+    POINTER_TOUCH_INFO contacts[REVERSE_DISPLAY_MAX_TOUCHES];
+    unsigned count = 0;
+    for (unsigned i = 0; i < state->touch_contact_count; ++i) {
+        if (i == skip_index) {
+            continue;
+        }
+        reverse_make_touch_info(&state->touch_contacts[i],
+                                POINTER_FLAG_DOWN | POINTER_FLAG_INRANGE
+                                | POINTER_FLAG_INCONTACT,
+                                &contacts[count++]);
+    }
+    if (!count) {
+        state->last_touch_inject_us = now;
+        return true;
+    }
+    if (InjectTouchInput(count, contacts)) {
+        state->last_touch_inject_us = now;
+        return true;
+    }
+    if (InitializeTouchInjection(REVERSE_DISPLAY_MAX_TOUCHES,
+                                 TOUCH_FEEDBACK_NONE)
+            && InjectTouchInput(count, contacts)) {
+        state->last_touch_inject_us = now;
+        return true;
+    }
+    return false;
+}
+
+static bool
 reverse_inject_touch_frame(struct reverse_display_state *state,
                            unsigned changed_index, UINT changed_flags) {
     assert(state->touch_contact_count > 0);
@@ -1661,11 +1695,25 @@ reverse_inject_touch_frame(struct reverse_display_state *state,
                                 &contacts[i]);
     }
 
+    int64_t now = av_gettime_relative();
     if (InjectTouchInput(state->touch_contact_count, contacts)) {
+        state->last_touch_inject_us = now;
         return true;
     }
 
     DWORD error = GetLastError();
+    if (error == ERROR_TIMEOUT || error == ERROR_INVALID_PARAMETER) {
+        unsigned skip = (changed_flags & POINTER_FLAG_UP)
+                      ? changed_index
+                      : REVERSE_DISPLAY_MAX_TOUCHES;
+        if (reverse_recover_touch_contacts(state, skip, now)) {
+            return true;
+        }
+        LOGD("Windows touch contact recovery failed (error %lu); resetting "
+             "active touch sequence", (unsigned long) error);
+        return false;
+    }
+
     state->use_mouse_fallback = true;
     if (!state->mouse_fallback_warning_logged) {
         LOGW("Windows touch injection is unavailable (error %lu); using "
@@ -1677,7 +1725,38 @@ reverse_inject_touch_frame(struct reverse_display_state *state,
 }
 
 static void
-reverse_cancel_touches(struct reverse_display_state *state) {
+reverse_keepalive_touches(struct reverse_display_state *state, int64_t now) {
+    if (atomic_load_explicit(&state->stopped, memory_order_acquire)
+            || atomic_load_explicit(&state->video_paused, memory_order_acquire)) {
+        return;
+    }
+
+    sc_mutex_lock(&state->touch_mutex);
+    if (!state->use_mouse_fallback && state->touch_contact_count > 0
+            && now - state->last_touch_inject_us
+               >= REVERSE_DISPLAY_TOUCH_KEEPALIVE_US) {
+        POINTER_TOUCH_INFO contacts[REVERSE_DISPLAY_MAX_TOUCHES];
+        for (unsigned i = 0; i < state->touch_contact_count; ++i) {
+            reverse_make_touch_info(&state->touch_contacts[i],
+                                    POINTER_FLAG_UPDATE | POINTER_FLAG_INRANGE
+                                    | POINTER_FLAG_INCONTACT,
+                                    &contacts[i]);
+        }
+        if (InjectTouchInput(state->touch_contact_count, contacts)) {
+            state->last_touch_inject_us = now;
+        } else {
+            DWORD error = GetLastError();
+            if (error == ERROR_TIMEOUT || error == ERROR_INVALID_PARAMETER) {
+                reverse_recover_touch_contacts(
+                    state, REVERSE_DISPLAY_MAX_TOUCHES, now);
+            }
+        }
+    }
+    sc_mutex_unlock(&state->touch_mutex);
+}
+
+static void
+reverse_cancel_touches_locked(struct reverse_display_state *state) {
     if (!state->touch_contact_count) {
         return;
     }
@@ -1705,11 +1784,21 @@ reverse_cancel_touches(struct reverse_display_state *state) {
                                 &contacts[i]);
     }
     if (!InjectTouchInput(state->touch_contact_count, contacts)) {
-        LOGW("Could not cancel Android touch contacts in Windows: error %lu",
-             (unsigned long) GetLastError());
+        DWORD error = GetLastError();
+        if (error != ERROR_TIMEOUT && error != ERROR_INVALID_PARAMETER) {
+            LOGW("Could not cancel Android touch contacts in Windows: error %lu",
+                 (unsigned long) error);
+        }
     }
     state->touch_contact_count = 0;
     state->primary_pointer_id = REVERSE_DISPLAY_NO_PRIMARY;
+}
+
+static void
+reverse_cancel_touches(struct reverse_display_state *state) {
+    sc_mutex_lock(&state->touch_mutex);
+    reverse_cancel_touches_locked(state);
+    sc_mutex_unlock(&state->touch_mutex);
 }
 
 static void
@@ -1722,6 +1811,8 @@ reverse_inject_touch(struct reverse_display_state *state,
         return;
     }
 
+    sc_mutex_lock(&state->touch_mutex);
+
     enum android_motionevent_action action =
         msg->reverse_touch.action & AMOTION_EVENT_ACTION_MASK;
     unsigned index = reverse_find_touch(state, pointer_id);
@@ -1731,13 +1822,14 @@ reverse_inject_touch(struct reverse_display_state *state,
     switch (action) {
         case AMOTION_EVENT_ACTION_DOWN: {
             if (state->touch_contact_count) {
-                reverse_cancel_touches(state);
+                reverse_cancel_touches_locked(state);
             }
             LONG x, y;
             if (!reverse_map_position(state, &msg->reverse_touch.position, &x, &y)
                     || !reverse_add_touch(state, pointer_id, x, y,
                                           reverse_touch_pressure(
                                               msg->reverse_touch.pressure))) {
+                sc_mutex_unlock(&state->touch_mutex);
                 return;
             }
             state->primary_pointer_id = pointer_id;
@@ -1750,6 +1842,7 @@ reverse_inject_touch(struct reverse_display_state *state,
         case AMOTION_EVENT_ACTION_MOVE: {
             LONG x, y;
             if (!reverse_map_position(state, &msg->reverse_touch.position, &x, &y)) {
+                sc_mutex_unlock(&state->touch_mutex);
                 return;
             }
             if (index == REVERSE_DISPLAY_MAX_TOUCHES) {
@@ -1759,6 +1852,7 @@ reverse_inject_touch(struct reverse_display_state *state,
                                                   msg->reverse_touch.pressure))) {
                     LOGW("Ignoring Android touch for unknown pointer id: %" PRIu64,
                          pointer_id);
+                    sc_mutex_unlock(&state->touch_mutex);
                     return;
                 }
                 index = state->touch_contact_count - 1;
@@ -1780,6 +1874,7 @@ reverse_inject_touch(struct reverse_display_state *state,
             if (index == REVERSE_DISPLAY_MAX_TOUCHES) {
                 LOGW("Ignoring Android touch UP for unknown pointer id: %" PRIu64,
                      pointer_id);
+                sc_mutex_unlock(&state->touch_mutex);
                 return;
             }
             // Windows requires the UP location to match the previous UPDATE
@@ -1788,9 +1883,11 @@ reverse_inject_touch(struct reverse_display_state *state,
             remove_after = true;
             break;
         case AMOTION_EVENT_ACTION_CANCEL:
-            reverse_cancel_touches(state);
+            reverse_cancel_touches_locked(state);
+            sc_mutex_unlock(&state->touch_mutex);
             return;
         default:
+            sc_mutex_unlock(&state->touch_mutex);
             return;
     }
 
@@ -1805,6 +1902,8 @@ reverse_inject_touch(struct reverse_display_state *state,
         }
         reverse_remove_touch(state, index);
     }
+
+    sc_mutex_unlock(&state->touch_mutex);
 }
 
 static void
@@ -2109,6 +2208,11 @@ sc_reverse_display_run(sc_socket video_socket, sc_socket control_socket,
         sc_mutex_destroy(&state.watchdog_mutex);
         return SCRCPY_EXIT_FAILURE;
     }
+    if (!sc_mutex_init(&state.touch_mutex)) {
+        sc_mutex_destroy(&state.send_mutex);
+        sc_mutex_destroy(&state.watchdog_mutex);
+        return SCRCPY_EXIT_FAILURE;
+    }
     HANDLE gui_control = reverse_gui_control_pipe();
 
     if (!InitializeTouchInjection(REVERSE_DISPLAY_MAX_TOUCHES,
@@ -2137,6 +2241,7 @@ sc_reverse_display_run(sc_socket video_socket, sc_socket control_socket,
     };
     if (!sc_receiver_init(&state.receiver, control_socket, &receiver_cbs,
                           &state)) {
+        sc_mutex_destroy(&state.touch_mutex);
         sc_mutex_destroy(&state.watchdog_mutex);
         sc_mutex_destroy(&state.send_mutex);
         return SCRCPY_EXIT_FAILURE;
@@ -2165,18 +2270,20 @@ sc_reverse_display_run(sc_socket video_socket, sc_socket control_socket,
                 ret = SCRCPY_EXIT_SUCCESS;
                 goto stop;
             }
+            int64_t now = av_gettime_relative();
             sc_mutex_lock(&state.watchdog_mutex);
             bool expired = sc_reverse_watchdog_expired(
-                &state.watchdog, av_gettime_relative())
-                || sc_reverse_watchdog_expired(&state.audio_watchdog, av_gettime_relative());
+                &state.watchdog, now)
+                || sc_reverse_watchdog_expired(&state.audio_watchdog, now);
             sc_mutex_unlock(&state.watchdog_mutex);
             if (expired) {
                 LOGE("Reverse display stalled for 10 seconds. "
                      "Check the phone and reconnect the stream.");
                 goto stop;
             }
+            reverse_keepalive_touches(&state, now);
             SDL_Event event;
-            if (!SDL_WaitEventTimeout(&event, 100)) {
+            if (!SDL_WaitEventTimeout(&event, 50)) {
                 if (atomic_load_explicit(&state.fatal_error,
                                          memory_order_acquire)) {
                     break;
@@ -2215,6 +2322,7 @@ stop:
     }
     if (state.audio_thread_started) sc_thread_join(&state.audio_thread, NULL);
     sc_receiver_destroy(&state.receiver);
+    sc_mutex_destroy(&state.touch_mutex);
     sc_mutex_destroy(&state.watchdog_mutex);
     sc_mutex_destroy(&state.send_mutex);
 
