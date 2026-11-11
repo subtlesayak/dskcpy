@@ -68,6 +68,24 @@ void sc_reverse_audio_encoder_discard_partial(struct sc_reverse_audio_encoder *e
     if (e) e->filled = 0;
 }
 
+static void consume_acks(struct sc_reverse_audio_encoder *e) {
+    int64_t ack = e->cbs->acked_pts(e->userdata);
+    // Reject future ACKs even if a caller forgets the wire-level check.
+    if (ack > e->last_pts) return;
+    unsigned consumed = 0;
+    while (consumed < e->pending_count && e->pending[consumed] <= ack) ++consumed;
+    e->pending_count -= consumed;
+    memmove(e->pending, e->pending + consumed, e->pending_count * sizeof(*e->pending));
+}
+
+size_t sc_reverse_audio_encoder_available_frames(struct sc_reverse_audio_encoder *e) {
+    if (!e || !enabled(e)) return 0;
+    consume_acks(e);
+    size_t maximum = SC_REVERSE_AUDIO_WINDOW * SC_REVERSE_AUDIO_FRAMES;
+    size_t frames = (SC_REVERSE_AUDIO_WINDOW - e->pending_count + 1) * SC_REVERSE_AUDIO_FRAMES - 1 - e->filled;
+    return frames < maximum ? frames : maximum;
+}
+
 bool
 sc_reverse_audio_encoder_push(struct sc_reverse_audio_encoder *e,
                              const int16_t *stereo, size_t frames,
@@ -90,14 +108,7 @@ sc_reverse_audio_encoder_push(struct sc_reverse_audio_encoder *e,
         e->filled += count; stereo += count * 2; frames -= count;
         if (e->filled != SC_REVERSE_AUDIO_FRAMES) continue;
         e->filled = 0;
-        int64_t ack = e->cbs->acked_pts(e->userdata);
-        // Reject future ACKs even if a caller forgets the wire-level check.
-        if (ack <= e->last_pts) {
-            unsigned consumed = 0;
-            while (consumed < e->pending_count && e->pending[consumed] <= ack) ++consumed;
-            e->pending_count -= consumed;
-            memmove(e->pending, e->pending + consumed, e->pending_count * sizeof(*e->pending));
-        }
+        consume_acks(e);
         if (e->pending_count == SC_REVERSE_AUDIO_WINDOW) continue;
         if (!e->configured) {
             if (!e->cbs->send(e->userdata, e->codec->extradata, 19, 0, SC_REVERSE_AUDIO_CONFIG)) return false;

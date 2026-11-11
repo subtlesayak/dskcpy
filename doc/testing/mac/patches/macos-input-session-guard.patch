@@ -1,0 +1,56 @@
+--- a/app/src/reverse_display_macos.m
++++ b/app/src/reverse_display_macos.m
+@@ -58,6 +58,11 @@
+         && CGRectEqualToRect(CGDisplayBounds(s->display_id), s->display_bounds)
+         && CGDisplayPixelsWide(s->display_id) == s->display_pixels_wide
+         && CGDisplayPixelsHigh(s->display_id) == s->display_pixels_high;
++}
++
++static bool mac_session_ended(struct mac_state *s) {
++    return atomic_load(&s->stopped) || atomic_load(&s->failed)
++        || atomic_load(&s->disconnected) || atomic_load(&s->quit);
+ }
+ 
+ @interface SCMacState : NSObject { @public struct mac_state state; }
+@@ -427,8 +432,8 @@
+     (void)receiver;
+     SCMacState *owner = (__bridge SCMacState *)context;
+     struct mac_state *s = &owner->state;
+-    if (atomic_load(&s->stopped) || atomic_load(&s->paused) || atomic_load(&s->disconnected)
+-            || atomic_load(&s->failed) || !AXIsProcessTrusted()) { mac_cancel_input(s); return; }
++    if (mac_session_ended(s) || atomic_load(&s->paused)
++            || !AXIsProcessTrusted()) { mac_cancel_input(s); return; }
+     if (!mac_display_matches(s)) { mac_cancel_input(s); atomic_store(&s->disconnected, true); return; }
+     unsigned action = msg->reverse_touch.action & AMOTION_EVENT_ACTION_MASK;
+     if (action == AMOTION_EVENT_ACTION_CANCEL) { mac_cancel_input(s); return; }
+@@ -469,8 +474,8 @@
+     (void)receiver;
+     SCMacState *owner = (__bridge SCMacState *)context;
+     struct mac_state *s = &owner->state;
+-    if (atomic_load(&s->stopped) || atomic_load(&s->paused) || atomic_load(&s->disconnected)
+-            || atomic_load(&s->failed) || !AXIsProcessTrusted()) { mac_cancel_input(s); return; }
++    if (mac_session_ended(s) || atomic_load(&s->paused)
++            || !AXIsProcessTrusted()) { mac_cancel_input(s); return; }
+     if (!mac_display_matches(s)) { mac_cancel_input(s); atomic_store(&s->disconnected, true); return; }
+     double x, y;
+     if (!sc_reverse_macos_point(&msg->reverse_scroll.position, s->display_bounds.origin.x, s->display_bounds.origin.y,
+@@ -538,7 +543,7 @@
+     (void)receiver;
+     SCMacState *owner = (__bridge SCMacState *)context;
+     struct mac_state *s = &owner->state;
+-    if (atomic_load(&s->stopped)) return;
++    if (mac_session_ended(s)) { mac_cancel_input(s); return; }
+     enum sc_reverse_system_action action = msg->reverse_system_action.action;
+     if (action == SC_REVERSE_SYSTEM_ACTION_STOP_SESSION) { mac_cancel_input(s); atomic_store(&s->quit, true); return; }
+     if (action == SC_REVERSE_SYSTEM_ACTION_PAUSE_VIDEO || action == SC_REVERSE_SYSTEM_ACTION_RESUME_VIDEO) {
+@@ -562,7 +567,9 @@
+     }
+     if (atomic_load(&s->paused)) return;
+     dispatch_async(dispatch_get_main_queue(), ^{
+-        if (atomic_load(&owner->state.stopped) || atomic_load(&owner->state.paused)) return;
++        // This runs later on the main queue. A capture failure, explicit user
++        // stop or disconnect may have ended the session since admission.
++        if (mac_session_ended(&owner->state) || atomic_load(&owner->state.paused)) return;
+         if (action <= SC_REVERSE_SYSTEM_ACTION_VOLUME_MUTE) { mac_volume(action); return; }
+         if (!AXIsProcessTrusted()) { LOGW("Enable Accessibility permission for Mac desktop input"); return; }
+         switch (action) {

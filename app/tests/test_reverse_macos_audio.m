@@ -42,7 +42,46 @@ static CMSampleBufferRef sample_buffer(bool planar, double rate, unsigned channe
     return sample;
 }
 
+static void test_capture_queue(void) {
+    struct sc_reverse_macos_audio_queue queue = {0};
+    struct sc_reverse_macos_audio_entry entry;
+    assert(!sc_reverse_macos_audio_queue_pop(&queue, &entry));
+    // A temporary callback/worker stall preserves chronological PCM, including
+    // the retain after the capture callback releases its reference.
+    for (unsigned i = 0; i < 4; ++i) {
+        CMSampleBufferRef sample = sample_buffer(true, 48000, 2, 480 + i);
+        assert(!sc_reverse_macos_audio_queue_push(&queue, sample, 1000 + i));
+        CFRelease(sample);
+    }
+    for (unsigned i = 0; i < 4; ++i) {
+        assert(sc_reverse_macos_audio_queue_pop(&queue, &entry));
+        assert(entry.sequence == i + 1 && entry.received_us == 1000 + i);
+        assert(CMSampleBufferGetNumSamples(entry.sample) == 480 + i);
+        CFRelease(entry.sample);
+    }
+    // A prolonged stall keeps only the bounded newest samples and exposes a
+    // sequence gap so callers can discard pre-gap partial Opus frames.
+    for (unsigned i = 0; i < 7; ++i) {
+        CMSampleBufferRef sample = sample_buffer(true, 48000, 2, 500 + i);
+        assert(sc_reverse_macos_audio_queue_push(&queue, sample, 2000 + i) == (i >= 4));
+        CFRelease(sample);
+    }
+    for (unsigned i = 3; i < 7; ++i) {
+        assert(sc_reverse_macos_audio_queue_pop(&queue, &entry));
+        assert(entry.sequence == 5 + i && entry.received_us == 2000 + i);
+        assert(CMSampleBufferGetNumSamples(entry.sample) == 500 + i);
+        CFRelease(entry.sample);
+    }
+    CMSampleBufferRef sample = sample_buffer(true, 48000, 2, 480);
+    assert(!sc_reverse_macos_audio_queue_push(&queue, sample, 3000));
+    CFRelease(sample);
+    sc_reverse_macos_audio_queue_clear(&queue); // Mute/Home must retain no tail.
+    sc_reverse_macos_audio_queue_clear(&queue); // Repeated cleanup is harmless.
+    assert(!sc_reverse_macos_audio_queue_pop(&queue, &entry));
+}
+
 int main(void) {
+    test_capture_queue();
     int16_t pcm[SC_REVERSE_AUDIO_MAX_CHUNK * 2]; size_t count = 0;
     assert(!sc_reverse_macos_audio_pcm(NULL, pcm, &count));
     for (unsigned planar = 0; planar <= 1; ++planar) {

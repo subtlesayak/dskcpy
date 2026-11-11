@@ -1,0 +1,25 @@
+{
+  "transport": "USB",
+  "nativeSha256": "6645f72dcabee3483f1db035ed43bd4aa019660a739154aef546ab89193e811f",
+  "companion": "unchanged-v1",
+  "offPhase": {
+    "userReport": "touch disabled cant touch",
+    "calculatorValueAfterOffPhase": "123",
+    "videoContinuedBeforeHumanReport": true
+  },
+  "restoration": {
+    "terminalControlOnVerifiedInSettings": true,
+    "calculatorBeforeRecoveryTap": "123",
+    "running": true,
+    "samplesIncreasing": true,
+    "agentRestartedStream": false,
+    "userRecoveryTapResult": "Touch recovered; initial user report 1235 differed from observed 12325. Clean follow-up: one phone tap 6 produced 123256, confirmed by user and native Calculator UI.",
+    "controllerStartedAt": "2026-10-21T06:42:20.891Z",
+    "calculatorObservedAfterTap5": "12325",
+    "calculatorObservedAfterSingleTap6": "123256",
+    "singleTapCheckPassed": true,
+    "terminalControlOnVerifiedAgain": true,
+    "controllerStartedAtAfterRecovery": "2026-10-21T06:42:20.891Z",
+    "runningAfterRecovery": true
+  }
+}
