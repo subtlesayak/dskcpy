@@ -17,6 +17,7 @@ struct sc_reverse_audio_encoder {
     int64_t pending[SC_REVERSE_AUDIO_WINDOW];
     int64_t sample_pts, last_pts, partial_us;
     bool configured;
+    struct sc_reverse_audio_stats stats;
 };
 
 void
@@ -91,15 +92,23 @@ sc_reverse_audio_encoder_push(struct sc_reverse_audio_encoder *e,
                              const int16_t *stereo, size_t frames,
                              int64_t captured_us, int64_t now_us) {
     if (!e || (!stereo && frames) || frames > SC_REVERSE_AUDIO_MAX_CHUNK) return false;
-    if (!enabled(e) || captured_us > now_us
-            || now_us - captured_us > SC_REVERSE_AUDIO_MAX_AGE_US) {
+    if (!enabled(e)) { e->filled = 0; return true; }
+    if (captured_us > now_us || now_us - captured_us > SC_REVERSE_AUDIO_MAX_AGE_US) {
+        e->stats.stale_frames += frames + e->filled;
         e->filled = 0;
         return true;
     }
-    if (e->filled && now_us - e->partial_us > SC_REVERSE_AUDIO_MAX_AGE_US) e->filled = 0;
+    if (e->filled && now_us - e->partial_us > SC_REVERSE_AUDIO_MAX_AGE_US) {
+        e->stats.stale_frames += e->filled;
+        e->filled = 0;
+    }
     // A delayed capture callback must not create an unbounded audio catch-up.
     const size_t keep = SC_REVERSE_AUDIO_FRAMES * SC_REVERSE_AUDIO_WINDOW;
-    if (frames > keep) { stereo += (frames - keep) * 2; frames = keep; e->filled = 0; }
+    if (frames > keep) {
+        e->stats.catchup_frames += frames - keep + e->filled;
+        stereo += (frames - keep) * 2;
+        frames = keep; e->filled = 0;
+    }
     while (frames && enabled(e)) {
         if (!e->filled) e->partial_us = captured_us;
         size_t count = SC_REVERSE_AUDIO_FRAMES - e->filled;
@@ -109,7 +118,7 @@ sc_reverse_audio_encoder_push(struct sc_reverse_audio_encoder *e,
         if (e->filled != SC_REVERSE_AUDIO_FRAMES) continue;
         e->filled = 0;
         consume_acks(e);
-        if (e->pending_count == SC_REVERSE_AUDIO_WINDOW) continue;
+        if (e->pending_count == SC_REVERSE_AUDIO_WINDOW) { e->stats.window_frames += SC_REVERSE_AUDIO_FRAMES; continue; }
         if (!e->configured) {
             if (!e->cbs->send(e->userdata, e->codec->extradata, 19, 0, SC_REVERSE_AUDIO_CONFIG)) return false;
             e->configured = true;
@@ -126,7 +135,7 @@ sc_reverse_audio_encoder_push(struct sc_reverse_audio_encoder *e,
                 && e->packet->size > 0 && e->packet->size <= 4096;
             if (ok && enabled(e)) {
                 ok = e->cbs->send(e->userdata, e->packet->data, e->packet->size, pts, SC_REVERSE_AUDIO_PACKET);
-                if (ok) { e->pending[e->pending_count++] = pts; e->last_pts = pts; }
+                if (ok) { e->pending[e->pending_count++] = pts; e->last_pts = pts; ++e->stats.packets; }
             }
             av_packet_unref(e->packet);
             if (!ok) return false;
@@ -134,6 +143,39 @@ sc_reverse_audio_encoder_push(struct sc_reverse_audio_encoder *e,
         if (result != AVERROR(EAGAIN) && result != AVERROR_EOF) return false;
     }
     return true;
+}
+
+bool sc_reverse_audio_encoder_feed(struct sc_reverse_audio_encoder *e,
+                                  const int16_t *stereo, size_t frames,
+                                  int64_t received_us,
+                                  const struct sc_reverse_audio_wait *clock) {
+    if (!e || (!stereo && frames) || frames > SC_REVERSE_AUDIO_MAX_CHUNK
+            || !clock || !clock->now || !clock->wait) return false;
+    while (frames && enabled(e)) {
+        int64_t now = clock->now(clock->userdata);
+        if (now < received_us || now - received_us > SC_REVERSE_AUDIO_MAX_AGE_US) {
+            e->stats.stale_frames += frames + e->filled;
+            sc_reverse_audio_encoder_discard_partial(e);
+            return true;
+        }
+        // Feed at most one codec frame per iteration. Waiting for an entire
+        // capture chunk to fit needlessly holds fresh PCM and discards its head.
+        size_t count = frames < SC_REVERSE_AUDIO_FRAMES ? frames : SC_REVERSE_AUDIO_FRAMES;
+        if (sc_reverse_audio_encoder_available_frames(e) < count) {
+            clock->wait(clock->userdata);
+            continue;
+        }
+        if (!sc_reverse_audio_encoder_push(e, stereo, count, received_us, now)) return false;
+        stereo += count * 2;
+        frames -= count;
+    }
+    if (!enabled(e)) sc_reverse_audio_encoder_discard_partial(e);
+    return true;
+}
+
+void sc_reverse_audio_encoder_get_stats(const struct sc_reverse_audio_encoder *e,
+                                       struct sc_reverse_audio_stats *stats) {
+    *stats = e->stats;
 }
 
 static int16_t sample_s16(float value) {

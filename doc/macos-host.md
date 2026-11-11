@@ -4,6 +4,10 @@ Send an Apple-silicon Mac desktop to the Android app or a browser. The native
 host uses ScreenCaptureKit and VideoToolbox and requires macOS 13+.
 This is an experimental source build, not a signed/notarized Mac application.
 
+See [Build identity and compatible upgrades](artifact-upgrades.md) before
+updating an installed Android companion or building the separate unsigned
+hosting candidate. Its deployment-target scan still needs clean-machine testing.
+
 [Requirements](#requirements) · [Build](#build-from-a-git-checkout) ·
 [Permissions](#allow-capture-and-input) · [First stream](#start-your-first-stream) ·
 [Troubleshooting](../FAQ.md)

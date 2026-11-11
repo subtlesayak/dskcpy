@@ -11,6 +11,9 @@ reverse direction. The original Android-to-computer mode remains available.
 [Mac setup](doc/macos-host.md) · [Browser receiving](doc/browser-receiver.md) ·
 [Troubleshooting](FAQ.md) · [Documentation](#documentation)
 
+For source/artifact identity, Android upgrade checks and the separate unsigned
+Mac hosting candidate, see [Build identity and compatible upgrades](doc/artifact-upgrades.md).
+
 > [!IMPORTANT]
 > Get dskcpy source from [this repository](https://github.com/subtlesayak/dskcpy).
 > It currently requires a source build; there is no signed, ready-to-install

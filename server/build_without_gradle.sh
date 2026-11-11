@@ -12,7 +12,14 @@
 set -e
 
 SCRCPY_DEBUG=false
-SCRCPY_VERSION_NAME=4.1
+SERVER_DIR=$(cd "$(dirname "$0")" && pwd)
+# Read data, never source the properties file as shell code.
+property() { sed -n "s/^$1=//p" "$SERVER_DIR/../dskcpy.properties" | tr -d '\r'; }
+DSKCPY_VERSION=$(property DSKCPY_VERSION)
+SCRCPY_PROTOCOL_VERSION=$(property SCRCPY_PROTOCOL_VERSION)
+[[ "$DSKCPY_VERSION" =~ ^[0-9A-Za-z.+-]+$ && "$SCRCPY_PROTOCOL_VERSION" =~ ^[0-9.]+$ ]] || {
+    echo 'Invalid dskcpy identity' >&2; exit 1;
+}
 
 PLATFORM=${ANDROID_PLATFORM:-36}
 BUILD_TOOLS=${ANDROID_BUILD_TOOLS:-36.0.0}
@@ -22,7 +29,6 @@ BUILD_TOOLS_DIR="$ANDROID_HOME/build-tools/$BUILD_TOOLS"
 BUILD_DIR="$(realpath "${BUILD_DIR:-build_manual}")"
 CLASSES_DIR="$BUILD_DIR/classes"
 GEN_DIR="$BUILD_DIR/gen"
-SERVER_DIR=$(dirname "$0")
 SERVER_BINARY=scrcpy-server
 ANDROID_JAR="$PLATFORM_TOOLS/android.jar"
 ANDROID_AIDL="$PLATFORM_TOOLS/framework.aidl"
@@ -45,7 +51,8 @@ package com.genymobile.scrcpy;
 
 public final class BuildConfig {
   public static final boolean DEBUG = $SCRCPY_DEBUG;
-  public static final String VERSION_NAME = "$SCRCPY_VERSION_NAME";
+  public static final String VERSION_NAME = "$DSKCPY_VERSION";
+  public static final String SCRCPY_PROTOCOL_VERSION = "$SCRCPY_PROTOCOL_VERSION";
 }
 EOF
 
