@@ -38,6 +38,7 @@ struct mac_state {
     struct sc_reverse_watchdog watchdog, audio_watchdog;
     struct sc_reverse_macos_audio_queue audio_queue; // Bounded FIFO, protected by mutex.
     uint64_t audio_epoch; // Epoch changes even for rapid mute/unmute.
+    uint64_t audio_queue_drops; // Protected by mutex; no device identity.
     _Atomic bool audio_route_changed;
     _Atomic bool keyboard_release_pending;
     CVPixelBufferRef latest; // Exactly one newest capture, protected by mutex.
@@ -147,7 +148,7 @@ static void mac_audio_abandon_pending(struct mac_state *s) {
                 || CMSampleBufferGetNumSamples(sample) > SC_REVERSE_AUDIO_MAX_CHUNK) return;
         sc_mutex_lock(&s->mutex);
         if (mac_audio_active(s)) {
-            sc_reverse_macos_audio_queue_push(&s->audio_queue, sample, av_gettime_relative());
+            if (sc_reverse_macos_audio_queue_push(&s->audio_queue, sample, av_gettime_relative())) ++s->audio_queue_drops;
         }
         sc_mutex_unlock(&s->mutex);
         return;
@@ -414,6 +415,13 @@ static bool mac_audio_send(void *context, const uint8_t *data, size_t size, int6
 }
 
 
+static int64_t mac_audio_now(void *context) {
+    (void)context; return av_gettime_relative();
+}
+static void mac_audio_wait(void *context) {
+    (void)context; SDL_Delay(1);
+}
+
 static int mac_audio_thread(void *context) {
     @autoreleasepool {
         SCMacState *owner = (__bridge SCMacState *)context;
@@ -422,10 +430,12 @@ static int mac_audio_thread(void *context) {
         static const struct sc_reverse_audio_callbacks cbs = {.stopped = mac_audio_stopped,
             .enabled = mac_audio_enabled, .acked_pts = mac_audio_acked, .send = mac_audio_send};
         struct sc_reverse_audio_encoder *encoder = NULL;
-        uint64_t sequence = 0;
+        uint64_t sequence = 0, resampler_trim_frames = 0;
         bool unavailable = false;
         unsigned retries = 0;
-        int64_t retry_at = 0;
+        int64_t retry_at = 0, report_at = 0;
+        AudioStreamBasicDescription last_format = {0};
+        const struct sc_reverse_audio_wait audio_clock = {.now = mac_audio_now, .wait = mac_audio_wait};
         struct sc_reverse_macos_audio_converter converter = {0};
         while (!mac_audio_stopped(&audio)) {
             sc_mutex_lock(&s->mutex);
@@ -456,20 +466,34 @@ static int mac_audio_thread(void *context) {
                 uint64_t format_generation = converter.generation;
                 bool ok = encoder && sample && sc_reverse_macos_audio_convert(&converter, sample, pcm, &frames);
                 if (ok) {
+                    const AudioStreamBasicDescription *format = CMAudioFormatDescriptionGetStreamBasicDescription(CMSampleBufferGetFormatDescription(sample));
+                    if (last_format.mSampleRate != format->mSampleRate
+                            || last_format.mChannelsPerFrame != format->mChannelsPerFrame
+                            || last_format.mBitsPerChannel != format->mBitsPerChannel
+                            || last_format.mFormatFlags != format->mFormatFlags) {
+                        LOGI("Mac audio format changed: rate=%.0f channels=%u bits=%u planar=%u",
+                            format->mSampleRate, (unsigned)format->mChannelsPerFrame,
+                            (unsigned)format->mBitsPerChannel, (unsigned)((format->mFormatFlags & kAudioFormatFlagIsNonInterleaved) != 0));
+                        last_format = *format;
+                    }
                     if (current != sequence + 1 || converter.generation != format_generation)
                         sc_reverse_audio_encoder_discard_partial(encoder);
                     size_t offset = frames > SC_REVERSE_AUDIO_MAX_CHUNK ? frames - SC_REVERSE_AUDIO_MAX_CHUNK : 0;
+                    resampler_trim_frames += offset;
                     frames -= offset;
-                    // Short socket/decoder stalls must not punch holes in fresh
-                    // PCM. Retain this chunk until the existing packet window
-                    // has room, but keep the same age cutoff and mute epoch.
-                    size_t needed = frames;
-                    size_t window = SC_REVERSE_AUDIO_FRAMES * SC_REVERSE_AUDIO_WINDOW;
-                    if (needed > window) needed = window;
-                    while (mac_audio_enabled(&audio) && !mac_audio_stopped(&audio)
-                            && av_gettime_relative() - received <= SC_REVERSE_AUDIO_MAX_AGE_US
-                            && sc_reverse_audio_encoder_available_frames(encoder) < needed) SDL_Delay(1);
-                    ok = sc_reverse_audio_encoder_push(encoder, pcm + offset * 2, frames, received, av_gettime_relative());
+                    ok = sc_reverse_audio_encoder_feed(encoder, pcm + offset * 2, frames, received, &audio_clock);
+                    if (av_gettime_relative() >= report_at) {
+                        struct sc_reverse_audio_stats stats;
+                        sc_reverse_audio_encoder_get_stats(encoder, &stats);
+                        sc_mutex_lock(&s->mutex);
+                        uint64_t dropped = s->audio_queue_drops;
+                        sc_mutex_unlock(&s->mutex);
+                        LOGI("Mac audio counters (current encoder): packets=%llu stale_frames=%llu window_frames=%llu catchup_frames=%llu capture_queue_drops=%llu resampler_trim_frames=%llu",
+                            (unsigned long long)stats.packets, (unsigned long long)stats.stale_frames,
+                            (unsigned long long)stats.window_frames, (unsigned long long)stats.catchup_frames,
+                            (unsigned long long)dropped, (unsigned long long)resampler_trim_frames);
+                        report_at = av_gettime_relative() + 2000000;
+                    }
                 }
                 if (!ok && !mac_audio_stopped(&audio)) {
                     const uint8_t notice = 0;
@@ -667,6 +691,20 @@ static void mac_window_zoom(void) {
     if (result != kAXErrorSuccess) LOGW("The active Mac window does not expose a zoom/restore action");
     if (button) CFRelease(button); if (window) CFRelease(window); CFRelease(app);
 }
+static void mac_pause_transition(void *context, bool paused) {
+    struct mac_state *s = context;
+    mac_cancel_input(s); mac_cancel_keyboard(s);
+    atomic_store(&s->paused, paused);
+    sc_mutex_lock(&s->mutex);
+    sc_reverse_watchdog_set_paused(&s->watchdog, paused, av_gettime_relative());
+    mac_audio_transition(s);
+    sc_mutex_unlock(&s->mutex);
+    LOGI("Reverse display %s (Android %s)", paused ? "paused" : "resumed", paused ? "background" : "foreground");
+}
+static void mac_request_keyframe(void *context) {
+    struct mac_state *s = context;
+    atomic_store(&s->force_key, true);
+}
 static void mac_action(struct sc_receiver *receiver, const struct sc_device_msg *msg, void *context) {
     (void)receiver;
     SCMacState *owner = (__bridge SCMacState *)context;
@@ -676,14 +714,10 @@ static void mac_action(struct sc_receiver *receiver, const struct sc_device_msg 
     if (action == SC_REVERSE_SYSTEM_ACTION_STOP_SESSION) { mac_cancel_input(s); mac_cancel_keyboard(s); atomic_store(&s->quit, true); return; }
     if (action == SC_REVERSE_SYSTEM_ACTION_PAUSE_VIDEO || action == SC_REVERSE_SYSTEM_ACTION_RESUME_VIDEO) {
         bool paused = action == SC_REVERSE_SYSTEM_ACTION_PAUSE_VIDEO;
-        mac_cancel_input(s); mac_cancel_keyboard(s);
-        atomic_store(&s->paused, paused);
-        sc_mutex_lock(&s->mutex);
-        sc_reverse_watchdog_set_paused(&s->watchdog, paused, av_gettime_relative());
-        mac_audio_transition(s);
-        sc_mutex_unlock(&s->mutex);
-        if (!paused) atomic_store(&s->force_key, true);
-        LOGI("Reverse display %s (Android %s)", paused ? "paused" : "resumed", paused ? "background" : "foreground");
+        static const struct sc_reverse_macos_pause_callbacks callbacks = {
+            .transition = mac_pause_transition, .keyframe = mac_request_keyframe,
+        };
+        sc_reverse_macos_pause(atomic_load(&s->paused), paused, &callbacks, s);
         return;
     }
     if (s->window_id) return; // Window capture is view-only, including host audio/volume/window actions.

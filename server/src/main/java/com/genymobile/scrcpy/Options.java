@@ -331,9 +331,9 @@ public class Options {
         }
 
         String clientVersion = args[0];
-        if (!clientVersion.equals(BuildConfig.VERSION_NAME)) {
+        if (!clientVersion.equals(BuildConfig.SCRCPY_PROTOCOL_VERSION)) {
             throw new IllegalArgumentException(
-                    "The server version (" + BuildConfig.VERSION_NAME + ") does not match the client " + "(" + clientVersion + ")");
+                    "The server protocol (" + BuildConfig.SCRCPY_PROTOCOL_VERSION + ") does not match the client " + "(" + clientVersion + ")");
         }
 
         Options options = new Options();

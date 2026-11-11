@@ -19,9 +19,17 @@ else
     mkdir -p "$PROJECT_DIR"
     cd "$PROJECT_DIR"
     ZIP_PREFIX=platform-tools
-    unzip "../$FILENAME" "$ZIP_PREFIX"/adb
+    unzip "../$FILENAME" "$ZIP_PREFIX"/adb "$ZIP_PREFIX"/NOTICE.txt
     mv "$ZIP_PREFIX"/* .
     rmdir "$ZIP_PREFIX"
+fi
+
+# Older cached extractions predate license packaging. Verify the original ZIP
+# before adding its notice; leave the existing executable untouched.
+if [[ ! -f "$SOURCES_DIR/$PROJECT_DIR/NOTICE.txt" ]]; then
+    cd "$SOURCES_DIR"
+    get_file "$URL" "$FILENAME" "$SHA256SUM"
+    unzip -p "$FILENAME" platform-tools/NOTICE.txt > "$PROJECT_DIR/NOTICE.txt"
 fi
 
 mkdir -p "$INSTALL_DIR/adb-macos"

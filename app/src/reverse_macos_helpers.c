@@ -4,6 +4,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+void sc_reverse_macos_pause(bool current, bool requested,
+    const struct sc_reverse_macos_pause_callbacks *callbacks, void *userdata) {
+    if (current != requested) callbacks->transition(userdata, requested);
+    if (!requested) callbacks->keyframe(userdata);
+}
+
 bool sc_reverse_macos_letterbox(double sw, double sh, uint16_t width, uint16_t height,
                                 double *x, double *y, double *ow, double *oh) {
     if (!isfinite(sw) || !isfinite(sh) || sw < 2 || sh < 2 || width < 2 || height < 2) return false;

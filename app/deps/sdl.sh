@@ -40,6 +40,9 @@ else
         -DCMAKE_BUILD_TYPE=Release
         -DSDL_TESTS=OFF
     )
+    if [[ "${DSKCPY_MAC_HOST_BUILD:-0}" == 1 ]]; then
+        conf+=(-DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 -DCMAKE_OSX_ARCHITECTURES=arm64 -DSDL_SHARED=OFF -DSDL_STATIC=ON)
+    fi
 
     if [[ "$HOST" == linux ]]
     then
@@ -81,5 +84,9 @@ else
     cmake "$SOURCES_DIR/$PROJECT_DIR" "${conf[@]}"
 fi
 
-cmake --build . -j
+if [[ "${DSKCPY_MAC_HOST_BUILD:-0}" == 1 ]]; then
+    cmake --build . --parallel "${DSKCPY_BUILD_JOBS:-2}"
+else
+    cmake --build . -j
+fi
 cmake --install .
