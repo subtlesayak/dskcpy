@@ -14,6 +14,14 @@ process_args() {
     BUILD_TYPE="$2"
     LINK_TYPE="$3"
     DIRNAME="$HOST-$BUILD_TYPE-$LINK_TYPE"
+    if [[ "${DSKCPY_MAC_HOST_BUILD:-0}" == 1 ]]; then
+        if [[ "$HOST-$BUILD_TYPE-$LINK_TYPE" != macos-native-static || "${MACOSX_DEPLOYMENT_TARGET:-}" != 13.0 ]]; then
+            echo 'Mac hosting dependencies require a native static macOS 13.0 target.' >&2
+            exit 1
+        fi
+        # Never reuse or poison the inherited Android-to-Mac dependency cache.
+        DIRNAME="macos-host13-$BUILD_TYPE-$LINK_TYPE"
+    fi
 
     if [[ "$BUILD_TYPE" != native && "$BUILD_TYPE" != cross ]]
     then

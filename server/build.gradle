@@ -1,5 +1,14 @@
 apply plugin: 'com.android.application'
 
+def identity = new Properties()
+rootProject.file('dskcpy.properties').withInputStream { identity.load(it) }
+def artifactVersion = identity.getProperty('DSKCPY_VERSION')
+def protocolVersion = identity.getProperty('SCRCPY_PROTOCOL_VERSION')
+def artifactCode = identity.getProperty('DSKCPY_ANDROID_VERSION_CODE').toInteger()
+if (!(artifactVersion ==~ /[0-9A-Za-z.+-]+/) || !(protocolVersion ==~ /[0-9.]+/) || artifactCode <= 50001) {
+    throw new GradleException('Invalid dskcpy identity or non-monotonic Android version code')
+}
+
 android {
     namespace = 'com.genymobile.scrcpy'
     compileSdk = 36
@@ -7,8 +16,9 @@ android {
         applicationId = "com.genymobile.scrcpy"
         minSdkVersion 21
         targetSdkVersion 36
-        versionCode 40100
-        versionName "4.1"
+        versionCode artifactCode
+        versionName artifactVersion
+        buildConfigField 'String', 'SCRCPY_PROTOCOL_VERSION', '"' + protocolVersion + '"'
         testInstrumentationRunner = "android.support.test.runner.AndroidJUnitRunner"
     }
     buildTypes {

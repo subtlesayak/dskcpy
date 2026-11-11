@@ -137,9 +137,68 @@ static void test_retained_pcm_capacity(void) {
     sc_reverse_audio_encoder_destroy(e);
 }
 
+struct feed_clock {
+    struct fixture *fixture;
+    int64_t now;
+    unsigned waits;
+    bool ack_on_wait, mute_on_wait, stop_on_wait;
+};
+static int64_t feed_now(void *context) { return ((struct feed_clock *)context)->now; }
+static void feed_wait(void *context) {
+    struct feed_clock *c = context;
+    ++c->waits; c->now += 10000;
+    if (c->ack_on_wait) c->fixture->ack = c->fixture->last_pts;
+    if (c->mute_on_wait) c->fixture->enabled = false;
+    if (c->stop_on_wait) c->fixture->stopped = true;
+}
+static void test_fresh_chunk_feeding(void) {
+    int16_t pcm[SC_REVERSE_AUDIO_MAX_CHUNK * 2] = {0};
+    struct fixture f = {.enabled = true, .ack = -1, .last_pts = -1};
+    struct sc_reverse_audio_encoder *e = sc_reverse_audio_encoder_create(&callbacks, &f);
+    assert(e);
+    // Reproduce the previous worker's bulk-push loss: a fresh 100ms callback
+    // was reduced to the newest 40ms even with immediate receiver progress.
+    assert(sc_reverse_audio_encoder_push(e, pcm, 4800, 100000, 100000));
+    struct sc_reverse_audio_stats stats;
+    sc_reverse_audio_encoder_get_stats(e, &stats);
+    assert(f.packets == 4 && stats.catchup_frames == 2880);
+    sc_reverse_audio_encoder_destroy(e);
+
+    for (unsigned mode = 0; mode < 4; ++mode) {
+        f = (struct fixture){.enabled = true, .ack = -1, .last_pts = -1};
+        e = sc_reverse_audio_encoder_create(&callbacks, &f); assert(e);
+        struct feed_clock clock = {.fixture = &f, .now = 100000,
+            .ack_on_wait = mode == 0, .mute_on_wait = mode == 2, .stop_on_wait = mode == 3};
+        struct sc_reverse_audio_wait wait = {.now = feed_now, .wait = feed_wait, .userdata = &clock};
+        assert(sc_reverse_audio_encoder_feed(e, pcm, 4800, 100000, &wait));
+        sc_reverse_audio_encoder_get_stats(e, &stats);
+        assert(!stats.catchup_frames && !stats.window_frames);
+        if (mode == 0) {
+            assert(f.packets == 10 && clock.waits == 2 && !stats.stale_frames);
+        } else if (mode == 1) {
+            assert(f.packets == 4 && clock.now == 190000 && stats.stale_frames == 2880);
+        } else {
+            assert(f.packets == 4 && clock.waits == 1 && !stats.stale_frames);
+        }
+        sc_reverse_audio_encoder_destroy(e);
+    }
+    f = (struct fixture){.enabled = true, .ack = -1, .last_pts = -1};
+    e = sc_reverse_audio_encoder_create(&callbacks, &f); assert(e);
+    struct feed_clock clock = {.fixture = &f, .now = 100000};
+    struct sc_reverse_audio_wait wait = {.now = feed_now, .wait = feed_wait, .userdata = &clock};
+    assert(sc_reverse_audio_encoder_feed(e, pcm, 480, 1, &wait));
+    assert(f.packets == 0 && clock.waits == 0);
+    assert(!sc_reverse_audio_encoder_feed(e, pcm, 4801, 100000, &wait));
+    assert(!sc_reverse_audio_encoder_feed(e, pcm, 480, 100000, NULL));
+    f.fail_send = true;
+    assert(!sc_reverse_audio_encoder_feed(e, pcm, 480, 100000, &wait));
+    sc_reverse_audio_encoder_destroy(e);
+}
+
 int main(void) {
     test_float_conversion();
     test_opus_and_backpressure();
     test_retained_pcm_capacity();
+    test_fresh_chunk_feeding();
     return 0;
 }

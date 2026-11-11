@@ -38,6 +38,7 @@ struct mac_state {
     struct sc_reverse_watchdog watchdog, audio_watchdog;
     struct sc_reverse_macos_audio_queue audio_queue; // Bounded FIFO, protected by mutex.
     uint64_t audio_epoch; // Epoch changes even for rapid mute/unmute.
+    uint64_t audio_queue_drops; // Protected by mutex; no device identity.
     _Atomic bool audio_route_changed;
     _Atomic bool keyboard_release_pending;
     CVPixelBufferRef latest; // Exactly one newest capture, protected by mutex.
@@ -147,7 +148,7 @@ static void mac_audio_abandon_pending(struct mac_state *s) {
                 || CMSampleBufferGetNumSamples(sample) > SC_REVERSE_AUDIO_MAX_CHUNK) return;
         sc_mutex_lock(&s->mutex);
         if (mac_audio_active(s)) {
-            sc_reverse_macos_audio_queue_push(&s->audio_queue, sample, av_gettime_relative());
+            if (sc_reverse_macos_audio_queue_push(&s->audio_queue, sample, av_gettime_relative())) ++s->audio_queue_drops;
         }
         sc_mutex_unlock(&s->mutex);
         return;
@@ -414,6 +415,13 @@ static bool mac_audio_send(void *context, const uint8_t *data, size_t size, int6
 }
 
 
+static int64_t mac_audio_now(void *context) {
+    (void)context; return av_gettime_relative();
+}
+static void mac_audio_wait(void *context) {
+    (void)context; SDL_Delay(1);
+}
+
 static int mac_audio_thread(void *context) {
     @autoreleasepool {
         SCMacState *owner = (__bridge SCMacState *)context;
@@ -425,7 +433,9 @@ static int mac_audio_thread(void *context) {
         uint64_t sequence = 0;
         bool unavailable = false;
         unsigned retries = 0;
-        int64_t retry_at = 0;
+        int64_t retry_at = 0, report_at = 0;
+        AudioStreamBasicDescription last_format = {0};
+        const struct sc_reverse_audio_wait audio_clock = {.now = mac_audio_now, .wait = mac_audio_wait};
         struct sc_reverse_macos_audio_converter converter = {0};
         while (!mac_audio_stopped(&audio)) {
             sc_mutex_lock(&s->mutex);
@@ -456,20 +466,33 @@ static int mac_audio_thread(void *context) {
                 uint64_t format_generation = converter.generation;
                 bool ok = encoder && sample && sc_reverse_macos_audio_convert(&converter, sample, pcm, &frames);
                 if (ok) {
+                    const AudioStreamBasicDescription *format = CMAudioFormatDescriptionGetStreamBasicDescription(CMSampleBufferGetFormatDescription(sample));
+                    if (last_format.mSampleRate != format->mSampleRate
+                            || last_format.mChannelsPerFrame != format->mChannelsPerFrame
+                            || last_format.mBitsPerChannel != format->mBitsPerChannel
+                            || last_format.mFormatFlags != format->mFormatFlags) {
+                        LOGI("Mac audio format changed: rate=%.0f channels=%u bits=%u planar=%u",
+                            format->mSampleRate, (unsigned)format->mChannelsPerFrame,
+                            (unsigned)format->mBitsPerChannel, (unsigned)((format->mFormatFlags & kAudioFormatFlagIsNonInterleaved) != 0));
+                        last_format = *format;
+                    }
                     if (current != sequence + 1 || converter.generation != format_generation)
                         sc_reverse_audio_encoder_discard_partial(encoder);
                     size_t offset = frames > SC_REVERSE_AUDIO_MAX_CHUNK ? frames - SC_REVERSE_AUDIO_MAX_CHUNK : 0;
                     frames -= offset;
-                    // Short socket/decoder stalls must not punch holes in fresh
-                    // PCM. Retain this chunk until the existing packet window
-                    // has room, but keep the same age cutoff and mute epoch.
-                    size_t needed = frames;
-                    size_t window = SC_REVERSE_AUDIO_FRAMES * SC_REVERSE_AUDIO_WINDOW;
-                    if (needed > window) needed = window;
-                    while (mac_audio_enabled(&audio) && !mac_audio_stopped(&audio)
-                            && av_gettime_relative() - received <= SC_REVERSE_AUDIO_MAX_AGE_US
-                            && sc_reverse_audio_encoder_available_frames(encoder) < needed) SDL_Delay(1);
-                    ok = sc_reverse_audio_encoder_push(encoder, pcm + offset * 2, frames, received, av_gettime_relative());
+                    ok = sc_reverse_audio_encoder_feed(encoder, pcm + offset * 2, frames, received, &audio_clock);
+                    if (av_gettime_relative() >= report_at) {
+                        struct sc_reverse_audio_stats stats;
+                        sc_reverse_audio_encoder_get_stats(encoder, &stats);
+                        sc_mutex_lock(&s->mutex);
+                        uint64_t dropped = s->audio_queue_drops;
+                        sc_mutex_unlock(&s->mutex);
+                        LOGI("Mac audio counters (current encoder): packets=%llu stale_frames=%llu window_frames=%llu catchup_frames=%llu capture_queue_drops=%llu",
+                            (unsigned long long)stats.packets, (unsigned long long)stats.stale_frames,
+                            (unsigned long long)stats.window_frames, (unsigned long long)stats.catchup_frames,
+                            (unsigned long long)dropped);
+                        report_at = av_gettime_relative() + 2000000;
+                    }
                 }
                 if (!ok && !mac_audio_stopped(&audio)) {
                     const uint8_t notice = 0;

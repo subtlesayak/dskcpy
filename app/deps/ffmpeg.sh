@@ -38,7 +38,7 @@ else
         export CFLAGS='-static-libgcc -static'
         export CXXFLAGS="$CFLAGS"
         export LDFLAGS='-static-libgcc -static'
-    elif [[ "$HOST" == "macos" ]]
+    elif [[ "$HOST" == "macos" && "${DSKCPY_MAC_HOST_BUILD:-0}" != 1 ]]
     then
         export PKG_CONFIG_PATH="/opt/homebrew/opt/zlib/lib/pkgconfig"
     fi
@@ -101,6 +101,9 @@ else
         # Media Foundation fallback in otherwise decoder-only release builds.
         conf+=(--enable-mediafoundation --enable-encoder=h264_mf)
     fi
+    if [[ "${DSKCPY_MAC_HOST_BUILD:-0}" == 1 ]]; then
+        conf+=(--enable-libopus --enable-encoder=libopus --enable-videotoolbox --enable-encoder=h264_videotoolbox)
+    fi
 
     if [[ "$LINK_TYPE" == static ]]
     then
@@ -149,6 +152,10 @@ fi
 
 if [[ "$HOST" == win* ]] && ! grep -q '^#define CONFIG_H264_MF_ENCODER 1' config_components.h; then
     echo "Windows reverse display requires h264_mf. Reconfigure this FFmpeg build." >&2
+    exit 1
+fi
+if [[ "${DSKCPY_MAC_HOST_BUILD:-0}" == 1 ]] && ! grep -q '^#define CONFIG_LIBOPUS_ENCODER 1' config_components.h; then
+    echo 'Mac hosting requires libopus. Reconfigure the isolated hosting FFmpeg build.' >&2
     exit 1
 fi
 

@@ -28,6 +28,8 @@ jobs:
       - run: npm ci --prefix gui
       - run: npm test --prefix gui
       - run: npm run build --prefix gui
+      - name: Artifact identity and upgrade preflight regressions
+        run: node --test tools/*.test.mjs
 
   native-windows:
     runs-on: windows-latest
@@ -86,6 +88,27 @@ jobs:
           build-macos/app/scrcpy --help | grep -F 'ScreenCaptureKit/VideoToolbox'
           node --test gui/server/macos-build.test.mjs gui/server/telemetry.test.mjs
 
+  macos-host-candidate:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install source-build tools
+        run: brew install cmake meson ninja pkgconf wget nasm
+      - name: Build and verify the separate unsigned Mac hosting candidate
+        run: bash release/build_macos_host.sh release/work/host-arm64
+      - name: Check packaged browser/dashboard runtime without starting capture
+        run: release/work/host-arm64/Start-dskcpy-host.command --check
+      - name: Preserve executable permissions in CI artifact
+        run: tar -C release/work -czf release/work/host-arm64.tar.gz host-arm64
+      - uses: actions/upload-artifact@v7
+        with:
+          name: unsigned-macos-host-arm64-candidate
+          path: release/work/host-arm64.tar.gz
+          retention-days: 7
+
   android-packaging:
     runs-on: ubuntu-latest
     strategy:
@@ -94,6 +117,9 @@ jobs:
         buildtype: [debug, release]
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
@@ -115,6 +141,7 @@ jobs:
           test -s .tmp/ci-android/server/reverse-display.apk
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify .tmp/ci-android/server/reverse-display.apk
           cmp server/build/outputs/apk/debug/server-debug.apk .tmp/ci-android/server/reverse-display.apk
+          node tools/check-android-upgrade.mjs --apk .tmp/ci-android/server/reverse-display.apk --sdk-tools "$ANDROID_HOME/build-tools/36.0.0" --require-current --output .tmp/ci-android/server/android-identity.json
       - name: Android unit tests
         if: matrix.buildtype == 'debug'
         run: ./gradlew :server:testDebugUnitTest
