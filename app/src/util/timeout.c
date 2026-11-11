@@ -14,6 +14,7 @@ sc_timeout_init(struct sc_timeout *timeout) {
 
     ok = sc_cond_init(&timeout->cond);
     if (!ok) {
+        sc_mutex_destroy(&timeout->mutex);
         return false;
     }
 
@@ -25,17 +26,22 @@ sc_timeout_init(struct sc_timeout *timeout) {
 static int
 run_timeout(void *data) {
     struct sc_timeout *timeout = data;
-    sc_tick deadline = timeout->deadline;
-
     sc_mutex_lock(&timeout->mutex);
-    bool timed_out = false;
-    while (!timeout->stopped && !timed_out) {
-        timed_out = !sc_cond_timedwait(&timeout->cond, &timeout->mutex,
-                    deadline);
+    while (!timeout->stopped) {
+        if (sc_cond_timedwait(&timeout->cond, &timeout->mutex,
+                              timeout->deadline)) {
+            continue; // A signal alone is not an expiration.
+        }
+        // Stop and expiration are decided under the same lock. Once claimed,
+        // a callback may finish concurrently with Stop; Join waits for it.
+        bool notify = !timeout->stopped;
+        sc_mutex_unlock(&timeout->mutex);
+        if (notify) {
+            timeout->cbs->on_timeout(timeout, timeout->cbs_userdata);
+        }
+        return 0;
     }
     sc_mutex_unlock(&timeout->mutex);
-
-    timeout->cbs->on_timeout(timeout, timeout->cbs_userdata);
 
     return 0;
 }
@@ -43,18 +49,18 @@ run_timeout(void *data) {
 bool
 sc_timeout_start(struct sc_timeout *timeout, sc_tick deadline,
                  const struct sc_timeout_callbacks *cbs, void *cbs_userdata) {
-    bool ok = sc_thread_create(&timeout->thread, run_timeout, "scrcpy-timeout",
-                               timeout);
-    if (!ok) {
+    assert(cbs && cbs->on_timeout);
+    // Immutable worker inputs must be ready even if it runs before Create
+    // returns. Do not clear stopped: Stop before Start is still cancellation.
+    timeout->cbs = cbs;
+    timeout->cbs_userdata = cbs_userdata;
+    timeout->deadline = deadline;
+
+    if (!sc_thread_create(&timeout->thread, run_timeout, "scrcpy-timeout",
+                           timeout)) {
         LOGE("Timeout: could not start thread");
         return false;
     }
-
-    timeout->deadline = deadline;
-
-    assert(cbs && cbs->on_timeout);
-    timeout->cbs = cbs;
-    timeout->cbs_userdata = cbs_userdata;
 
     return true;
 }

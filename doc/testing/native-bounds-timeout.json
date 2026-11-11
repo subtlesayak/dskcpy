@@ -1,0 +1,79 @@
+{
+  "checked_at": "2026-11-11T10:18:07.680169+00:00",
+  "source_base": "ad91f7fd18d9fc0ee9e579f4dca5c204571b5394",
+  "implementation": "Original code written against dskcpy interfaces; no upstream implementation copied or cherry-picked. Earlier reference exposure precludes a formal isolated clean-room claim.",
+  "source_sha256": {
+    "app/meson.build": "efdc5dd2da28535f1be54d808534f2d4db23649ab10311a82e3d8adbf054f555",
+    "app/src/demuxer.c": "384ac0dac5c5d4d8b2941ba21ac796123544a6438473017dad2b4a5a0dd2bea6",
+    "app/src/util/str.c": "d24f6e31280c5901383612dd71d008fc93aa42d09c882894dd1910f10fc1de0e",
+    "app/src/util/timeout.c": "448e936c22ac467f9447695c889753198e3340866951b0f20a67d2cb19521b9b",
+    "app/src/util/timeout.h": "d33458d25061f03d43183b37f81466b6c85da6f4a2dec6ddbadee9d00c958ee4",
+    "app/tests/test_demuxer_packet.c": "040ddddaa165cef6fd5c1813c636e67db960ed0f2c76f5c98abb6fdb3d6fcb91",
+    "app/tests/test_str.c": "17762fbe400e09832f556d57d23989bf62f52fe2d409b4617bb97370fb261d89",
+    "app/tests/test_timeout.c": "e8cd1e6d64e3236669185206b5b13aa83d1fabefe2a0100fc3865fdb2bbb92bf",
+    "app/tests/test_timeout_thread.c": "1e1dd37390537a53a8d0c5647d0b41402d9890565ab60a8b264663db0dece490",
+    "doc/upstream-issue-review.md": "ef7c9be06461d1dfff78b684b5554584e71d22b7afa344e3cd9f1a821ca7caf2"
+  },
+  "packet_limit_bytes": 67108864,
+  "packet_scope": "Inherited native media packet body. Existing custom session headers, reverse SRD1 framing and browser limits unchanged.",
+  "utf8_scope": "Bounded cut search; valid boundaries and full-string behavior preserved, no new whole-string validation policy.",
+  "timeout_contract": "Single use after init; inputs published before worker creation; stop suppresses unclaimed expiration; callback outside mutex may call stop; join completes an already claimed callback; condition init failure releases mutex.",
+  "verification": {
+    "native": {
+      "passed": 20,
+      "failed": 0
+    },
+    "address_undefined_sanitizers": {
+      "passed": 20,
+      "failed": 0
+    },
+    "backend": {
+      "passed": 162,
+      "skipped": 6,
+      "failed": 0
+    },
+    "production_build": "TypeScript/Vite passed",
+    "before_regressions": [
+      {
+        "case": "packet",
+        "exit_code": -6,
+        "failed_as_expected": true
+      },
+      {
+        "case": "utf8",
+        "exit_code": -6,
+        "failed_as_expected": true
+      },
+      {
+        "case": "timeout_init",
+        "exit_code": -6,
+        "failed_as_expected": true
+      },
+      {
+        "case": "timeout_publication",
+        "exit_code": -6,
+        "failed_as_expected": true
+      },
+      {
+        "case": "timeout_pre_stop",
+        "exit_code": -6,
+        "failed_as_expected": true
+      },
+      {
+        "case": "timeout_wait_stop",
+        "exit_code": -6,
+        "failed_as_expected": true
+      }
+    ],
+    "real_threads": "128 immediate expirations plus stop-before-start, immediate stop and signaled-then-stop cases using SDL workers",
+    "mock_fixtures": "Allocation/read probes, exact upper boundary with injected OOM, valid payload/PTS/config/keyframe and short reads; deterministic timeout init/create failures, immediate worker scheduling, spurious signals and wait-return cancellation"
+  },
+  "native_candidate_sha256": "c90b0940520f425d0c3036e64405756ca0fb6d8208f6954039dc0bacab733950",
+  "runtime_activated": false,
+  "physical_verification": "None in this change; existing Mac/browser audio and hardware gates remain open.",
+  "limits": [
+    "Homebrew-linked local candidate is not a portable macOS 13 release",
+    "No dependency, Android companion, UI or browser source change",
+    "No account, public relay, release/signing configuration or active stream change"
+  ]
+}
