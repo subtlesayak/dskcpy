@@ -691,6 +691,20 @@ static void mac_window_zoom(void) {
     if (result != kAXErrorSuccess) LOGW("The active Mac window does not expose a zoom/restore action");
     if (button) CFRelease(button); if (window) CFRelease(window); CFRelease(app);
 }
+static void mac_pause_transition(void *context, bool paused) {
+    struct mac_state *s = context;
+    mac_cancel_input(s); mac_cancel_keyboard(s);
+    atomic_store(&s->paused, paused);
+    sc_mutex_lock(&s->mutex);
+    sc_reverse_watchdog_set_paused(&s->watchdog, paused, av_gettime_relative());
+    mac_audio_transition(s);
+    sc_mutex_unlock(&s->mutex);
+    LOGI("Reverse display %s (Android %s)", paused ? "paused" : "resumed", paused ? "background" : "foreground");
+}
+static void mac_request_keyframe(void *context) {
+    struct mac_state *s = context;
+    atomic_store(&s->force_key, true);
+}
 static void mac_action(struct sc_receiver *receiver, const struct sc_device_msg *msg, void *context) {
     (void)receiver;
     SCMacState *owner = (__bridge SCMacState *)context;
@@ -700,14 +714,10 @@ static void mac_action(struct sc_receiver *receiver, const struct sc_device_msg 
     if (action == SC_REVERSE_SYSTEM_ACTION_STOP_SESSION) { mac_cancel_input(s); mac_cancel_keyboard(s); atomic_store(&s->quit, true); return; }
     if (action == SC_REVERSE_SYSTEM_ACTION_PAUSE_VIDEO || action == SC_REVERSE_SYSTEM_ACTION_RESUME_VIDEO) {
         bool paused = action == SC_REVERSE_SYSTEM_ACTION_PAUSE_VIDEO;
-        mac_cancel_input(s); mac_cancel_keyboard(s);
-        atomic_store(&s->paused, paused);
-        sc_mutex_lock(&s->mutex);
-        sc_reverse_watchdog_set_paused(&s->watchdog, paused, av_gettime_relative());
-        mac_audio_transition(s);
-        sc_mutex_unlock(&s->mutex);
-        if (!paused) atomic_store(&s->force_key, true);
-        LOGI("Reverse display %s (Android %s)", paused ? "paused" : "resumed", paused ? "background" : "foreground");
+        static const struct sc_reverse_macos_pause_callbacks callbacks = {
+            .transition = mac_pause_transition, .keyframe = mac_request_keyframe,
+        };
+        sc_reverse_macos_pause(atomic_load(&s->paused), paused, &callbacks, s);
         return;
     }
     if (s->window_id) return; // Window capture is view-only, including host audio/volume/window actions.

@@ -33,3 +33,21 @@ or label decode RTT as physical touch-to-display latency.
 The unrelated historical Android display-socket startup stall still needs the
 matching source/APK handoff and independent repeated-start testing. A successful
 retry or the browser decoder-drain fix does not close that gate.
+
+## Repeated Resume and IDR recovery
+
+The receiver task's controlled USB/WebCodecs repeat with the first static native
+and its scheduler correction still failed audibly. Live evidence correlated
+periodic action-8 IDR requests with repeated Mac audio-epoch changes and fresh
+Opus configuration. The Mac control path treated every Resume as a foreground
+transition, also canceling held keyboard/mouse input while already active.
+
+The production pause dispatcher now runs transition cleanup only when the
+paused state changes. Every Resume still requests a fresh video keyframe.
+True pause/resume keeps input release, watchdog updates, PCM clearing and audio
+epoch retirement; the existing audio enable/disable and route paths are intact.
+The dispatcher lives in the portable Mac helper so native tests exercise its
+actual callback decisions. The new regression fails with the old unconditional
+dispatch and passes 10,000 active Resume requests with no audio/input retirement,
+duplicate pauses and rapid real pause/resume. This is a source regression pass;
+the corrected candidate requires another owner-controlled physical repeat.
