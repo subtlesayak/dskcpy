@@ -11,16 +11,16 @@ const execFileAsync = promisify(execFile);
 const defaultRepo = fileURLToPath(new URL('../../', import.meta.url));
 
 export function parseOptions(args, environment = process.env) {
-  const allowed = ['--check', '--no-open', '--help'];
+  const allowed = ['--check', '--no-open', '--no-reuse', '--help'];
   if (args.some((arg) => !allowed.includes(arg))) {
-    throw new Error('Unknown option. Use --check, --no-open or --help.');
+    throw new Error('Unknown option. Use --check, --no-open, --no-reuse or --help.');
   }
   const rawPort = environment.DISPLAY_BRIDGE_PORT ?? '27183';
   if (!/^\d+$/.test(rawPort) || Number(rawPort) < 1 || Number(rawPort) > 65535) {
     throw new Error('DISPLAY_BRIDGE_PORT must be a port number from 1 to 65535.');
   }
   return { check: args.includes('--check'), open: !args.includes('--no-open'),
-    help: args.includes('--help'), port: Number(rawPort) };
+    help: args.includes('--help'), reuse: !args.includes('--no-reuse'), port: Number(rawPort) };
 }
 
 // Only a small, explicit identity response is accepted. Do not follow redirects,
@@ -95,7 +95,7 @@ export async function launch({ args = [], environment = process.env, repoDir = d
 } = {}) {
   const options = parseOptions(args, environment);
   if (options.help) {
-    log('dskcpy launcher: --check (no server/browser/capture), --no-open (keep server in this terminal).');
+    log('dskcpy launcher: --check (no server/browser/capture), --no-open (keep server in this terminal), --no-reuse (require this configuration).');
     return { exitCode: 0 };
   }
   const url = `http://127.0.0.1:${options.port}`;
@@ -109,6 +109,7 @@ export async function launch({ args = [], environment = process.env, repoDir = d
   const existing = await probe(options.port);
   if (existing === 'occupied') throw occupiedError(options.port);
   if (existing === 'dskcpy' && !options.check) {
+    if (!options.reuse) throw new Error('A dskcpy dashboard is already running. Stop its Terminal launcher before starting this configuration.');
     log('Using the running dskcpy dashboard. Its stream and settings were not changed.');
     await showDashboard();
     return { exitCode: 0, reused: true };
@@ -135,6 +136,7 @@ export async function launch({ args = [], environment = process.env, repoDir = d
     if (error.code !== 'EADDRINUSE') throw error;
     // A second launcher may have won the race while dependencies were checked.
     if (await probe(options.port) !== 'dskcpy') throw occupiedError(options.port);
+    if (!options.reuse) throw new Error('Another dskcpy dashboard started first. Stop its launcher before starting this configuration.');
     log('Another dskcpy launcher started first. Using its dashboard without changing its stream.');
     await showDashboard();
     return { exitCode: 0, reused: true };

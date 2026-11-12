@@ -1,0 +1,75 @@
+{
+  "verified_at": "2026-11-11T11:53:14.515857+00:00",
+  "source_base": "ba6df2a71871f224aa68c74155fd5647e800057a",
+  "physical_baseline": {
+    "transport": "USB / WebCodecs",
+    "native_sha256": "b083ecfd69cf350e7cf831b767c1ebf36640c5e728ac79579f1fcc4c73331955",
+    "result": "FAIL: user hears gaps/stutters and beep-like playback of continuous tone",
+    "tone_sha256": "9a21c9d6b2ce7380e118535fbb0d3b82fd3124db5ac0b3a0e046ccd9734e5648",
+    "source_signal": "90s 48kHz stereo; no silent 100ms PCM blocks"
+  },
+  "failing_before": [
+    "10-packet / 100ms burst cancels eight previously scheduled sources",
+    "A packet arriving 2ms before scheduled sound ends is delayed again, creating a gap"
+  ],
+  "correction": [
+    "Bounded 20ms initial/rebuffer lead and 160ms maximum future queue",
+    "Append exactly to the existing timeline while queued sound remains",
+    "Account for ended sources by audio-clock end time even if onended callback is delayed",
+    "Bound buffer count to 24 and reject oversized decoded output",
+    "Mute/background/disconnect discard scheduled sound; old decoder output stays retired"
+  ],
+  "verification": {
+    "receiver_backend_passed": 186,
+    "failed": 0,
+    "optional_skips": 7,
+    "production_build": "TypeScript/Vite passed",
+    "focused_cases": "burst continuity, slightly late arrival, mute/background/stale callbacks, excessive input/underrun, oversized output",
+    "logger_fixture": "Verified static no-capture logger fixture enabled"
+  },
+  "native_candidate": {
+    "source_commit": "b93df9ad2edb26fe856b87709d60e5b3cf4ab408",
+    "sha256": "c6085c8622e5a279e06c56922df04b27e4fcd52c12a629e78df2e068566df2b8",
+    "independent_checks": "5934 payload hashes verified; clean source manifest; system-only libraries; help capabilities; 20 assertion tests pass",
+    "activation": "Historical c608 candidate was activated and failed; preserved separately after corrected f837 switch"
+  },
+  "limits": [
+    "Unit regression models AudioDecoder/AudioContext and is not audible device verification",
+    "Corrected native f837 passes short USB tone/mute, Home10s/return and five-minute audible soak; Wi-Fi/private-route/output-route and longer/broader qualification remain open",
+    "Experimental unsigned arm64 macOS 13-target native is not clean-OS/signing/notarization or full desktop-app qualification",
+    "Native protocol/ACK IDs unchanged"
+  ],
+  "source_sha256": {
+    "gui/receiver/receiver.mjs": "98b03663f20c0ee6c17c226d23ee7f3778501dd36041f8982d2c172b1b81d673",
+    "gui/server/receiver.test.mjs": "eb70eea46376ae6692b8c66bdd2c5fb419d7530c00901d48224d8e10ace900c6"
+  },
+  "reconciled_master": "e5e8c6e3",
+  "combined_physical_result": {
+    "native_sha256": "c6085c8622e5a279e06c56922df04b27e4fcd52c12a629e78df2e068566df2b8",
+    "receiver_source": "78d7bbb2",
+    "result": "FAIL: continuous reference tone still sounds like beeps",
+    "localized_interaction": "Periodic native Resume/IDR request resets audio epoch/codec and cancels held input even when already active",
+    "evidence": "Live Resume then fresh Opus creation at 160-180ms intervals; native drop counters zero; reproduction compiled actual control block fails",
+    "native_fix_owner": "Separate P1 native task; actual native worktree not edited here; minimal proposal shared",
+    "pending": "Newly hashed idempotent native Resume candidate and another agreed physical test"
+  },
+  "resume_candidate": {
+    "native_source_commit": "4ec8e7fcaec7b4d558220afecdd54b494d6795aa",
+    "native_sha256": "f837ddf4a81139b360b47ab22fedc18af8de96102f741fb380d7c47f8a2d0bcc",
+    "receiver_source": "1d303ab5; receiver.mjs unchanged from 78d7bbb2",
+    "transport": "USB / WebCodecs",
+    "physical_result": "PASS: human confirms continuous USB tone, phone mute/resume, Android Home10s/return with video/touch/audio recovery, and continuous sound throughout a five-minute soak",
+    "native_evidence": "Counters exceeded44000 packets after genuine Home/return transition; same current encoder progresses throughout listening. End counters stale/window/catchup/resampler trim0,capture_queue_drops34 versus32 at first soak snapshot. Counts are not audible or latency measurements.",
+    "pending": [
+      "Wi-Fi/private-route audio",
+      "Output-device changes",
+      "Longer sessions and broader browser/device qualification"
+    ],
+    "qualification_limit": "Short audible result only; encoder counters are not a substitute for listening",
+    "five_minute_tone": {
+      "duration_seconds": 300,
+      "sha256": "7f241c8add7c7207f8d4afdf91d48b53e5da206b3707d97a7cb121cbae15cffe",
+      "signal": "440Hz,48kHz16bitstereo,no silent100ms blocks among3000"
+    }
+  }
+}

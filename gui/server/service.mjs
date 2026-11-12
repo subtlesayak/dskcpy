@@ -8,6 +8,7 @@ import { openInternetBridge, summarizeTailnet } from './internet.mjs';
 import { resolveRuntime, inspectReadiness } from './runtime.mjs';
 import { parseMdnsServices } from './discovery.mjs';
 import { createBrowserReceiver } from './browser.mjs';
+import { browserJoinUrl } from '../receiver/protocol.mjs';
 
 import {
   buildScrcpyArgs,
@@ -419,9 +420,20 @@ export function createControlService({
       if (attempt.signal.aborted || !browserReceiver.status().waiting) {
         browserReceiver.cancel(); throw new Error('Connection cancelled or invitation expired.');
       }
+      let openedOnPhone = false;
+      if (usbDevice) {
+        const runtime = currentRuntime();
+        try {
+          const opened = await runCommand(runtime.adb, ['-s', usbDevice.serial, 'shell', 'am', 'start',
+            '-a', 'android.intent.action.VIEW', '-d', browserJoinUrl(invitation.url, invitation.key)],
+          { env: runtime.env, cwd: repoDir, timeoutMs: 5000 });
+          openedOnPhone = !/\b(?:Error|Exception):|unable to resolve/i.test(`${opened.stdout || ''}\n${opened.stderr || ''}`);
+        } catch { /* Keep the owned tunnel and one-use invitation for manual fallback. */ }
+      }
+      if (attempt.signal.aborted) { browserReceiver.cancel(); throw new Error('Connection cancelled.'); }
       // Include public status so the UI can reveal the link immediately even if
       // event delivery is delayed. The one-use key remains outside status/logs.
-      return { ...invitation, status: publicState() };
+      return { ...invitation, openedOnPhone, status: publicState() };
     } finally { if (browserPreparation === attempt) browserPreparation = null; }
   }
 
@@ -518,7 +530,10 @@ export function createControlService({
         child.stdout.destroy();
         child.stderr.destroy();
         if (streamProcess === child) streamProcess = null;
-        internetBridge?.close();
+        // Only a fixed recovery category crosses to an authenticated viewer;
+        // raw host diagnostics can contain local paths or private details.
+        internetBridge?.close(!streamStopRequested && /^Allow Screen Recording\b/.test(lastNativeError || '')
+          ? 'capture-permission' : undefined);
         internetBridge = null;
         state.running = false;
         state.stopping = false;

@@ -1,10 +1,10 @@
 // Original dskcpy decoder lifecycle implementation. No encoded frames are kept
 // for replay: recovery discards pending input and asks the host for a fresh IDR.
 export function createVideoReceiver({
-  Decoder = globalThis.VideoDecoder, onFrame, onAck, onKeyframe, onError,
+  Decoder = globalThis.VideoDecoder, onFrame, onAck, onKeyframe, onError, onRecovery = () => {},
   suspended = false, setTimer = setTimeout, clearTimer = clearTimeout,
 }) {
-  let decoder, configuration, timer, epoch = 0, closed = false;
+  let decoder, configuration, timer, drainTimer, epoch = 0, closed = false, flushing = false;
   let waitingKey = true, software = false, recoveries = 0;
   const pending = new Set();
   const timeoutMs = 5000, maximumRecoveries = 3;
@@ -12,6 +12,7 @@ export function createVideoReceiver({
   function retire() {
     ++epoch;
     clearTimer(timer); timer = undefined;
+    clearTimer(drainTimer); drainTimer = undefined; flushing = false;
     const previous = decoder; decoder = undefined;
     if (previous && previous.state !== 'closed') previous.close();
     for (const timestamp of pending) onAck(timestamp);
@@ -26,10 +27,40 @@ export function createVideoReceiver({
     close(); onError(message);
   }
   function active(mine) { return !closed && !suspended && mine === epoch; }
+  function scheduleDrain(mine) {
+    clearTimer(drainTimer); drainTimer = undefined;
+    if (!pending.size || flushing || typeof decoder?.flush !== 'function') return;
+    // The native sender allows only two unacknowledged pictures. A platform
+    // decoder may buffer both despite optimizeForLatency, leaving sender and
+    // decoder waiting for each other. Drain only after output has stalled;
+    // normal decoders never pay for a flush or an extra keyframe.
+    drainTimer = setTimer(() => {
+      drainTimer = undefined;
+      if (!active(mine) || !pending.size || flushing) return;
+      flushing = true; waitingKey = true; deadline(mine);
+      try {
+        Promise.resolve(decoder.flush()).then(() => {
+          if (!active(mine)) return;
+          flushing = false;
+          if (pending.size) { recover({ name: 'EncodingError' }, mine); return; }
+          // flush() requires the next accepted chunk to be a keyframe. Drop
+          // and acknowledge in-flight deltas, then request a fresh host IDR.
+          deadline(mine); onKeyframe();
+        }).catch((error) => recover(error, mine));
+      } catch (error) { recover(error, mine); }
+    }, 100);
+  }
   function deadline(mine) {
     clearTimer(timer);
     timer = setTimer(() => {
-      if (active(mine)) fail('Video recovery timed out. Reconnect or try a lower resolution.');
+      if (!active(mine)) return;
+      // Some platform decoders accept input but never return a first frame.
+      // Treat that as a decoder failure, just like an explicit EncodingError,
+      // and try software once. A stalled probe or missing host keyframe is a
+      // different failure: recreating the decoder cannot produce missing input.
+      if (decoder && pending.size && !software && recoveries < maximumRecoveries) {
+        recover({ name: 'EncodingError' }, mine);
+      } else fail('Video recovery timed out. Reconnect or try a lower resolution.');
     }, timeoutMs);
   }
   function recover(error, mine) {
@@ -41,7 +72,7 @@ export function createVideoReceiver({
       return;
     }
     recoveries++;
-    if (fallback) software = true;
+    if (fallback) { software = true; onRecovery('Retrying video with software decoding…'); }
     void start();
   }
   async function start() {
@@ -63,8 +94,9 @@ export function createVideoReceiver({
         output: (frame) => {
           try {
             if (!active(mine) || !pending.delete(frame.timestamp)) return;
-            clearTimer(timer); timer = undefined;
+            if (!flushing) { clearTimer(timer); timer = undefined; }
             onFrame(frame); onAck(frame.timestamp);
+            scheduleDrain(mine);
           } catch {
             fail('This browser could not display the decoded video. Reconnect to try again.');
           } finally { frame.close(); }
@@ -84,7 +116,7 @@ export function createVideoReceiver({
   }
   function decode(chunk) {
     if (closed) return;
-    if (suspended || !decoder || (waitingKey && chunk.type !== 'key')) {
+    if (suspended || !decoder || flushing || (waitingKey && chunk.type !== 'key')) {
       onAck(chunk.timestamp); return;
     }
     if (decoder.decodeQueueSize >= 3 || pending.size >= 3) {
@@ -95,7 +127,7 @@ export function createVideoReceiver({
     pending.add(chunk.timestamp);
     try {
       decoder.decode(chunk);
-      if (active(mine)) waitingKey = false;
+      if (active(mine)) { waitingKey = false; scheduleDrain(mine); }
     } catch (error) { recover(error, mine); }
   }
   function suspend() {

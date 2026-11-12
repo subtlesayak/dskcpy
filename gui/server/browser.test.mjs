@@ -11,7 +11,7 @@ import path from 'node:path';
 import { WebSocket } from 'ws';
 import { createBrowserReceiver, receiverOrigin, isPrivateBind } from './browser.mjs';
 import { SrdParser, validBrowserInput, MAX_PACKET } from './browser-protocol.mjs';
-import { ack, avcCodec, avcParameters, touchPacket, scrollPacket, takeDecodedTimestamps, fitDisplay } from '../receiver/protocol.mjs';
+import { ack, avcCodec, avcParameters, touchPacket, scrollPacket, takeDecodedTimestamps, fitDisplay, browserJoinUrl } from '../receiver/protocol.mjs';
 
 const header = Buffer.from('535244310000000100000280000001e0', 'hex');
 function packet(pts, flags, payload = Buffer.from([1, 2, 3])) {
@@ -69,7 +69,7 @@ test('receiver origin accepts explicit HTTPS origins, no paths or credentials; d
     'https://user@desktop.example.ts.net', 'https://desktop.example.ts.net/?key=secret']) assert.throws(() => receiverOrigin(value));
 });
 
-test('dedicated QR join page forces a document load without putting credentials in requests', async (t) => {
+test('legacy QR join page loads without putting credentials in requests', async (t) => {
   const f = await fixture(t);
   const page = await fetch(new URL('/join', f.invitation.url));
   assert.equal(page.status, 200);
@@ -80,6 +80,26 @@ test('dedicated QR join page forces a document load without putting credentials 
   assert.equal(f.calls(), 0);
   assert.equal(f.receiver.status().waiting, true);
   assert.equal((await fetch(new URL('/join/unexpected', f.invitation.url))).status, 404);
+});
+
+test('fresh navigation paths serve the receiver without authorizing access or opening other routes', async (t) => {
+  const f = await fixture(t);
+  const join = new URL(browserJoinUrl(f.invitation.url, f.invitation.key));
+  assert.match(join.pathname, /^\/join\/[a-f0-9]{32}$/);
+  const requestUrl = join.origin + join.pathname;
+  const page = await fetch(requestUrl);
+  assert.equal(page.status, 200);
+  assert.equal(page.headers.get('cache-control'), 'no-store');
+  assert.equal(page.headers.get('referrer-policy'), 'no-referrer');
+  assert.match(await page.text(), /src="\/receiver.mjs"/);
+  assert.ok(!requestUrl.includes(f.invitation.key));
+  assert.equal(f.calls(), 0);
+  assert.equal(f.receiver.status().waiting, true);
+  assert.equal((await fetch(requestUrl, { method: 'POST' })).status, 404);
+  for (const suffix of ['/extra', '?connect=not-a-code', '.mjs']) {
+    assert.equal((await fetch(requestUrl + suffix)).status, 404);
+  }
+  assert.equal((await fetch(join.origin + '/join/' + 'a'.repeat(33))).status, 404);
 });
 
 test('SRD parser accepts arbitrarily fragmented media and zero-length unavailable status', () => {

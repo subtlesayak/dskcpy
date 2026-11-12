@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>dskcpy input check</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#101820;color:#eef6fa;font:18px/1.45 system-ui,sans-serif}main{max-width:1100px;margin:auto;padding:20px}h1{margin:0;font-size:28px}h2{font-size:21px;margin:0 0 10px}p{margin:8px 0;color:#c1d0da}.checks{display:grid;grid-template-columns:1fr 1fr;gap:16px}.card{padding:18px;background:#1b2934;border:1px solid #5c7688;border-radius:12px;margin-top:16px}.wide{grid-column:1/-1}button,input,textarea{font:inherit;border:2px solid #7fcce9;border-radius:8px;background:#102b3a;color:#fff;padding:12px;min-height:48px}button{cursor:pointer}button:focus-visible,input:focus-visible,textarea:focus-visible,.rows:focus-visible{outline:4px solid #ffdc7e;outline-offset:3px}.targets{display:flex;gap:12px}.targets button{flex:1}#hold{width:100%;height:120px;touch-action:none;background:#143c51}#hold[data-held=true]{background:#1b6851}output{display:block;margin-top:10px;min-height:30px;color:#9aefc6;font-weight:650}label{display:block}textarea{display:block;width:100%;resize:vertical;min-height:80px;margin-top:8px}.rows{height:120px;overflow:auto;border:2px solid #7594a6;border-radius:8px;padding:0 12px;overscroll-behavior:contain}.rows p{border-bottom:1px solid #496173;padding:8px 0}#text-result{white-space:pre-wrap;overflow-wrap:anywhere}code{font:inherit;color:#fff}@media(max-width:650px){.checks{grid-template-columns:1fr}.wide{grid-column:auto}}
+</style>
+<main>
+<h1>Phone input check</h1>
+<p>Use the streamed screen on your phone. This page keeps results only in this window.</p>
+<section class="card" aria-labelledby="tone-title"><h2 id="tone-title">Start the sound when you are ready</h2><p>This quiet tone has no planned gaps and ends after five minutes. Enable audio in the phone receiver first.</p><div class="targets"><button id="tone-play">Play continuous tone</button><button id="tone-stop" disabled>Stop tone</button></div><output id="tone-state" aria-live="polite">Tone: stopped</output><span id="tone-remaining" aria-live="off"></span></section>
+<div class="checks">
+<section class="card"><h2>1. Tap each target once</h2><div class="targets"><button data-tap="A">A · 0</button><button data-tap="B">B · 0</button><button data-tap="C">C · 0</button></div><output id="tap-result" aria-live="polite">Total: 0</output></section>
+<section class="card"><h2>2. Hold and drag</h2><p>Choose “Drag: select” on your phone. Hold this target and move slowly for at least three seconds, then lift your finger.</p><button id="hold" data-held="false">Hold and move here</button><output id="hold-result" aria-live="polite">Pointer released · no holds yet</output></section>
+<section class="card"><h2>3. Type on the Mac</h2><label for="text">Tap this field, open the phone receiver’s Keyboard, and type <code>café 🙂</code> or <code>test123</code>. Add other scripts if your keyboard offers them.</label><textarea id="text" autocomplete="off" spellcheck="false"></textarea><output id="text-result" aria-live="polite">Received text: empty</output><output id="key-result">Pressed physical keys: none · modifiers: none</output><details><summary>Key event trace</summary><pre id="key-events" style="white-space:pre-wrap;overflow-wrap:anywhere"></pre></details></section>
+<section class="card"><h2>4. Scroll with two fingers</h2><div class="rows" id="rows" tabindex="0" role="region" aria-label="Two-finger scrolling check"></div><output id="scroll-result" aria-live="polite">Scroll position: 0 px</output></section>
+</div>
+</main>
+<script>
+const get=id=>document.getElementById(id),counts={A:0,B:0,C:0};
+for(const button of document.querySelectorAll('[data-tap]'))button.addEventListener('click',()=>{const id=button.dataset.tap;button.textContent=`${id} · ${++counts[id]}`;get('tap-result').textContent=`Total: ${Object.values(counts).reduce((a,b)=>a+b,0)}`;});
+const hold=get('hold');let held=null,longest=0,moves=0;
+hold.addEventListener('pointerdown',event=>{if(event.button!==0||held)return;held={id:event.pointerId,at:performance.now()};moves=0;hold.setPointerCapture(event.pointerId);hold.dataset.held='true';get('hold-result').textContent='Pointer HELD';});
+hold.addEventListener('pointermove',event=>{if(held?.id===event.pointerId){moves++;get('hold-result').textContent=`Pointer HELD · ${((performance.now()-held.at)/1000).toFixed(1)} seconds · ${moves} moves`;}});
+function release(event){if(held?.id!==event.pointerId)return;const duration=performance.now()-held.at;longest=Math.max(longest,duration);held=null;hold.dataset.held='false';get('hold-result').textContent=`Pointer released after ${(duration/1000).toFixed(1)} seconds · ${moves} moves · longest ${(longest/1000).toFixed(1)} seconds`;}
+for(const event of ['pointerup','pointercancel','lostpointercapture'])hold.addEventListener(event,release);
+const field=get('text'),keys=new Map(),keyEvents=[];
+field.addEventListener('input',()=>{get('text-result').textContent=`Received text: ${field.value||'empty'}`;});
+function keyEvent(event){
+  // A Unicode key's text can differ between keydown and keyup on macOS.
+  // Pair physical identities instead of treating character text as a key ID.
+  const id=`${event.code||`keyCode:${event.keyCode}`}:${event.location}`;
+  if(event.type==='keydown')keys.set(id,event.key);else keys.delete(id);
+  const modifiers=['Control','Alt','Shift','Meta'].filter(name=>event.getModifierState(name));
+  get('key-result').textContent=`Pressed physical keys: ${[...keys.keys()].join(', ')||'none'} · modifiers: ${modifiers.join(', ')||'none'}`;
+  keyEvents.push(JSON.stringify({type:event.type,code:event.code,key:event.key,location:event.location,modifiers}));
+  if(keyEvents.length>40)keyEvents.shift();get('key-events').textContent=keyEvents.join('\n');
+}
+field.addEventListener('keydown',keyEvent);field.addEventListener('keyup',keyEvent);
+// Deliberately do not clear held state on blur: actual native release events
+// must arrive for an interruption/cleanup test to pass.
+const rows=get('rows');for(let i=1;i<=20;i++){const p=document.createElement('p');p.textContent=`Row ${i} — scroll this box from the phone`;rows.append(p);}rows.addEventListener('scroll',()=>{get('scroll-result').textContent=`Scroll position: ${Math.round(rows.scrollTop)} px`;});
+let toneContext=null,toneAttempt=0,toneTimer;
+function stopTone(message='Tone: stopped'){
+  toneAttempt++;clearInterval(toneTimer);const context=toneContext;toneContext=null;
+  if(context)void context.close();get('tone-play').disabled=false;get('tone-stop').disabled=true;
+  get('tone-state').textContent=message;get('tone-remaining').textContent='';
+}
+get('tone-stop').addEventListener('click',()=>stopTone());
+get('tone-play').addEventListener('click',async()=>{
+  stopTone();const mine=++toneAttempt;get('tone-play').disabled=true;get('tone-stop').disabled=false;
+  try{
+    const context=new AudioContext();toneContext=context;await context.resume();if(mine!==toneAttempt)return;
+    const base=context.currentTime+.1,oscillator=context.createOscillator(),gain=context.createGain();
+    oscillator.type='sine';oscillator.frequency.value=440;gain.gain.setValueAtTime(0,base);
+    gain.gain.linearRampToValueAtTime(.025,base+.02);gain.gain.setValueAtTime(.025,base+299.98);gain.gain.linearRampToValueAtTime(0,base+300);
+    oscillator.connect(gain).connect(context.destination);oscillator.onended=()=>{if(mine===toneAttempt)stopTone('Tone: finished');};
+    oscillator.start(base);oscillator.stop(base+300);get('tone-state').textContent='Tone: playing continuously';
+    const remaining=()=>{const seconds=Math.max(0,Math.ceil(base+300-context.currentTime));get('tone-remaining').textContent=`${Math.floor(seconds/60)}:${String(seconds%60).padStart(2,'0')} remaining`;};
+    remaining();toneTimer=setInterval(remaining,1000);
+  }catch{if(mine===toneAttempt)stopTone('Tone could not start. Please report this result.');}
+});
+window.addEventListener('pagehide',()=>stopTone());
+</script>
+</html>

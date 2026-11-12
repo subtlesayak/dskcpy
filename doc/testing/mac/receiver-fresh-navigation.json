@@ -1,0 +1,34 @@
+{
+  "checked_at": "2026-11-11T12:34:41.493425+00:00",
+  "source_base": "1d303ab5",
+  "problem": "Each generated invitation used the same /join document path. Reusing a receiver tab can retain its old module code on fragment-only navigation. Earlier physical asset fidelity is not retrospectively proven.",
+  "correction": "An independent random public navigation ID in /join/<id> forces a document navigation; the invitation remains only in the fragment, scrubbed before authentication. Legacy /join remains supported. No navigation ID authorizes a session.",
+  "verification": {
+    "regression_before": "Repeated launches have the same pathname; uniqueness assertion fails",
+    "focused_backend_passed": 62,
+    "full_backend_passed": 188,
+    "optional_skips": 7,
+    "failed": 0,
+    "production_build": "TypeScript/Vite passed",
+    "covered": [
+      "Independent QR decoding retains the exact fragment invitation",
+      "Repeated launches change document path for the same key",
+      "Fresh route serves no-store assets without authenticating",
+      "Wrong methods, suffixes, queries and malformed IDs fail closed",
+      "USB launch still uses its owned tunnel and one-use invitation"
+    ]
+  },
+  "activation": "Prepared source only; active service not restarted",
+  "limits": [
+    "New route requires a later user-agreed service restart",
+    "Phone/Edge refresh was used for the current f837 audible result",
+    "No physical scanner/navigation refresh claim for this new route yet"
+  ],
+  "source_sha256": {
+    "gui/receiver/protocol.mjs": "c2cf089eb39bc221534277500dff1be573fddc60b16ba79f0af8fbe3c936049a",
+    "gui/server/browser.mjs": "67ab08fd96e918e79b9482ca6220e7d6d93560b9fe765fdfdff9615fb4ae34c4",
+    "gui/server/browser-qr.test.mjs": "fadc49b68678cc01a39dcffd437ee846ff17977af9400cb37b3e0230ba0f7931",
+    "gui/server/browser.test.mjs": "1c090582e2491c716f2e9519d8286ce58e84b35794f1b690e8a5ff227e4276a4",
+    "gui/server/service.test.mjs": "f4b9497212ab9a562151f7eb78ececf942ed964ac03ea3cb9fdcca5436885648"
+  }
+}
