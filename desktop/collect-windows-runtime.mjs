@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { readWindowsPeImports } from '../gui/server/windows-runtime.mjs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { readdir, lstat, readFile, mkdir, cp, writeFile } from 'node:fs/promises';
@@ -6,19 +7,15 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 const execute = promisify(execFile);
 const validDll = name => /^[a-z0-9_.+-]+\.dll$/i.test(name);
-const systemNames = new Set(('advapi32 authz avrt bcrypt cfgmgr32 comctl32 comdlg32 crypt32 cryptbase d3d11 dcomp dhcpcsvc dinput8 dnsapi dwmapi dxgi gdi32 imm32 iphlpapi kernel32 kernelbase mf mfplat mfreadwrite mfuuid mpr msacm32 msimg32 msvcrt msvcp_win normaliz ntdll ole32 oleaut32 opengl32 powrprof propsys psapi rpcrt4 secur32 setupapi shell32 shlwapi user32 ucrtbase version winhttp wininet winmm winspool wintrust windows.storage ws2_32 wtsapi32').split(' ').map(name => name + '.dll'));
+const systemNames = new Set(('advapi32 authz avrt bcrypt bcryptprimitives cfgmgr32 comctl32 comdlg32 crypt32 cryptbase d3d11 dcomp dhcpcsvc dinput8 dnsapi dwmapi dxgi gdi32 imm32 iphlpapi kernel32 kernelbase mf mfplat mfreadwrite mfuuid mpr msacm32 msimg32 msvcrt msvcp_win normaliz ntdll ole32 oleaut32 opengl32 powrprof propsys psapi rpcrt4 secur32 setupapi shell32 shlwapi user32 userenv ucrtbase version winhttp wininet winmm winspool wintrust windows.storage ws2_32 wtsapi32').split(' ').map(name => name + '.dll'));
 
-// GNU objdump comes from the build toolchain only. The installed host never
-// needs objdump, MSYS or a compiler. Reject foreign images and unsafe names.
-export function parseWindowsDependencies(output) {
-  if (!/\bfile format pei-x86-64\b/.test(output)) throw Error('Expected an x64 PE executable or DLL');
-  const names = [];
-  for (const line of output.split(/\r?\n/)) {
-    if (!line.includes('DLL Name:')) continue;
-    const match = /^\s*DLL Name:\s+(\S+)\s*$/.exec(line);
-    if (!match || !validDll(match[1])) throw Error('Invalid DLL import name');
-    names.push(match[1].toLowerCase());
-  }
+// Inspect only bounded PE import tables. Do not execute images or produce huge
+// diagnostic dumps of unrelated export/unwind tables during dependency discovery.
+export function parseWindowsDependencies(bytes) {
+  const image = readWindowsPeImports(bytes);
+  if (!image || image.machine !== 0x8664 || image.kind !== 'pe32+') throw Error('Expected a valid x64 PE image and import tables');
+  const names = [...image.imports, ...image.delayImports];
+  if (names.some(name => !validDll(name))) throw Error('Invalid DLL import name');
   return [...new Set(names)].sort();
 }
 
@@ -49,7 +46,7 @@ export async function planRuntimeClosure({ entry, inspect, resolve, system, limi
   return { files: [...files.values()].sort((a, b) => a.name.localeCompare(b.name)), systemImports: [...systemImports].sort() };
 }
 
-export async function collectWindowsRuntime(native, runtimeDirectory, output, { objdump = path.join(runtimeDirectory, 'objdump.exe') } = {}) {
+export async function collectWindowsRuntime(native, runtimeDirectory, output) {
   if (process.platform !== 'win32') throw Error('Collect the runtime on Windows');
   if (path.basename(native).toLowerCase() !== 'scrcpy.exe') throw Error('Choose scrcpy.exe');
   const roots = [...new Set([path.dirname(path.resolve(native)), path.resolve(runtimeDirectory)])], index = new Map();
@@ -62,11 +59,10 @@ export async function collectWindowsRuntime(native, runtimeDirectory, output, { 
   const deadline = Date.now() + 180000;
   const plan = await planRuntimeClosure({ entry: { name: 'scrcpy.exe', file: path.resolve(native) },
     inspect: async file => {
-      if (Date.now() > deadline || !(await lstat(file)).isFile()) throw Error('Runtime inspection did not finish');
-      try {
-        const { stdout } = await execute(objdump, ['-f', '-p', file], { timeout: 10000, killSignal: 'SIGKILL', maxBuffer: 8 * 1024 * 1024, env: { ...process.env, LC_ALL: 'C', LANG: 'C' } });
-        return parseWindowsDependencies(stdout);
-      } catch { throw Error('Cannot inspect x64 runtime file: ' + path.basename(file)); }
+      const info = await lstat(file);
+      if (Date.now() > deadline || !info.isFile() || info.size > 256 * 1024 * 1024) throw Error('Runtime inspection did not finish');
+      try { return parseWindowsDependencies(await readFile(file)); }
+      catch { throw Error('Cannot inspect x64 runtime file: ' + path.basename(file)); }
     },
     resolve: async name => {
       const candidates = index.get(name) || [];

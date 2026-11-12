@@ -2,13 +2,28 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseWindowsDependencies, isolatedWindowsEnvironment, planRuntimeClosure } from '../collect-windows-runtime.mjs';
 
-test('PE dependency parsing accepts x64 imports only and rejects paths masquerading as DLL names', () => {
-  const header = 'host.exe: file format pei-x86-64\n';
-  assert.deepEqual(parseWindowsDependencies(header + ' DLL Name: SDL3.dll\n DLL Name: KERNEL32.dll\n DLL Name: SDL3.dll\n'), ['kernel32.dll', 'sdl3.dll']);
-  for (const name of ['../evil.dll', 'C:\\evil.dll', 'bad name.dll', 'bad.dll:stream', 'not-a-dll']) {
-    assert.throws(() => parseWindowsDependencies(header + ' DLL Name: ' + name + '\n'));
+function image(names, delayed = []) {
+  const bytes = Buffer.alloc(8192);
+  bytes.writeUInt16LE(0x5a4d); bytes.writeUInt32LE(128, 60);
+  bytes.writeUInt32LE(0x4550, 128); bytes.writeUInt16LE(0x8664, 132); bytes.writeUInt16LE(1, 134);
+  bytes.writeUInt16LE(240, 148); bytes.writeUInt16LE(0x20b, 152); bytes.writeBigUInt64LE(0x140000000n, 176);
+  bytes.writeUInt32LE(16, 260); bytes.writeUInt32LE(0x1000, 272); bytes.writeUInt32LE((names.length + 1) * 20, 276);
+  bytes.writeUInt32LE(0x1000, 404); bytes.writeUInt32LE(7168, 408); bytes.writeUInt32LE(1024, 412);
+  names.forEach((name, i) => { bytes.writeUInt32LE(0x1400 + i * 256, 1024 + i * 20 + 12); bytes.write(name + '\0', 2048 + i * 256, 'ascii'); });
+  if (delayed.length) {
+    bytes.writeUInt32LE(0x1c00, 368); bytes.writeUInt32LE((delayed.length + 1) * 32, 372);
+    delayed.forEach((name, i) => { bytes.writeUInt32LE(1, 4096 + i * 32); bytes.writeUInt32LE(0x2000 + i * 256, 4100 + i * 32); bytes.write(name + '\0', 5120 + i * 256, 'ascii'); });
   }
-  for (const header of ['file format pei-i386', 'file format elf64-x86-64', '']) assert.throws(() => parseWindowsDependencies(header));
+  return bytes;
+}
+test('bounded PE imports include delay-loaded libraries and reject unsafe paths or foreign architectures', () => {
+  assert.deepEqual(parseWindowsDependencies(image(['SDL3.dll', 'KERNEL32.dll', 'SDL3.dll'], ['codec.dll'])), ['codec.dll', 'kernel32.dll', 'sdl3.dll']);
+  for (const name of ['../evil.dll', 'C:\\evil.dll', 'bad name.dll', 'bad.dll:stream', 'not-a-dll']) assert.throws(() => parseWindowsDependencies(image([name])));
+  const foreign = image([]); foreign.writeUInt16LE(0xaa64, 132); assert.throws(() => parseWindowsDependencies(foreign));
+  const invalid = image(['x.dll'], ['y.dll']); invalid.writeUInt32LE(0xffffffff, 4100); assert.throws(() => parseWindowsDependencies(invalid));
+  const legacy = image([], ['legacy.dll']); legacy.writeBigUInt64LE(0x10000000n, 176); legacy.writeUInt32LE(0, 4096); legacy.writeUInt32LE(0x10002000, 4100); assert.deepEqual(parseWindowsDependencies(legacy), ['legacy.dll']);
+  const flags = image([], ['flags.dll']); flags.writeUInt32LE(2, 4096); assert.throws(() => parseWindowsDependencies(flags));
+  for (let n = 0; n < 8192; n += 29) { try { parseWindowsDependencies(image(['a.dll']).subarray(0, n)); } catch (error) { assert.match(error.message, /PE|import/); } }
 });
 test('the runtime closure includes transitive libraries exactly once and terminates cycles', async () => {
   const graph = { host: ['a.dll', 'kernel32.dll'], a: ['b.dll', 'c.dll'], b: ['a.dll'], c: [] };

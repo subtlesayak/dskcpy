@@ -6,13 +6,14 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 const execute = promisify(execFile), require = createRequire(import.meta.url);
-if (process.platform === 'win32') throw Error('The fake native shell fixture is POSIX only; Windows runtime qualification remains separate.');
-const resources = path.resolve(process.argv[2] || 'desktop/out/mac-arm64/dskcpy Host.app/Contents/Resources');
+if (process.platform === 'win32' && !process.argv[3]) throw Error('Supply the compiled desktop/test/fake-host.c fixture on Windows.');
+const resources = path.resolve(process.argv[2] || (process.platform === 'win32' ? 'desktop/out/win-unpacked/resources' : 'desktop/out/mac-arm64/dskcpy Host.app/Contents/Resources'));
 const application = path.join(resources, 'app');
 await readFile(path.join(application, 'desktop/preload.cjs')); // Fail before launching if the assembled bundle is absent.
 const ownedDirectory = await mkdtemp(path.join(os.tmpdir(), 'dskcpy-electron-check-'));
-const result = path.join(ownedDirectory, 'result.json'), fakeNative = path.join(ownedDirectory, 'fake-host');
-await writeFile(fakeNative, '#!/bin/sh\nif [ "$#" -ne 1 ] || [ "$1" != "--help" ]; then exit 64; fi\nprintf "%s\\n" "--reverse-display --reverse-socket --reverse-keyboard ScreenCaptureKit/VideoToolbox"\n', { mode: 0o755 });
+const result = path.join(ownedDirectory, 'result.json'), fakeNative = path.join(ownedDirectory, process.platform === 'win32' ? 'fake-host.exe' : 'fake-host');
+if (process.platform === 'win32') await writeFile(fakeNative, await readFile(path.resolve(process.argv[3])));
+else await writeFile(fakeNative, '#!/bin/sh\nif [ "$#" -ne 1 ] || [ "$1" != "--help" ]; then exit 64; fi\nprintf "%s\\n" "--reverse-display --reverse-socket --reverse-keyboard ScreenCaptureKit/VideoToolbox"\n', { mode: 0o755 });
 await writeFile(path.join(ownedDirectory, 'config.json'), JSON.stringify({ application, fakeNative, ownedDirectory, result }));
 try {
   await execute(require('electron'), [fileURLToPath(new URL('./electron-smoke.cjs', import.meta.url)),

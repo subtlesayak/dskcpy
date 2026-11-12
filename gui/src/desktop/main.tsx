@@ -30,7 +30,8 @@ function App() {
   const api = window.dskcpyHost;
   const [state, setState] = useState<Snapshot | null>(null);
   const [notice, setNotice] = useState(''); const [qr, setQr] = useState('');
-  const [pending, setPending] = useState(false); const heading = useRef<HTMLHeadingElement>(null);
+  const [pending, setPending] = useState(false); const [stopping, setStopping] = useState(false);
+  const operation = useRef(0); const heading = useRef<HTMLHeadingElement>(null);
   const phase = state?.phase || 'checking';
   useEffect(() => { heading.current?.focus(); }, [phase]);
   useEffect(() => {
@@ -46,10 +47,15 @@ function App() {
       .then(value => { if (live) setQr(value); }).catch(() => { if (live) setNotice('Use Copy private link to connect.'); });
     return () => { live = false; };
   }, [state?.invitation?.joinUrl]);
-  async function run(action: (() => Promise<unknown>) | undefined) {
-    if (!action || pending) return; setPending(true); setNotice('');
-    try { await action(); } catch { setNotice('That step could not finish. Check your setup and try again.'); }
-    finally { setPending(false); }
+  async function run(action: ((generation: number) => Promise<unknown>) | undefined) {
+    if (!action || pending || stopping) return; const generation = ++operation.current; setPending(true); setNotice('');
+    try { await action(generation); } catch { if (generation === operation.current) setNotice('That step could not finish. Check your setup and try again.'); }
+    finally { if (generation === operation.current) setPending(false); }
+  }
+  async function stopSharing() {
+    if (!api || stopping) return; ++operation.current; setPending(false); setStopping(true); setNotice('');
+    try { await api.stop(); } catch { setNotice('Sharing could not be stopped. Try Stop sharing again.'); }
+    finally { setStopping(false); }
   }
   async function primary() {
     if (!api) return;
@@ -63,7 +69,7 @@ function App() {
   return <div className="host-app">
     <header><span className="brand"><Monitor aria-hidden="true" size={22} /> dskcpy</span>
       {(phase === 'inviting' || phase === 'preparing') && state?.canStop
-        ? <button className="secondary" disabled={pending} onClick={() => run(api?.stop)}>Cancel invitation</button>
+        ? <button className="secondary" disabled={stopping} onClick={stopSharing}>Cancel invitation</button>
         : <span className="private-badge"><ShieldCheck aria-hidden="true" size={16} /> Private sharing</span>}</header>
     <main>
       {phase !== 'inviting' && <div className={`hero-icon ${phase === 'sharing' ? 'is-sharing' : ''}`}><Monitor aria-hidden="true" size={34} /></div>}
@@ -77,22 +83,22 @@ function App() {
       </ol>}
       {phase === 'inviting' && <section className="invitation" aria-label="Connection invitation">
         {qr ? <img className="qr" src={qr} width="256" height="256" alt="Scan with your other device’s camera to connect. You can also copy the private link below." /> : <p>Preparing QR…</p>}
-        <button className="primary" disabled={pending} onClick={() => run(async () => {
-          const copied = await api?.copyInvitation(); setNotice(copied ? 'Private link copied. Send it only to the person you want to connect.' : 'This invitation expired. Stop and start sharing for a new link.');
+        <button className="primary" disabled={pending || stopping} onClick={() => run(async generation => {
+          const copied = await api?.copyInvitation(); if (generation !== operation.current) return; setNotice(copied ? 'Private link copied. Send it only to the person you want to connect.' : 'This invitation expired. Stop and start sharing for a new link.');
         })}><Copy size={18} aria-hidden="true" />Copy private link</button>
         <p className="hint">One use. Expires after five minutes. Anyone using this invitation can view and control this computer.</p>
         {!state?.features.keyboard && <p className="hint">Keyboard entry is not available on this host yet.</p>}
       </section>}
       {phase === 'sharing' && <div className="sharing-card"><Check size={22} aria-hidden="true" /><span>Sharing stays on when you close this window. Use dskcpy in the menu bar or system tray to stop.</span></div>}
       <div className="actions">
-        {content.action && <button className="primary" disabled={!api || pending} onClick={primary}>{content.action}<ArrowRight aria-hidden="true" size={19} /></button>}
-        {state?.canStop && !['inviting', 'preparing'].includes(phase) && <button className="stop" disabled={pending} onClick={() => run(api?.stop)}><Square size={16} aria-hidden="true" />Stop sharing</button>}
-        {setup && <button className="secondary" disabled={!api || pending} onClick={() => run(api?.refresh)}>Check again</button>}
+        {content.action && <button className="primary" disabled={!api || pending || stopping} onClick={primary}>{content.action}<ArrowRight aria-hidden="true" size={19} /></button>}
+        {state?.canStop && !['inviting', 'preparing'].includes(phase) && <button className="stop" disabled={stopping} onClick={stopSharing}><Square size={16} aria-hidden="true" />Stop sharing</button>}
+        {setup && <button className="secondary" disabled={!api || pending || stopping} onClick={() => run(api?.refresh)}>Check again</button>}
       </div>
       <p className="notice" role="status">{notice}</p>
       {['ready', 'sharing'].includes(phase) && state?.startup && <details className="startup-settings">
         <summary>Startup</summary>
-        <label><input type="checkbox" checked={state.startup.requested} disabled={!api || pending || !state.startup.available}
+        <label><input type="checkbox" checked={state.startup.requested} disabled={!api || pending || stopping || !state.startup.available}
           aria-describedby="startup-note" onChange={event => {
             const enabled = event.currentTarget.checked;
             void run(async () => { await api?.setOpenAtLogin(enabled); });

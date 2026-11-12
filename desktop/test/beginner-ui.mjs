@@ -68,6 +68,23 @@ try {
       await page.close();
     }
   }
+  const cancelPage = await browser.newPage({ viewport: { width: 620, height: 740 } });
+  await cancelPage.addInitScript(() => {
+    let state = { phase: 'ready', features: { keyboard: true }, permissions: { screen: true, control: true }, route: { connected: true, ready: true }, invitation: null, error: null, canStop: false };
+    let change = () => {}, release;
+    window.dskcpyHost = { snapshot: async () => state, onChange: callback => { change = callback; return () => {}; },
+      start: () => { state = { ...state, phase: 'preparing', canStop: true }; change(state); return new Promise(resolve => { release = resolve; }); },
+      stop: async () => { state = { ...state, phase: 'ready', canStop: false }; change(state); release?.(state); return state; } };
+  });
+  await cancelPage.goto(origin + '/desktop/index.html');
+  await cancelPage.getByRole('button', { name: 'Start sharing', exact: true }).click();
+  const cancel = cancelPage.getByRole('button', { name: 'Cancel invitation', exact: true });
+  assert.equal(await cancel.isEnabled(), true, 'Cancel must remain available while Start sharing is pending');
+  await cancelPage.screenshot({ path: path.join(output, 'pending-start-cancel.png'), fullPage: true });
+  await cancel.click();
+  await cancelPage.getByRole('button', { name: 'Start sharing', exact: true }).waitFor();
+  assert.equal(await cancelPage.getByRole('button', { name: 'Start sharing', exact: true }).isEnabled(), true);
+  results.push({ deferredStartCancellation: true, returnedToReady: true, realService: false }); await cancelPage.close();
   await writeFile(path.join(output, 'results.json'), JSON.stringify({ synthetic: true, realPermissions: false, realMedia: false, results }, null, 2));
-  console.log(`${results.length} headless beginner-flow viewport/direction cases pass.`);
+  console.log(`${results.length} headless beginner-flow scenarios pass, including deferred-start cancellation.`);
 } finally { await browser.close(); await new Promise(resolve => server.close(resolve)); }

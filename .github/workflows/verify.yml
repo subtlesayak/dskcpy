@@ -100,6 +100,8 @@ jobs:
           node desktop/stage.mjs .tmp/ci-desktop-runtime/scrcpy.exe
           npm run package:windows --prefix desktop
           node desktop/verify-bundle.mjs desktop/out/win-unpacked/resources
+          gcc -O2 desktop/test/fake-host.c -o .tmp/desktop-smoke-fixture.exe
+          node desktop/test/run-electron-smoke.mjs desktop/out/win-unpacked/resources .tmp/desktop-smoke-fixture.exe
 
   native-macos:
     runs-on: macos-15

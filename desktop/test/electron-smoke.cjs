@@ -27,7 +27,7 @@ app.whenReady().then(async () => {
       DSKCPY_VIEWER_TLS_CERT: '', DSKCPY_VIEWER_TLS_KEY: '' } });
   await backend.ensure({});
   const readiness = await backend.readiness();
-  assert.equal(readiness.ready, process.platform === 'darwin');
+  assert.equal(readiness.ready, ['darwin', 'win32'].includes(process.platform));
   assert.deepEqual(await backend.status(), { running: false, browser: { waiting: false, connected: false } });
   let state = { phase: 'ready', features: { keyboard: true }, permissions: { screen: true, control: true },
     route: { connected: true, ready: true, conflict: false }, startup: { available: true, requested: false, enabled: false, requiresApproval: false, error: null }, error: null, invitation: null, canStop: false };

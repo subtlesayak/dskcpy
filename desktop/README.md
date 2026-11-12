@@ -67,7 +67,8 @@ The optional native-license input is for development staging; a missing input
 is recorded as incomplete. Public distribution remains blocked on a reviewed
 complete notice/source-offer set. Electron and npm notices must also ship.
 
-Windows CI collects the transitive x64 DLL closure using build-time objdump,
+Windows CI collects the transitive x64 DLL closure with the existing bounded PE
+parser, including delay imports,
 rejects missing/conflicting libraries, and probes the copied executable with
 no external MSYS directory in PATH. Native Windows CI assembles/verifies the
 development app without launching capture or uploading an installer.
@@ -121,3 +122,20 @@ from desktop media/TCC qualification. Screenshots are test fixtures, not hardwar
 Initial package targets are Apple-silicon macOS and Windows x64. Intel Mac,
 Windows ARM, Linux hosting and Safari/iOS receiving are separate qualification
 gates. Do not label this prototype universal or beginner-release-ready.
+
+## Current remote recovery and power limits
+
+The existing receiver can resume the same browser session after a brief drop or
+background period, within about two minutes, while the host remains running.
+Keep Tailscale connected, reopen the same receiver tab and let it retry; refresh
+once if needed. Disconnect explicitly ends that session. An expired session or
+restarted host needs a new one-use invitation from the Mac; an old QR is not a
+remembered-device credential.
+
+Shutdown/restart ends the stream. The existing Terminal host has no verified
+reboot recovery. The prototype’s optional login setting opens the tray after
+user login and leaves sharing stopped; it does not unlock the Mac, keep a
+user-session VPN alive before login, or authorize a permanent receiver. Do not
+promise phone-only recovery across cold boot. Qualify signed app startup,
+private-route availability, explicit remembered-device authentication and owner
+revocation/pause behavior before calling unattended reconnection complete.
