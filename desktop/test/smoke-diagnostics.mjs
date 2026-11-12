@@ -8,3 +8,10 @@ export function smokeFailure(record, error, phase = 'electron-process') {
     signal: ['SIGTERM', 'SIGKILL', 'SIGABRT', 'SIGSEGV'].includes(error?.signal) ? error.signal : null,
     actualHostShellLaunched: false, screenCapture: false, permissionApis: false };
 }
+
+
+// Electron's Windows entry point tests whether this variable exists, even when
+// empty. GUI smoke children must delete every casing, rather than set it to ''.
+export function electronUiEnvironment(input) {
+  return Object.fromEntries(Object.entries(input).filter(([name]) => name.toUpperCase() !== 'ELECTRON_RUN_AS_NODE'));
+}

@@ -5,7 +5,7 @@ import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { smokeFailure } from './smoke-diagnostics.mjs';
+import { smokeFailure, electronUiEnvironment } from './smoke-diagnostics.mjs';
 import { isolatedWindowsEnvironment } from '../collect-windows-runtime.mjs';
 const execute = promisify(execFile), require = createRequire(import.meta.url);
 if (process.platform === 'win32' && !process.argv[3]) throw Error('Supply the compiled desktop/test/fake-host.c fixture on Windows.');
@@ -26,7 +26,7 @@ try {
   await execute(require('electron'), [fileURLToPath(new URL('./electron-smoke.cjs', import.meta.url)),
     `--smoke-config=${path.join(ownedDirectory, 'config.json')}`], {
     cwd: ownedDirectory, timeout: 45000, killSignal: 'SIGKILL', maxBuffer: 1024 * 1024,
-    env: { ...process.env, ELECTRON_RUN_AS_NODE: '' },
+    env: electronUiEnvironment(process.env),
   });
   const receipt = JSON.parse(await readFile(result, 'utf8'));
   if (!receipt.utilityProcessIpc || !receipt.bridgeLoaded || !receipt.hiddenWindow) throw Error('Runtime check incomplete');
