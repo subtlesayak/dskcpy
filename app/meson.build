@@ -31,6 +31,7 @@ src = [
     'src/receiver.c',
     'src/recorder.c',
     'src/reverse_display.c',
+    'src/reverse_touch.c',
     'src/reverse_audio.c',
     'src/reverse_audio_encoder.c',
     'src/reverse_macos_helpers.c',
@@ -265,6 +266,7 @@ if get_option('buildtype') == 'debug'
         ['test_timeout', ['tests/test_timeout.c', 'src/util/timeout.c']],
         ['test_timeout_thread', ['tests/test_timeout_thread.c', 'src/util/timeout.c', 'src/util/thread.c', 'src/util/tick.c']],
         ['test_reverse_audio_encoder', ['tests/test_reverse_audio_encoder.c', 'src/reverse_audio_encoder.c']],
+        ['test_reverse_touch', ['tests/test_reverse_touch.c', 'src/reverse_touch.c']],
         ['test_reverse_watchdog', ['tests/test_reverse_watchdog.c']],
         ['test_reverse_macos_helpers', ['tests/test_reverse_macos_helpers.c', 'src/reverse_macos_helpers.c']],
         ['test_adb_parser', [

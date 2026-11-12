@@ -2,6 +2,18 @@
 
 On Windows, `--reverse-display` streams a physical Windows monitor to the
 Android device and sends touch events on the Android surface back to Windows.
+
+Windows native touch sends periodic updates during a held gesture. Brief
+injection timing collisions retry the same frame a bounded number of times.
+If a touch frame still fails, the host cancels that gesture: lift all fingers
+and touch again to start a fresh native multitouch gesture. It does not replay
+held fingers as new presses. Unfinished cleanup blocks a new gesture until the
+old contacts can be released. A host without native touch injection uses the
+existing primary-finger mouse fallback.
+
+The recovery state machine has automated fault-injection regressions; these
+do not establish physical Windows game compatibility. See the
+[Windows touch test procedure](testing/windows-touch.md) for hardware checks.
 The video path uses Desktop Duplication, a low-latency H.264 encoder, the
 existing scrcpy ADB tunnel, and Android `MediaCodec` output directly to a
 surface.
