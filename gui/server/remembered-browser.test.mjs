@@ -134,3 +134,14 @@ test('revocation during awaited readiness prevents a new ticket and capture', as
   assert.equal((await pending).status, 400);
   assert.equal(f.receiver.status().waiting, false); assert.equal(f.captures(), 1);
 });
+
+
+test('shutdown retires an in-flight trusted preparation without capture or a late ticket', async t => {
+  let release, preparing = false;
+  const f = await fixture(t, { beforeTrusted: async () => { preparing = true; await new Promise(resolve => release = resolve); } });
+  const { ws, cookie } = await enroll(f); ws.close(4000); await until(() => !f.receiver.status().connected);
+  const pending = f.post('trusted/connect', cookie).catch(() => ({ status: 0 })); await until(() => preparing);
+  const shuttingDown = f.receiver.shutdown(); release(); await shuttingDown;
+  assert.notEqual((await pending).status, 201);
+  assert.equal(f.receiver.status().waiting, false); assert.equal(f.captures(), 1);
+});

@@ -37,7 +37,7 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
   tls, rtcBind = '127.0.0.1', onConnect, onChange = () => {}, invitationMs = 300000, authMs = 5000,
   resumeMs = 120000, lifetimeMs = 12 * 60 * 60 * 1000, trustedDevices, onTrustedConnect } = {}) {
   const remoteOrigin = receiverOrigin(origin);
-  let port;
+  let port, closed = false;
   let listening;
   let secureServer;
   let mode = 'local';
@@ -215,7 +215,7 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
   const upgrade = (req, socket, head) => {
     const resume = mayResume(req);
     const mediaMode = req.url === '/stream/webrtc' && mode !== 'usb' ? 'webrtc' : 'webcodecs';
-    if (!['/stream', '/stream/webrtc'].includes(req.url)
+    if (closed || !['/stream', '/stream/webrtc'].includes(req.url)
         || (resume && mediaMode !== session.mediaMode)
         || !allowedHost(req.headers.host) || !allowedOrigin(req.headers.origin)
         || (!resume && (!invitation || session || failures >= 10)) || sockets.size >= 4) {
@@ -263,6 +263,7 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
   server.on('upgrade', upgrade);
 
   async function ensureListening(connection) {
+    if (closed) throw new Error('The host has closed.');
     if (!['local', 'usb', 'wifi', 'ip', 'internet'].includes(connection)) throw new Error('Choose a browser connection method.');
     if (!['local', 'usb'].includes(connection) && !remoteOrigin) {
       throw new Error('Configure a trusted HTTPS receiver address before using Wi-Fi, IP or Internet. USB and local tests work without certificates.');
@@ -306,6 +307,7 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
     return { key: invitation.toString('base64url'), ...status() };
   }
   async function shutdown() {
+    if (closed) return; closed = true; accessGeneration++;
     cancel();
     await pendingCleanup;
     wss.close();
