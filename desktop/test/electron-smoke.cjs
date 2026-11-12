@@ -39,9 +39,9 @@ app.whenReady().then(async () => {
   window.webContents.session.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
   const errors = []; window.webContents.on('preload-error', () => errors.push('preload failure'));
   function handle(name, callback) {
-    ipcMain.handle(`host:${name}`, event => {
+    ipcMain.handle(`host:${name}`, (event, ...args) => {
       assert.equal(event.sender, window.webContents); assert.equal(event.senderFrame, window.webContents.mainFrame);
-      assert.equal(event.senderFrame.url, page); return callback();
+      assert.equal(event.senderFrame.url, page); return callback(...args);
     });
   }
   handle('snapshot', () => state);

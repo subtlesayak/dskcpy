@@ -25,4 +25,7 @@ try {
   await mkdir('desktop/out/runtime-verification', { recursive: true });
   await writeFile('desktop/out/runtime-verification/electron-smoke.json', JSON.stringify(receipt, null, 2) + '\n');
   console.log(JSON.stringify(receipt));
+} catch {
+  console.error('Hidden Electron runtime check failed; inspect the owned fixture and app bundle. No capture or OS startup action was requested.');
+  process.exitCode = 1;
 } finally { await rm(ownedDirectory, { recursive: true, force: true }); }
