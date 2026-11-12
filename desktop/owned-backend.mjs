@@ -33,7 +33,12 @@ export class OwnedBackend {
         }
         if (this.child === child) { this.child = null; this.configuration = null; if (!this.retiring.has(child)) this.onExit(); }
       });
-      await this.request('ready');
+      try { await this.request('ready'); }
+      catch (error) {
+        this.retiring.add(child);
+        if (this.child === child) { this.child = null; this.configuration = null; }
+        child.kill(); throw error;
+      }
     })().finally(() => { this.opening = null; });
     return this.opening;
   }
@@ -44,7 +49,8 @@ export class OwnedBackend {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => { this.pending.delete(id); reject(new Error('The sharing service took too long.')); }, 20000);
       this.pending.set(id, { resolve, reject, timer, child });
-      child.postMessage({ id, action });
+      try { child.postMessage({ id, action }); }
+      catch (error) { clearTimeout(timer); this.pending.delete(id); reject(error); }
     });
   }
   status() { return this.request('status'); }

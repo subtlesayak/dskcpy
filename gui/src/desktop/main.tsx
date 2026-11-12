@@ -31,6 +31,7 @@ function App() {
   const [notice, setNotice] = useState(''); const [qr, setQr] = useState('');
   const [pending, setPending] = useState(false); const heading = useRef<HTMLHeadingElement>(null);
   const phase = state?.phase || 'checking';
+  useEffect(() => { heading.current?.focus(); }, [phase]);
   useEffect(() => {
     if (!api) { setNotice('Open the installed dskcpy Host app to share this computer.'); return; }
     let live = true;
@@ -66,7 +67,7 @@ function App() {
     <main>
       {phase !== 'inviting' && <div className={`hero-icon ${phase === 'sharing' ? 'is-sharing' : ''}`}><Monitor aria-hidden="true" size={34} /></div>}
       <p className="eyebrow">{setup ? 'SET UP YOUR COMPUTER' : phase === 'sharing' ? 'CONNECTED' : 'BROWSER RECEIVER · NO APP NEEDED'}</p>
-      <h1 ref={heading}>{content.title}</h1>
+      <h1 ref={heading} tabIndex={-1}>{content.title}</h1>
       <p className="description">{state?.error || (phase === 'sharing' && !state?.features.keyboard
         ? 'The connected device can see your whole screen, hear desktop audio and use the mouse. Stop sharing to end its access.' : content.description)}</p>
       {setup && state && <ol className="setup-list" aria-label="Setup progress">

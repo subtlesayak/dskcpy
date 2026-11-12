@@ -3,13 +3,14 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { OwnedBackend } from '../owned-backend.mjs';
 
-function fixture() {
+function fixture({ failFirstReady = false } = {}) {
   const children = []; let exits = 0;
   const backend = new OwnedBackend({ modulePath: 'owned-entry.cjs', environment: {}, onExit: () => exits++,
     fork(module, args, options) {
       const child = new EventEmitter(); child.calls = []; child.killed = false; child.status = { running: false, browser: {} };
-      child.postMessage = message => { child.calls.push(message.action); queueMicrotask(() => child.emit('message', {
-        id: message.id, ok: true, value: message.action === 'status' ? child.status : true })); };
+      child.postMessage = message => { child.calls.push(message.action);
+        const ok = !(failFirstReady && children[0]?.child === child && message.action === 'ready');
+        queueMicrotask(() => child.emit('message', { id: message.id, ok, value: message.action === 'status' ? child.status : true })); };
       child.kill = () => { child.killed = true; child.emit('exit', 0); };
       children.push({ child, module, args, options }); return child;
     } });
@@ -32,4 +33,10 @@ test('an idle reconfiguration retires exactly the previous owned handle', async 
   const f = fixture(); await f.backend.ensure(route); await f.backend.ensure({ ...route, bind: '100.64.0.2' });
   assert.equal(f.children.length, 2); assert.equal(f.children[0].child.killed, true);
   assert.equal(f.children[1].child.killed, false); assert.equal(f.exits(), 0); await f.backend.shutdown();
+});
+test('failed startup retires its child and a retry can create a fresh service', async () => {
+  const f = fixture({ failFirstReady: true }); await assert.rejects(f.backend.ensure(route));
+  assert.equal(f.children[0].child.killed, true); assert.equal(f.exits(), 0);
+  await f.backend.ensure(route); assert.equal(f.children.length, 2);
+  assert.equal(f.children[1].child.killed, false); await f.backend.shutdown();
 });
