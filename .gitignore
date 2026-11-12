@@ -11,6 +11,12 @@ local.properties
 /.tmp/
 /gui/dist/
 /gui/node_modules/
+/gui/node_modules
+/gui/dist-desktop/
+/desktop/node_modules/
+/desktop/stage/
+/desktop/out/
+/desktop/.browsers/
 
 # Local planning, design references, credentials and companion build copies.
 /.planning/

@@ -28,6 +28,25 @@ jobs:
       - run: npm ci --prefix gui
       - run: npm test --prefix gui
       - run: npm run build --prefix gui
+      - name: Check isolated beginner desktop app source
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+        run: |
+          npm ci --prefix desktop --ignore-scripts
+          node --test --test-timeout=15000 desktop/test/*.test.mjs
+          node --check desktop/main.cjs
+          node --check desktop/preload.cjs
+          node --check desktop/service-entry.cjs
+      - name: Build the beginner desktop view
+        working-directory: gui
+        run: node node_modules/vite/bin/vite.js build --config vite.desktop.config.ts
+      - name: Check synthetic beginner flow and narrow layouts
+        if: runner.os == 'Linux'
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: desktop/.browsers
+        run: |
+          node desktop/node_modules/playwright/cli.js install --with-deps chromium
+          node desktop/test/beginner-ui.mjs
       - name: Artifact identity and upgrade preflight regressions
         run: node --test tools/*.test.mjs
 

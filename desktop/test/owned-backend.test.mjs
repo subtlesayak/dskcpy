@@ -1,0 +1,35 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
+import { OwnedBackend } from '../owned-backend.mjs';
+
+function fixture() {
+  const children = []; let exits = 0;
+  const backend = new OwnedBackend({ modulePath: 'owned-entry.cjs', environment: {}, onExit: () => exits++,
+    fork(module, args, options) {
+      const child = new EventEmitter(); child.calls = []; child.killed = false; child.status = { running: false, browser: {} };
+      child.postMessage = message => { child.calls.push(message.action); queueMicrotask(() => child.emit('message', {
+        id: message.id, ok: true, value: message.action === 'status' ? child.status : true })); };
+      child.kill = () => { child.killed = true; child.emit('exit', 0); };
+      children.push({ child, module, args, options }); return child;
+    } });
+  return { backend, children, exits: () => exits };
+}
+const route = { origin: 'https://host.test.ts.net:8443', bind: '100.64.0.1' };
+test('desktop service is a created child, never an existing controller discovered by port', async () => {
+  const f = fixture(); await f.backend.ensure(route); await f.backend.ensure(route);
+  assert.equal(f.children.length, 1); assert.deepEqual(f.children[0].child.calls, ['ready']);
+  assert.equal(f.children[0].options.env.DSKCPY_VIEWER_ORIGIN, route.origin);
+  await f.backend.shutdown(); assert.equal(f.children[0].child.killed, true); assert.equal(f.exits(), 0);
+});
+test('a connection change refuses to retire an owned active stream', async () => {
+  const f = fixture(); await f.backend.ensure(route); f.children[0].child.status.running = true;
+  await assert.rejects(f.backend.ensure({ ...route, bind: '100.64.0.2' }), /Stop this app/);
+  assert.equal(f.children.length, 1); assert.equal(f.children[0].child.killed, false);
+  await f.backend.shutdown();
+});
+test('an idle reconfiguration retires exactly the previous owned handle', async () => {
+  const f = fixture(); await f.backend.ensure(route); await f.backend.ensure({ ...route, bind: '100.64.0.2' });
+  assert.equal(f.children.length, 2); assert.equal(f.children[0].child.killed, true);
+  assert.equal(f.children[1].child.killed, false); assert.equal(f.exits(), 0); await f.backend.shutdown();
+});
