@@ -6,7 +6,7 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 const execute = promisify(execFile);
 const validDll = name => /^[a-z0-9_.+-]+\.dll$/i.test(name);
-const systemNames = new Set(('advapi32 authz avrt bcrypt cfgmgr32 comctl32 comdlg32 crypt32 cryptbase d3d11 dcomp dhcpcsvc dinput8 dnsapi dwmapi dxgi gdi32 imm32 iphlpapi kernel32 kernelbase mf mfplat mfreadwrite mfuuid mpr msacm32 msvcrt msvcp_win normaliz ntdll ole32 oleaut32 opengl32 powrprof propsys psapi rpcrt4 secur32 setupapi shell32 shlwapi user32 ucrtbase version winhttp wininet winmm winspool wintrust windows.storage ws2_32 wtsapi32').split(' ').map(name => name + '.dll'));
+const systemNames = new Set(('advapi32 authz avrt bcrypt cfgmgr32 comctl32 comdlg32 crypt32 cryptbase d3d11 dcomp dhcpcsvc dinput8 dnsapi dwmapi dxgi gdi32 imm32 iphlpapi kernel32 kernelbase mf mfplat mfreadwrite mfuuid mpr msacm32 msimg32 msvcrt msvcp_win normaliz ntdll ole32 oleaut32 opengl32 powrprof propsys psapi rpcrt4 secur32 setupapi shell32 shlwapi user32 ucrtbase version winhttp wininet winmm winspool wintrust windows.storage ws2_32 wtsapi32').split(' ').map(name => name + '.dll'));
 
 // GNU objdump comes from the build toolchain only. The installed host never
 // needs objdump, MSYS or a compiler. Reject foreign images and unsafe names.
@@ -30,7 +30,7 @@ export function isolatedWindowsEnvironment(input, bin) {
 }
 
 export async function planRuntimeClosure({ entry, inspect, resolve, system, limit = 256 }) {
-  const queue = [entry], files = new Map(), systemImports = new Set();
+  const queue = [entry], files = new Map(), systemImports = new Set(), missing = new Set();
   while (queue.length) {
     const item = queue.shift(), key = item.name.toLowerCase();
     if (files.has(key)) continue;
@@ -41,10 +41,11 @@ export async function planRuntimeClosure({ entry, inspect, resolve, system, limi
       if (!validDll(name)) throw Error('Invalid DLL import name');
       if (await system(name)) { systemImports.add(name); continue; }
       const file = await resolve(name);
-      if (!file) throw Error('Missing runtime dependency: ' + name);
+      if (!file) { missing.add(name); continue; }
       queue.push({ name, file });
     }
   }
+  if (missing.size) throw Error((missing.size === 1 ? 'Missing runtime dependency: ' : 'Missing runtime dependencies: ') + [...missing].sort().join(', '));
   return { files: [...files.values()].sort((a, b) => a.name.localeCompare(b.name)), systemImports: [...systemImports].sort() };
 }
 
@@ -97,6 +98,6 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   if (!native || !runtime || !output) { console.error('Usage: node desktop/collect-windows-runtime.mjs NATIVE RUNTIME_DIRECTORY NEW_OUTPUT'); process.exitCode = 1; }
   else collectWindowsRuntime(path.resolve(native), path.resolve(runtime), path.resolve(output))
     .then(result => console.log('Collected ' + result.files.length + ' x64 runtime files; --help loads without external MSYS PATH.'))
-    .catch(error => { console.error(/^(Missing|Conflicting) runtime dependency: [a-z0-9_.+-]+\.dll$/i.test(error.message)
+    .catch(error => { console.error(/^(?:Missing runtime dependenc(?:y|ies)|Conflicting runtime dependency): [a-z0-9_.+-]+\.dll(?:, [a-z0-9_.+-]+\.dll)*$/i.test(error.message)
       ? error.message : 'Windows runtime collection failed; check the x64 toolchain, dependencies and new output directory.'); process.exitCode = 1; });
 }

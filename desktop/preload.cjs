@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('dskcpyHost', Object.freeze({
   privateSetup: () => ipcRenderer.invoke('host:private-setup'),
   tailscale: () => ipcRenderer.invoke('host:tailscale'),
   copyInvitation: () => ipcRenderer.invoke('host:copy-invitation'),
+  setOpenAtLogin: enabled => ipcRenderer.invoke('host:set-open-at-login', enabled),
   onChange: callback => {
     const listener = (_event, snapshot) => callback(snapshot);
     ipcRenderer.on('host:changed', listener);

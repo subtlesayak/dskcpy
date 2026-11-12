@@ -31,7 +31,7 @@ try {
       page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
       await page.addInitScript(() => {
         let state = { phase: 'ready', features: { keyboard: true }, permissions: { screen: true, control: true },
-          route: { connected: true, ready: true, conflict: false }, error: null, invitation: null, canStop: false };
+          route: { connected: true, ready: true, conflict: false }, startup: { available: true, requested: false, enabled: false, requiresApproval: false, error: null }, error: null, invitation: null, canStop: false };
         let change = () => {};
         window.dskcpyHost = {
           snapshot: async () => state, onChange: callback => { change = callback; return () => {}; },
@@ -39,6 +39,7 @@ try {
             invitation: { joinUrl: 'https://example.invalid/join/synthetic#connect=synthetic-test-only', expiresAt: Date.now() + 300000 } }; change(state); return state; },
           stop: async () => { state = { ...state, phase: 'ready', canStop: false, invitation: null }; change(state); return state; },
           copyInvitation: async () => true, refresh: async () => state,
+          setOpenAtLogin: async enabled => { state = { ...state, startup: { ...state.startup, requested: enabled, enabled } }; change(state); return state.startup; },
         };
       });
       await page.goto(origin + '/desktop/index.html');
@@ -57,7 +58,13 @@ try {
       await page.screenshot({ path: path.join(output, `invitation-${viewport.width}-${direction}.png`), fullPage: true });
       await page.getByRole('button', { name: 'Cancel invitation', exact: true }).click();
       await page.getByRole('button', { name: 'Start sharing', exact: true }).waitFor();
-      results.push({ viewport, direction, keyboardStart: true, copy: true, cancel: true, horizontalOverflow: false, pageErrors: 0 });
+      await page.getByText('Startup', { exact: true }).click();
+      const startup = page.getByRole('checkbox', { name: 'Open dskcpy when I sign in', exact: true });
+      await startup.check(); assert.equal(await startup.isChecked(), true);
+      await startup.uncheck(); assert.equal(await startup.isChecked(), false);
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false);
+      await page.screenshot({ path: path.join(output, `startup-${viewport.width}-${direction}.png`), fullPage: true });
+      results.push({ viewport, direction, keyboardStart: true, copy: true, cancel: true, syntheticStartupToggle: true, horizontalOverflow: false, pageErrors: 0 });
       await page.close();
     }
   }

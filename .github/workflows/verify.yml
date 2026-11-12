@@ -140,6 +140,14 @@ jobs:
         run: bash release/build_macos_host.sh release/work/host-arm64
       - name: Check packaged browser/dashboard runtime without starting capture
         run: release/work/host-arm64/Start-dskcpy-host.command --check
+      - name: Build and smoke-test the unsigned Mac desktop shell without capture
+        run: |
+          npm ci --prefix desktop
+          (cd gui && node node_modules/vite/bin/vite.js build --config vite.desktop.config.ts)
+          node desktop/stage.mjs release/work/host-arm64/bin/scrcpy release/work/host-arm64/licenses
+          npm run package:mac --prefix desktop
+          node desktop/verify-bundle.mjs "desktop/out/mac-arm64/dskcpy Host.app/Contents/Resources"
+          node desktop/test/run-electron-smoke.mjs
       - name: Preserve executable permissions in CI artifact
         run: tar -C release/work -czf release/work/host-arm64.tar.gz host-arm64
       - uses: actions/upload-artifact@v7

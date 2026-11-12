@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { isolatedWindowsEnvironment } from './collect-windows-runtime.mjs';
 import { readFile, stat } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
@@ -13,7 +14,7 @@ export async function verifyBundle(resources) {
   const packageJson = JSON.parse(await readFile(path.join(app, 'package.json'), 'utf8'));
   if (packageJson.main !== 'desktop/main.cjs') throw Error('Wrong desktop entry');
   const required = ['desktop/main.cjs', 'desktop/preload.cjs', 'desktop/service-entry.cjs',
-    'desktop/host-controller.mjs', 'desktop/owned-backend.mjs', 'desktop/private-route.mjs',
+    'desktop/host-controller.mjs', 'desktop/owned-backend.mjs', 'desktop/private-route.mjs', 'desktop/startup-preference.mjs',
     'gui/server/service.mjs', 'gui/receiver/receiver.mjs', 'gui/dist-desktop/desktop/index.html', 'gui/dist/index.html'];
   for (const relative of required) {
     const file = path.join(app, relative);
@@ -35,8 +36,7 @@ export async function verifyBundle(resources) {
   const native = path.join(host, 'bin', manifest.platform === 'win32' ? 'scrcpy.exe' : 'scrcpy');
   if (await hashFile(native) !== manifest.nativeSha256) throw Error('Native hash changed');
   const { stdout } = await execute(native, ['--help'], { timeout: 10000, killSignal: 'SIGKILL', maxBuffer: 1024 * 1024,
-    cwd: host, env: { ...process.env, PATH: process.platform === 'win32'
-      ? `${path.join(host, 'bin')};${process.env.SystemRoot}\\System32;${process.env.SystemRoot}` : '/usr/bin:/bin' } });
+    cwd: host, env: process.platform === 'win32' ? isolatedWindowsEnvironment(process.env, path.join(host, 'bin')) : { ...process.env, PATH: '/usr/bin:/bin' } });
   if (!stdout.includes('--reverse-socket')) throw Error('Packaged native cannot load');
   return { requiredSourceFiles: required.length, backendDependenciesBundled: true, backendModuleLoad: true,
     nativeHashMatches: true, nativeHelp: true, desktopLaunched: false, captureStarted: false, hardwareQualified: false };

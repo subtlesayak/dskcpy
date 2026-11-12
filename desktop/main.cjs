@@ -5,7 +5,7 @@ const { pathToFileURL } = require('node:url');
 app.setName('dskcpy Host');
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
-  let window, tray, host, backend, privateRoute, timer, quitting = false, refreshing = false;
+  let window, tray, host, backend, privateRoute, startup, timer, quitting = false, refreshing = false;
   const hostRoot = app.isPackaged ? path.join(process.resourcesPath, 'host') : path.join(__dirname, 'stage/host');
   const page = pathToFileURL(path.join(__dirname, '../gui/dist-desktop/desktop/index.html')).href;
   const importLocal = name => import(pathToFileURL(path.join(__dirname, name)).href);
@@ -21,6 +21,7 @@ else {
     } : { screen: true, control: true };
   }
   function update(snapshot) {
+    snapshot = { ...snapshot, startup: startup?.snapshot() };
     if (window && !window.isDestroyed()) window.webContents.send('host:changed', snapshot);
     if (!tray) return;
     tray.setToolTip(snapshot.phase === 'sharing' ? 'dskcpy — sharing your screen' : 'dskcpy Host');
@@ -34,15 +35,16 @@ else {
   async function refresh(setup = true) {
     if (refreshing || !host) return host?.snapshot();
     refreshing = true;
+    if (setup) startup?.refresh();
     try { return await host.refresh({ setup }); }
     catch { host.error = 'The sharing service is unavailable. Reopen dskcpy to try again.'; host.emit(); return host.snapshot(); }
     finally { refreshing = false; }
   }
   function handle(name, action) {
-    ipcMain.handle(`host:${name}`, async event => {
+    ipcMain.handle(`host:${name}`, async (event, ...args) => {
       if (event.sender !== window?.webContents || event.senderFrame !== window.webContents.mainFrame
           || event.senderFrame.url !== page) throw new Error('Untrusted host action');
-      return action();
+      return action(...args);
     });
   }
   app.on('before-quit', event => {
@@ -56,9 +58,14 @@ else {
     Promise.resolve(host?.close()).catch(() => {}).finally(() => app.quit());
   });
   app.whenReady().then(async () => {
-    const [{ HostController }, { OwnedBackend }, { createPrivateRoute }] = await Promise.all([
-      importLocal('host-controller.mjs'), importLocal('owned-backend.mjs'), importLocal('private-route.mjs'),
+    const [{ HostController }, { OwnedBackend }, { createPrivateRoute }, { StartupPreference }] = await Promise.all([
+      importLocal('host-controller.mjs'), importLocal('owned-backend.mjs'), importLocal('private-route.mjs'), importLocal('startup-preference.mjs'),
     ]);
+    startup = new StartupPreference({ platform: process.platform, executable: app.getPath('exe'),
+      available: app.isPackaged && ['darwin', 'win32'].includes(process.platform) && (process.platform !== 'darwin' || app.isInApplicationsFolder()),
+      read: options => app.getLoginItemSettings(options), write: options => app.setLoginItemSettings(options) });
+    const launchedAtLogin = startup.refresh().wasOpenedAtLogin || process.argv.includes('--background');
+    if (launchedAtLogin) app.dock?.hide();
     privateRoute = createPrivateRoute();
     backend = new OwnedBackend({ fork: utilityProcess.fork, modulePath: path.join(__dirname, 'service-entry.cjs'),
       environment: { ...process.env, SCRCPY_GUI_BINARY: path.join(hostRoot, 'bin', process.platform === 'win32' ? 'scrcpy.exe' : 'scrcpy'),
@@ -79,13 +86,17 @@ else {
       title: 'dskcpy Host', backgroundColor: '#0a1419', show: false,
       webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true,
         nodeIntegration: false, sandbox: true, webSecurity: true } });
+    window.on('focus', () => { startup.refresh(); update(host.snapshot()); });
     window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
     window.webContents.on('will-navigate', (event, url) => { if (url !== page) event.preventDefault(); });
     window.webContents.session.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
     window.on('close', event => { if (!quitting) { event.preventDefault(); window.hide(); } });
     const icon = nativeImage.createFromPath(path.join(hostRoot, 'bin', process.platform === 'win32' ? 'icon.ico' : 'scrcpy.png')).resize({ width: 20, height: 20 });
     tray = new Tray(icon); tray.on('click', show); update(host.snapshot());
-    handle('snapshot', () => host.snapshot());
+    handle('snapshot', () => ({ ...host.snapshot(), startup: startup.snapshot() }));
+    handle('set-open-at-login', enabled => {
+      const next = startup.set(enabled); update(host.snapshot()); return next;
+    });
     handle('start', () => host.start());
     handle('stop', () => host.stop());
     handle('refresh', () => refresh());
@@ -121,7 +132,10 @@ else {
       if (!invitation || invitation.expiresAt <= Date.now()) return false;
       clipboard.writeText(invitation.joinUrl); return true;
     });
-    await window.loadURL(page); window.show();
+    await window.loadURL(page);
+    // Login startup opens the tray host only. It never creates an invitation or
+    // starts screen/audio capture; those still require the sharing action.
+    if (!launchedAtLogin) window.show();
     await refresh();
     timer = setInterval(() => refresh(false), 1500); timer.unref();
   }).catch(() => {

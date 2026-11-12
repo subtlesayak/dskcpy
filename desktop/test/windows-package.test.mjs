@@ -21,6 +21,7 @@ test('missing dependencies and unbounded closures fail before a packaging plan i
   const base = { entry: { name: 'scrcpy.exe', file: 'host' }, inspect: async () => ['missing.dll'], system: async () => false };
   await assert.rejects(planRuntimeClosure({ ...base, resolve: async () => null }), /Missing runtime dependency: missing.dll/);
   await assert.rejects(planRuntimeClosure({ ...base, resolve: async name => name, limit: 1 }), /limit/);
+  await assert.rejects(planRuntimeClosure({ ...base, inspect: async () => ['z.dll', 'a.dll'], resolve: async () => null }), /Missing runtime dependencies: a.dll, z.dll/);
 });
 test('the validation child has exactly one PATH and cannot load an external MSYS runtime', () => {
   const original = { Path: 'C:\\msys64\\mingw64\\bin', PATH: 'C:\\msys64\\ucrt64\\bin', SystemRoot: 'C:\\Windows', OTHER: 'retained' };

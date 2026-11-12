@@ -35,3 +35,8 @@ footer svg { flex-shrink: 0; margin-block-start: 2px; }
 .sr-only { position: absolute; inline-size: 1px; block-size: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 @media (max-width: 400px) { header { padding: 20px; } main { padding: 16px 20px 12px; } footer { padding-inline: 20px; } }
 @media (forced-colors: active) { button, .step, .sharing-card { border: 1px solid ButtonText; } button:focus-visible { outline-color: Highlight; } }
+.startup-settings { border-block-start: 1px solid #304a58; padding-block: 12px 18px; margin-block: 12px; }
+.startup-settings summary { cursor: pointer; padding-block: 10px; }
+.startup-settings summary:focus-visible, .startup-settings input:focus-visible { outline: 3px solid #67dbf6; outline-offset: 4px; }
+.startup-settings label { display: flex; align-items: center; gap: 10px; min-block-size: 46px; cursor: pointer; }
+.startup-settings input { inline-size: 20px; block-size: 20px; flex-shrink: 0; accent-color: #67dbf6; }

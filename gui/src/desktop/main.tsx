@@ -6,10 +6,11 @@ import './style.css';
 
 type Phase = 'checking' | 'installation' | 'screen-permission' | 'control-permission' | 'network' | 'route-conflict' | 'private-link' | 'ready' | 'preparing' | 'inviting' | 'sharing' | 'error';
 type Snapshot = { phase: Phase; permissions: { screen: boolean; control: boolean }; route: { connected: boolean; ready: boolean; conflict: boolean };
+  startup?: { available: boolean; requested: boolean; enabled: boolean; requiresApproval: boolean; error: string | null };
   features: { keyboard: boolean }; error: string | null; invitation: { joinUrl: string; expiresAt: number } | null; canStop: boolean };
 type HostAPI = { snapshot(): Promise<Snapshot>; start(): Promise<Snapshot>; stop(): Promise<Snapshot>; refresh(): Promise<Snapshot>;
   screenPermission(): Promise<void>; controlPermission(): Promise<void>; privateSetup(): Promise<Snapshot>; tailscale(): Promise<void>;
-  copyInvitation(): Promise<boolean>; onChange(callback: (snapshot: Snapshot) => void): () => void };
+  copyInvitation(): Promise<boolean>; setOpenAtLogin(enabled: boolean): Promise<unknown>; onChange(callback: (snapshot: Snapshot) => void): () => void };
 declare global { interface Window { dskcpyHost?: HostAPI } }
 const copy: Record<Phase, { title: string; description: string; action?: string }> = {
   checking: { title: 'Let’s get your computer ready', description: 'Checking the app’s streaming components…' },
@@ -89,6 +90,18 @@ function App() {
         {setup && <button className="secondary" disabled={!api || pending} onClick={() => run(api?.refresh)}>Check again</button>}
       </div>
       <p className="notice" role="status">{notice}</p>
+      {['ready', 'sharing'].includes(phase) && state?.startup && <details className="startup-settings">
+        <summary>Startup</summary>
+        <label><input type="checkbox" checked={state.startup.requested} disabled={!api || pending || !state.startup.available}
+          aria-describedby="startup-note" onChange={event => {
+            const enabled = event.currentTarget.checked;
+            void run(async () => { await api?.setOpenAtLogin(enabled); });
+          }} /><span>Open dskcpy when I sign in</span></label>
+        <p id="startup-note" className="hint" role="status">{!state.startup.available ? 'Available after installing the packaged app. On a Mac, keep it in Applications.'
+          : state.startup.error || (state.startup.requiresApproval || (state.startup.requested && !state.startup.enabled)
+            ? 'Allow dskcpy in your system’s login or startup settings to finish setup.'
+            : 'The app opens in the menu bar or system tray. Screen sharing waits for you to start it.')}</p>
+      </details>}
     </main>
     <footer><Wifi size={16} aria-hidden="true" /><span>For remote access, both devices need Tailscale access to this computer.</span></footer>
   </div>;
