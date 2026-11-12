@@ -87,6 +87,19 @@ jobs:
         run: |
           npm ci --prefix gui --ignore-scripts
           node --test gui/server/telemetry.test.mjs gui/server/windows-runtime-native.test.mjs
+      - name: Assemble and inspect the unsigned Windows desktop prototype without capture
+        env:
+          MSYS2_PATH_TYPE: inherit
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+        run: |
+          dskcpy_runtime_dir="$(cygpath -w /ucrt64/bin)"
+          node desktop/collect-windows-runtime.mjs .tmp/ci-native/app/scrcpy.exe "$dskcpy_runtime_dir" .tmp/ci-desktop-runtime
+          npm ci --prefix desktop --ignore-scripts
+          npm run build --prefix gui
+          (cd gui && node node_modules/vite/bin/vite.js build --config vite.desktop.config.ts)
+          node desktop/stage.mjs .tmp/ci-desktop-runtime/scrcpy.exe
+          npm run package:windows --prefix desktop
+          node desktop/verify-bundle.mjs desktop/out/win-unpacked/resources
 
   native-macos:
     runs-on: macos-15
