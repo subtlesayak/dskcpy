@@ -13,7 +13,7 @@ const config = require(configPath);
 app.setName('dskcpy isolated runtime check');
 app.setPath('userData', path.join(config.ownedDirectory, 'user-data'));
 app.disableHardwareAcceleration();
-let window, backend;
+let window, backend, stage = 'app-ready';
 app.on('window-all-closed', () => {});
 app.whenReady().then(async () => {
   app.dock?.hide();
@@ -25,9 +25,11 @@ app.whenReady().then(async () => {
     environment: { ...process.env, SCRCPY_GUI_BINARY: config.fakeNative,
       ADB: path.join(config.ownedDirectory, 'absent-adb'), DSKCPY_VIEWER_ORIGIN: '',
       DSKCPY_VIEWER_TLS_CERT: '', DSKCPY_VIEWER_TLS_KEY: '' } });
-  await backend.ensure({});
+  stage = 'utility-start'; await backend.ensure({});
+  stage = 'utility-readiness';
   const readiness = await backend.readiness();
   assert.equal(readiness.ready, ['darwin', 'win32'].includes(process.platform));
+  stage = 'utility-idle';
   assert.deepEqual(await backend.status(), { running: false, browser: { waiting: false, connected: false } });
   let state = { phase: 'ready', features: { keyboard: true }, permissions: { screen: true, control: true },
     route: { connected: true, ready: true, conflict: false }, startup: { available: true, requested: false, enabled: false, requiresApproval: false, error: null }, error: null, invitation: null, canStop: false };
@@ -57,7 +59,8 @@ app.whenReady().then(async () => {
     assert.equal(typeof enabled, 'boolean'); state.startup = { ...state.startup, requested: enabled, enabled };
     window.webContents.send('host:changed', state); return state.startup;
   });
-  await window.loadURL(page);
+  stage = 'renderer-load'; await window.loadURL(page);
+  stage = 'renderer-actions';
   const check = await window.webContents.executeJavaScript(`(async () => {
     if (typeof require !== 'undefined' || typeof process !== 'undefined') throw Error('Node reached renderer');
     if (typeof window.dskcpyHost?.snapshot !== 'function') throw Error('Preload unavailable');
@@ -75,14 +78,16 @@ app.whenReady().then(async () => {
     await window.dskcpyHost.setOpenAtLogin(true); await window.dskcpyHost.setOpenAtLogin(false);
     return { bridgeLoaded: true, nodeUnavailable: true, rendererStartStopEvents: true, syntheticCopy: copied, syntheticStartupIpc: true };
   })()`);
+  stage = 'renderer-validation';
   assert.deepEqual(errors, []); assert.equal(window.isVisible(), false);
-  await backend.shutdown(); backend = null;
+  stage = 'utility-shutdown'; await backend.shutdown(); backend = null;
+  stage = 'result-write';
   await writeFile(config.result, JSON.stringify({ ...check, utilityProcessIpc: true,
     bundledRuntime: process.versions.electron, hiddenWindow: true, nativeProgram: 'fake --help only',
     realInvitation: false, screenCapture: false, permissionApis: false, tailscale: false,
     actualHostShellLaunched: false, desktopMediaQualified: false }, null, 2));
-}).catch(async () => {
-  await writeFile(config.result, JSON.stringify({ passed: false, detail: 'Hidden runtime, renderer or utility IPC assertion failed' }));
+}).catch(async error => {
+  await writeFile(config.result, JSON.stringify({ passed: false, stage, category: error.code === 'ERR_ASSERTION' ? 'assertion' : 'runtime' }));
   process.exitCode = 1;
 }).finally(async () => {
   await backend?.shutdown().catch(() => {}); window?.destroy(); app.exit(process.exitCode || 0);
