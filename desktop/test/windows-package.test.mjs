@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseWindowsDependencies, isolatedWindowsEnvironment, planRuntimeClosure } from '../collect-windows-runtime.mjs';
+import { parseWindowsDependencies, isolatedWindowsEnvironment, planRuntimeClosure, isWindowsSystemImport } from '../collect-windows-runtime.mjs';
 
 function image(names, delayed = []) {
   const bytes = Buffer.alloc(8192);
@@ -44,4 +44,24 @@ test('the validation child has exactly one PATH and cannot load an external MSYS
   assert.deepEqual(Object.keys(env).filter(name => name.toLowerCase() === 'path'), ['PATH']);
   assert.equal(env.PATH, 'D:\\package\\bin;C:\\Windows\\System32;C:\\Windows');
   assert.equal(env.OTHER, 'retained'); assert.equal(original.Path, 'C:\\msys64\\mingw64\\bin');
+});
+
+
+test('known Windows text, graphics, crypto and legacy sockets imports require System32 files', async () => {
+  const paths = [], systemRoot = 'C:\\Windows';
+  const stat = async filename => { paths.push(filename); return { isFile: () => true }; };
+  for (const name of ['DWRITE.dll', 'gdiplus.dll', 'NCRYPT.dll', 'usp10.dll', 'wsock32.dll']) {
+    assert.equal(await isWindowsSystemImport(name, { systemRoot, stat }), true);
+  }
+  assert.deepEqual(paths, ['dwrite.dll','gdiplus.dll','ncrypt.dll','usp10.dll','wsock32.dll'].map(name => `${systemRoot}\\System32\\${name}`));
+  const count = paths.length;
+  for (const name of ['libgraphics.dll', 'dwrite-compat.dll', '../dwrite.dll', 'C:\\dwrite.dll', 'gdiplus.dll:stream']) {
+    assert.equal(await isWindowsSystemImport(name, { systemRoot, stat }), false);
+  }
+  assert.equal(paths.length, count);
+  assert.equal(await isWindowsSystemImport('dwrite.dll', { systemRoot, stat: async () => { throw Object.assign(new Error(), { code: 'ENOENT' }); } }), false);
+  assert.equal(await isWindowsSystemImport('dwrite.dll', { systemRoot, stat: async () => ({ isFile: () => false }) }), false);
+  assert.equal(await isWindowsSystemImport('dwrite.dll', { systemRoot: '', stat }), false);
+  assert.equal(await isWindowsSystemImport('dwrite.dll', { systemRoot: 'relative', stat }), false);
+  assert.equal(await isWindowsSystemImport('api-ms-win-core-test-l1-1-0.dll', { systemRoot, stat }), true);
 });
