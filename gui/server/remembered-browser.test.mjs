@@ -34,8 +34,8 @@ async function fixture(t, { viewOnly = false, beforeTrusted = async () => {} } =
         body: JSON.parse(bytes || '{}'), cookie: res.headers['set-cookie']?.[0] }));
     }); req.on('error', reject); req.end(JSON.stringify(body));
   });
-  const connect = async key => {
-    const ws = new WebSocket(`ws://127.0.0.1:${receiver.port}/stream`, { origin, headers: { Host: 'host.example' } });
+  const connect = async (key, requestOrigin = origin, requestHost = 'host.example') => {
+    const ws = new WebSocket(`ws://127.0.0.1:${receiver.port}/stream`, { origin: requestOrigin, headers: { Host: requestHost } });
     ws.on('error', () => {}); ws.received = [];
     ws.on('upgrade', res => ws.cookie = res.headers['set-cookie']?.[0].split(';')[0]);
     ws.on('message', (data, binary) => ws.received.push({ data, binary }));
@@ -144,4 +144,14 @@ test('shutdown retires an in-flight trusted preparation without capture or a lat
   const shuttingDown = f.receiver.shutdown(); release(); await shuttingDown;
   assert.notEqual((await pending).status, 201);
   assert.equal(f.receiver.status().waiting, false); assert.equal(f.captures(), 1);
+});
+
+
+test('trusted reconnect tickets are bound to the approved private receiver origin', async t => {
+  const f = await fixture(t); const { ws, cookie } = await enroll(f);
+  ws.close(4000); await until(() => !f.receiver.status().connected);
+  const ticket = await f.post('trusted/connect', cookie); assert.equal(ticket.status, 201);
+  await assert.rejects(f.connect(ticket.body.key, `http://127.0.0.1:${f.receiver.port}`, `127.0.0.1:${f.receiver.port}`), /403/);
+  assert.equal(f.captures(), 1); assert.equal(f.receiver.status().waiting, true);
+  const returning = await f.connect(ticket.body.key); await until(() => f.captures() === 2); returning.close(4000);
 });

@@ -218,6 +218,8 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
     if (closed || !['/stream', '/stream/webrtc'].includes(req.url)
         || (resume && mediaMode !== session.mediaMode)
         || !allowedHost(req.headers.host) || !allowedOrigin(req.headers.origin)
+        || (!resume && trustedTicket && (req.headers.origin !== trustedTicket.origin
+          || req.headers.host !== new URL(trustedTicket.origin).host))
         || (!resume && (!invitation || session || failures >= 10)) || sockets.size >= 4) {
       socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');
       return;
@@ -236,7 +238,8 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
         const accepted = invitation && candidate.length === invitation.length
           && timingSafeEqual(candidate, invitation);
         candidate.fill(0);
-        if (!accepted || session || (trustedTicket && !trustedDevices.allowed(trustedTicket.id, trustedTicket.digest))) {
+        if (!accepted || session || (trustedTicket && (!trustedDevices.allowed(trustedTicket.id, trustedTicket.digest)
+          || req.headers.origin !== trustedTicket.origin || req.headers.host !== new URL(trustedTicket.origin).host))) {
           if (++failures >= 10) cancel();
           ws.close(1008, 'Session key rejected or expired.');
           return;

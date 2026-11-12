@@ -107,6 +107,7 @@ cd ..
 PLAYWRIGHT_BROWSERS_PATH=desktop/.browsers node desktop/node_modules/playwright/cli.js install chromium
 PLAYWRIGHT_BROWSERS_PATH=desktop/.browsers node desktop/test/beginner-ui.mjs
 PLAYWRIGHT_BROWSERS_PATH=desktop/.browsers node desktop/test/remembered-ui.mjs
+PLAYWRIGHT_BROWSERS_PATH=desktop/.browsers node desktop/test/remembered-cookie.mjs
 ```
 
 Service integration uses a fake no-capture executable and a new ephemeral
@@ -116,7 +117,13 @@ contact a running host. `node desktop/test/run-electron-smoke.mjs` checks the
 assembled app’s real Electron renderer/preload and utility IPC, including an empty temporary remembered-device registry and pause, in a hidden
 window with a fake --help-only native. The main host shell, OS permission and
 startup APIs, clipboard writes and Tailscale are not invoked. This is distinct
-from desktop media/TCC qualification. Screenshots are test fixtures, not hardware proof.
+from desktop media/TCC qualification. Screenshots are test fixtures, not hardware proof. The remembered-cookie check
+uses a fully intercepted synthetic HTTPS origin and temporary Chromium profile,
+not a certificate bypass or a real VPN/TLS endpoint. It verifies cookie flags,
+JavaScript isolation at the matching path, browser and fixture-host restarts,
+and revocation with synthetic grants, then deletes the owned profile/registry.
+The temporary-session bootstrap is supplied by the fixture; this test does not
+claim a physical first-pairing, TLS, media, or Android browser result.
 
 ## Beginner release gates still open
 

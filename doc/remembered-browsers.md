@@ -34,3 +34,13 @@ The source library defaults to no persistent registry. Real launcher entry point
 Playback now treats the receiver video being in standard Picture-in-Picture (or reported WebKit presentation mode) as visible even if its original page is hidden. Closing PiP while the page remains hidden restores the normal bounded away timeout. This addresses a reproducible lifecycle logic gap; it does not prove the cause of previously reported drops or guarantee that Android Edge reports every OS PiP transition. Browser termination, mobile background restrictions and VPN loss still need device testing.
 
 Automated checks cover saved approval after receiver restart, token hashing/origin binding/expiry, persistent pause/revoke, revoked or pending requests, view-only and CSRF denial, concurrent invitations, revocation during awaited preparation, receiver automatic reconnect, explicit Disconnect, and PiP playback state. Synthetic desktop UI tests cover owner approval/pause/resume/revoke at 320 and 620 pixels. No real device has been enrolled by these tests; no live host has been switched.
+
+
+The Chromium cookie fixture additionally exercises the actual enrollment
+Set-Cookie response, flags and HttpOnly isolation at `/stream`, closing and
+reopening Chromium with its owned test profile, restarting the fixture host,
+and revocation. It uses a fully intercepted HTTPS fixture origin and fake
+native sessions, with no certificate-trust bypass, real device or actual media.
+This strengthens storage/reconnect evidence without replacing real HTTPS/VPN
+and Android Edge lifecycle qualification. The temporary-session bootstrap is
+provided by the fixture, rather than a physical first pairing.

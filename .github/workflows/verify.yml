@@ -48,6 +48,7 @@ jobs:
           node desktop/node_modules/playwright/cli.js install --with-deps chromium
           node desktop/test/beginner-ui.mjs
           node desktop/test/remembered-ui.mjs
+          node desktop/test/remembered-cookie.mjs
       - name: Artifact identity and upgrade preflight regressions
         run: node --test tools/*.test.mjs
 
