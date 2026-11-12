@@ -73,6 +73,23 @@ rejects missing/conflicting libraries, and probes the copied executable with
 no external MSYS directory in PATH. Native Windows CI assembles/verifies the
 development app without launching capture or uploading an installer.
 
+The system-import allowlist additionally checks the actual System32 file. The
+following Windows components were identified from the failed clean-build
+closure and verified against Microsoft documentation; they must not be copied
+from a developer's machine into the package:
+
+| Component | Official reference |
+| --- | --- |
+| `dwrite.dll` | [DWriteCreateFactory](https://learn.microsoft.com/en-us/windows/win32/api/dwrite/nf-dwrite-dwritecreatefactory) |
+| `gdiplus.dll` | [GdiplusStartup](https://learn.microsoft.com/en-us/windows/win32/api/gdiplusinit/nf-gdiplusinit-gdiplusstartup) |
+| `ncrypt.dll` | [NCryptOpenStorageProvider](https://learn.microsoft.com/en-us/windows/win32/api/ncrypt/nf-ncrypt-ncryptopenstorageprovider) |
+| `usp10.dll` | [ScriptFreeCache](https://learn.microsoft.com/en-us/windows/win32/api/usp10/nf-usp10-scriptfreecache) |
+| `wsock32.dll` | [Windows Sockets compatibility](https://learn.microsoft.com/en-us/windows/win32/winsock/windows-sockets-compatibility-issues-2) |
+
+Unknown dependencies still fail collection. The copied native executable must
+also load with only its packaged directory and Windows system directories in
+PATH; passing this CI check does not qualify physical capture or minimum OS.
+
 Builder targets currently produce unsigned **development app directories**,
 not public installers. No app is installed, launched, permission-granted,
 signed, notarized, published or substituted for a running host by these steps.

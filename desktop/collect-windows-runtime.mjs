@@ -7,7 +7,7 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 const execute = promisify(execFile);
 const validDll = name => /^[a-z0-9_.+-]+\.dll$/i.test(name);
-const systemNames = new Set(('advapi32 authz avrt bcrypt bcryptprimitives cfgmgr32 comctl32 comdlg32 crypt32 cryptbase d3d11 dcomp dhcpcsvc dinput8 dnsapi dwmapi dxgi gdi32 imm32 iphlpapi kernel32 kernelbase mf mfplat mfreadwrite mfuuid mpr msacm32 msimg32 msvcrt msvcp_win normaliz ntdll ole32 oleaut32 opengl32 powrprof propsys psapi rpcrt4 secur32 setupapi shell32 shlwapi user32 userenv ucrtbase version winhttp wininet winmm winspool wintrust windows.storage ws2_32 wtsapi32').split(' ').map(name => name + '.dll'));
+const systemNames = new Set(('advapi32 authz avrt bcrypt bcryptprimitives cfgmgr32 comctl32 comdlg32 crypt32 cryptbase d3d11 dcomp dhcpcsvc dinput8 dnsapi dwmapi dwrite dxgi gdi32 gdiplus imm32 iphlpapi kernel32 kernelbase mf mfplat mfreadwrite mfuuid mpr msacm32 msimg32 msvcrt msvcp_win ncrypt normaliz ntdll ole32 oleaut32 opengl32 powrprof propsys psapi rpcrt4 secur32 setupapi shell32 shlwapi user32 userenv ucrtbase usp10 version winhttp wininet winmm winspool wintrust windows.storage ws2_32 wsock32 wtsapi32').split(' ').map(name => name + '.dll'));
 
 // Inspect only bounded PE import tables. Do not execute images or produce huge
 // diagnostic dumps of unrelated export/unwind tables during dependency discovery.
@@ -24,6 +24,18 @@ export function isolatedWindowsEnvironment(input, bin) {
   const env = Object.fromEntries(Object.entries(input).filter(([name]) => name.toLowerCase() !== 'path'));
   env.PATH = [bin, path.win32.join(input.SystemRoot, 'System32'), input.SystemRoot].join(';');
   return env;
+}
+
+// Explicit OS components are not copied into the app. A named import still
+// requires the real System32 file; arbitrary DLLs are never exempted merely
+// because a similarly named file is present elsewhere on a build machine.
+export async function isWindowsSystemImport(name, { systemRoot = process.env.SystemRoot, stat = lstat } = {}) {
+  if (typeof name !== 'string' || !validDll(name)) return false;
+  const normalized = name.toLowerCase();
+  if (/^(?:api|ext)-ms-win-[a-z0-9_.-]+\.dll$/.test(normalized)) return true;
+  if (!systemRoot || !path.win32.isAbsolute(systemRoot) || !systemNames.has(normalized)) return false;
+  try { return (await stat(path.win32.join(systemRoot, 'System32', normalized))).isFile(); }
+  catch { return false; }
 }
 
 export async function planRuntimeClosure({ entry, inspect, resolve, system, limit = 256 }) {
@@ -70,11 +82,7 @@ export async function collectWindowsRuntime(native, runtimeDirectory, output) {
       if (hashes.size > 1) throw Error('Conflicting runtime dependency: ' + name);
       return candidates[0];
     },
-    system: async name => {
-      if (/^(?:api|ext)-ms-win-[a-z0-9_.-]+\.dll$/i.test(name)) return true;
-      if (!systemNames.has(name)) return false;
-      try { return (await lstat(path.join(process.env.SystemRoot, 'System32', name))).isFile(); } catch { return false; }
-    },
+    system: name => isWindowsSystemImport(name),
   });
   // Resolve every dependency before creating a new output. Never overwrite a
   // developer runtime, a running host, or another package.
