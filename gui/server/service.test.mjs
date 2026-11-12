@@ -1,3 +1,7 @@
+import { mkdtemp, rm } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { createTrustedDevices, deviceDigest } from './trusted-devices.mjs';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import http from 'node:http';
@@ -696,4 +700,23 @@ test('private remote Mac desktop session opts into keyboard support only after a
   await once(ws, 'open'); ws.send(body.key); await waitFor(() => f.children.length === 1);
   assert.ok(f.children[0].args.includes('--reverse-keyboard'));
   await f.request('/api/stream/stop', {});
+});
+
+
+test('owner Stop durably pauses remembered access; remote origin cannot re-enable it', async t => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'dskcpy-owner-trust-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const filename = path.join(dir, 'devices.json'); const store = createTrustedDevices({ filename }); await store.ready;
+  await store.approve({ id: 'a'.repeat(32), digest: deviceDigest('x'.repeat(43)), name: 'Test browser',
+    origin: 'https://host.example', profile: { maxSize: 1600, maxFps: 30, bitRateMbps: 8 } });
+  const f = await fixture(t, { trustedDevicesPath: filename, environment: { SCRCPY_GUI_BINARY: process.execPath, DSKCPY_VIEWER_ORIGIN: 'https://host.example' } });
+  assert.equal((await f.request('/api/browser/trusted')).body.devices.length, 1);
+  assert.equal(f.children.length, 0); assert.equal(f.publicState().browser.waiting, false);
+  assert.equal((await f.request('/api/stream/stop', {})).code, 202);
+  const restart = createTrustedDevices({ filename }); await restart.ready; assert.equal(restart.snapshot().paused, true);
+  const denied = await fetch(`http://127.0.0.1:${f.port}/api/browser/trusted`, { method: 'POST',
+    headers: { Origin: 'https://host.example', 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'resume' }) });
+  assert.equal(denied.status, 403);
+  assert.equal((await f.request('/api/browser/trusted', { action: 'resume' })).body.paused, false);
+  assert.equal(f.children.length, 0);
 });
