@@ -42,15 +42,15 @@ export function createTrustedDevices({ filename, now = Date.now } = {}) {
   })();
   async function save() {
     if (!filename) throw new Error('Remembered access is unavailable in this host.');
-    await mkdir(path.dirname(filename), { recursive: true, mode: 0o700 });
     const temp = `${filename}.${randomBytes(12).toString('hex')}.tmp`;
     let file;
     try {
+      await mkdir(path.dirname(filename), { recursive: true, mode: 0o700 });
       file = await open(temp, 'wx', 0o600);
       await file.writeFile(JSON.stringify(data) + '\n'); await file.sync(); await file.close(); file = null;
       await rename(temp, filename);
     } catch { failed = true; data.paused = true; throw new Error('Could not save remembered access. Access is paused; check host storage.'); }
-    finally { await file?.close(); await rm(temp, { force: true }); }
+    finally { await file?.close(); await rm(temp, { force: true }).catch(() => {}); }
   }
   const mutate = action => {
     const operation = serial.then(async () => { await ready; if (failed) throw new Error('Remembered access storage needs attention.'); return action(); });

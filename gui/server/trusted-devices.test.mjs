@@ -50,8 +50,11 @@ test('expired, malformed and corrupt registry data fail closed', async t => {
 });
 
 test('storage failures never acknowledge approval and immediately block new access', async t => {
-  const filename = await fixture(t); await writeFile(path.dirname(filename), 'not a directory');
+  const filename = await fixture(t);
   const store = createTrustedDevices({ filename }); await store.ready;
+  // Introduce the obstruction after a clean load on every platform, so this
+  // exercises the write failure rather than platform-specific open errors.
+  await writeFile(path.dirname(filename), 'not a directory');
   await assert.rejects(store.approve(grant(randomBytes(32).toString('base64url'))));
   assert.equal(store.snapshot().available, false); assert.equal(store.snapshot().paused, true);
 });
