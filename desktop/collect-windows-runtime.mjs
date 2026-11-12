@@ -63,8 +63,10 @@ export async function collectWindowsRuntime(native, runtimeDirectory, output, { 
   const plan = await planRuntimeClosure({ entry: { name: 'scrcpy.exe', file: path.resolve(native) },
     inspect: async file => {
       if (Date.now() > deadline || !(await lstat(file)).isFile()) throw Error('Runtime inspection did not finish');
-      const { stdout } = await execute(objdump, ['-f', '-p', file], { timeout: 10000, killSignal: 'SIGKILL', maxBuffer: 8 * 1024 * 1024, env: { ...process.env, LC_ALL: 'C', LANG: 'C' } });
-      return parseWindowsDependencies(stdout);
+      try {
+        const { stdout } = await execute(objdump, ['-f', '-p', file], { timeout: 10000, killSignal: 'SIGKILL', maxBuffer: 8 * 1024 * 1024, env: { ...process.env, LC_ALL: 'C', LANG: 'C' } });
+        return parseWindowsDependencies(stdout);
+      } catch { throw Error('Cannot inspect x64 runtime file: ' + path.basename(file)); }
     },
     resolve: async name => {
       const candidates = index.get(name) || [];
@@ -86,9 +88,15 @@ export async function collectWindowsRuntime(native, runtimeDirectory, output, { 
     await cp(item.file, path.join(output, item.name), { errorOnExist: true, force: false });
     manifest.files.push({ name: item.name, sha256: await digest(item.file), imports: item.imports });
   }
-  const { stdout } = await execute(path.resolve(output, 'scrcpy.exe'), ['--help'], { cwd: output, timeout: 10000,
-    killSignal: 'SIGKILL', maxBuffer: 1024 * 1024, env: isolatedWindowsEnvironment(process.env, path.resolve(output)) });
-  if (!stdout.includes('--reverse-socket')) throw Error('Collected native runtime cannot load');
+  let help;
+  try {
+    help = (await execute(path.resolve(output, 'scrcpy.exe'), ['--help'], { cwd: output, timeout: 10000,
+      killSignal: 'SIGKILL', maxBuffer: 1024 * 1024, env: isolatedWindowsEnvironment(process.env, path.resolve(output)) })).stdout;
+  } catch (error) {
+    const code = Number.isSafeInteger(error.code) ? String(error.code) : error.killed ? 'timeout' : 'unavailable';
+    throw Error('Collected native help failed: ' + code);
+  }
+  if (!help.includes('--reverse-socket')) throw Error('Collected native help lacks browser hosting');
   manifest.qualification = { nativeHelp: true, externalMsysPathUsed: false, physicalCapture: false, cleanMinimumWindows: false, noticesReviewed: false };
   await writeFile(path.join(output, 'runtime-manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
   return manifest;
@@ -99,5 +107,6 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   else collectWindowsRuntime(path.resolve(native), path.resolve(runtime), path.resolve(output))
     .then(result => console.log('Collected ' + result.files.length + ' x64 runtime files; --help loads without external MSYS PATH.'))
     .catch(error => { console.error(/^(?:Missing runtime dependenc(?:y|ies)|Conflicting runtime dependency): [a-z0-9_.+-]+\.dll(?:, [a-z0-9_.+-]+\.dll)*$/i.test(error.message)
-      ? error.message : 'Windows runtime collection failed; check the x64 toolchain, dependencies and new output directory.'); process.exitCode = 1; });
+      ? error.message : /^(?:Cannot inspect x64 runtime file: [a-z0-9_.+-]+\.(?:dll|exe)|Collected native help failed: (?:-?[0-9]+|timeout|unavailable)|Collected native help lacks browser hosting|Native runtime dependency limit exceeded|Runtime inspection did not finish)$/.test(error.message)
+        ? error.message : 'Windows runtime collection failed (' + (/^E[A-Z0-9]+$/.test(error.code || '') ? error.code : 'unknown') + '); check the toolchain and new output.'); process.exitCode = 1; });
 }
