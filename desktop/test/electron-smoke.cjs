@@ -24,6 +24,7 @@ app.whenReady().then(async () => {
     modulePath: path.join(config.application, 'desktop/service-entry.cjs'),
     environment: { ...process.env, SCRCPY_GUI_BINARY: config.fakeNative,
       ADB: path.join(config.ownedDirectory, 'absent-adb'), DSKCPY_VIEWER_ORIGIN: '',
+      DSKCPY_TRUST_STORE: path.join(config.ownedDirectory, 'synthetic-device-registry.json'),
       DSKCPY_VIEWER_TLS_CERT: '', DSKCPY_VIEWER_TLS_KEY: '' } });
   await backend.ensure({});
   const readiness = await backend.readiness();
@@ -45,6 +46,11 @@ app.whenReady().then(async () => {
     });
   }
   handle('snapshot', () => state);
+  handle('trusted-list', () => backend.request('trusted-list'));
+  handle('trusted-action', (action, id) => {
+    assert.equal(action, 'pause'); assert.equal(id, undefined);
+    return backend.request('trusted-action', { action });
+  });
   handle('start', () => {
     state = { ...state, phase: 'inviting', canStop: true, invitation: {
       joinUrl: 'https://example.invalid/join/synthetic#connect=synthetic-test-only', expiresAt: Date.now() + 300000 } };
@@ -73,13 +79,17 @@ app.whenReady().then(async () => {
     const copied = await window.dskcpyHost.copyInvitation();
     await window.dskcpyHost.stop(); await wait('Your computer, wherever you are');
     await window.dskcpyHost.setOpenAtLogin(true); await window.dskcpyHost.setOpenAtLogin(false);
-    return { bridgeLoaded: true, nodeUnavailable: true, rendererStartStopEvents: true, syntheticCopy: copied, syntheticStartupIpc: true };
+    const devices = await window.dskcpyHost.trustedList();
+    if (!devices.available || devices.devices.length || devices.pending.length) throw Error('Empty synthetic device registry unavailable');
+    const paused = await window.dskcpyHost.trustedAction('pause');
+    if (!paused.paused || paused.devices.length) throw Error('Synthetic remembered pause IPC failed');
+    return { bridgeLoaded: true, nodeUnavailable: true, rendererStartStopEvents: true, syntheticCopy: copied, syntheticStartupIpc: true, rememberedDeviceIpc: true };
   })()`);
   assert.deepEqual(errors, []); assert.equal(window.isVisible(), false);
   await backend.shutdown(); backend = null;
   await writeFile(config.result, JSON.stringify({ ...check, utilityProcessIpc: true,
     bundledRuntime: process.versions.electron, hiddenWindow: true, nativeProgram: 'fake --help only',
-    realInvitation: false, screenCapture: false, permissionApis: false, tailscale: false,
+    realInvitation: false, realDeviceEnrolled: false, screenCapture: false, permissionApis: false, tailscale: false,
     actualHostShellLaunched: false, desktopMediaQualified: false }, null, 2));
 }).catch(async () => {
   await writeFile(config.result, JSON.stringify({ passed: false, detail: 'Hidden runtime, renderer or utility IPC assertion failed' }));
