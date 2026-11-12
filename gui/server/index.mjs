@@ -1,6 +1,8 @@
+import os from 'node:os';
+import path from 'node:path';
 import { createControlService } from './service.mjs';
 
-const service = createControlService();
+const service = createControlService({ trustedDevicesPath: process.env.DSKCPY_TRUST_STORE || path.join(os.homedir(), '.dskcpy', 'remembered-devices.json') });
 const shutdown = () => { void service.shutdown(); };
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);

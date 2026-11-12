@@ -1,3 +1,4 @@
+import TrustedDevicesPanel from './TrustedDevicesPanel';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import QRCode from 'qrcode';
 import { browserJoinUrl } from '../receiver/protocol.mjs';
@@ -220,6 +221,7 @@ export default function BrowserHostPanel({ status, config, online, onStatus }: {
     <p role="status" className="action-note browser-feedback">{browser?.connected ? 'Streaming to your browser. Stop here or select Disconnect in the receiver to end sharing.' : message}</p>
     {error && <p className="inline-error" role="alert">{error}</p>}
 
+    <TrustedDevicesPanel />
     <details className="wireless-setup browser-details">
       <summary>Compatibility and advanced setup</summary>
       <p>Chrome and Edge are the initial test targets. Safari and iPhone still need device testing. USB browser mode is Android-only. Video, optional audio, and touch input use your <a href="#performance">Performance settings</a>.</p>

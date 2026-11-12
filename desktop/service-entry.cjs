@@ -5,7 +5,7 @@ const parent = process.parentPort;
 let service, origin;
 const startup = (async () => {
   const { createControlService } = await import(pathToFileURL(path.join(__dirname, '../gui/server/service.mjs')).href);
-  service = createControlService({ configuredPort: 0, browserPort: 27180 });
+  service = createControlService({ configuredPort: 0, browserPort: 27180, trustedDevicesPath: process.env.DSKCPY_TRUST_STORE || null });
   origin = `http://127.0.0.1:${await service.listen()}`;
 })();
 async function api(endpoint, body) {
@@ -30,6 +30,11 @@ parent.on('message', async ({ data }) => {
       case 'readiness': {
         const readiness = (await api('/api/status')).readiness;
         value = { ready: Boolean(readiness?.transports?.browser?.ready), keyboard: readiness?.features?.browserKeyboard === true }; break;
+      }
+      case 'trusted-list': value = await api('/api/browser/trusted'); break;
+      case 'trusted-action': {
+        if (!data.args || !['approve','reject','revoke','pause','resume'].includes(data.args.action)) throw new Error('Invalid device action');
+        value = await api('/api/browser/trusted', data.args); break;
       }
       case 'invite': value = await api('/api/browser/invite', { browserTransport: 'internet', maxSize: 1600, maxFps: 30, bitRateMbps: 8 }); break;
       case 'stop': value = await api('/api/stream/stop', {}); break;

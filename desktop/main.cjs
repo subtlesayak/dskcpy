@@ -70,7 +70,7 @@ else {
     backend = new OwnedBackend({ fork: utilityProcess.fork, modulePath: path.join(__dirname, 'service-entry.cjs'),
       environment: { ...process.env, SCRCPY_GUI_BINARY: path.join(hostRoot, 'bin', process.platform === 'win32' ? 'scrcpy.exe' : 'scrcpy'),
         ADB: path.join(hostRoot, 'bin', process.platform === 'win32' ? 'adb.exe' : 'adb'),
-        SCRCPY_ICON_DIR: path.join(hostRoot, 'bin'), DSKCPY_VIEWER_PORT: '27180',
+        SCRCPY_ICON_DIR: path.join(hostRoot, 'bin'), DSKCPY_VIEWER_PORT: '27180', DSKCPY_TRUST_STORE: path.join(app.getPath('userData'), 'remembered-devices.json'),
         // A package must never inherit development TLS/binary overrides.
         DSKCPY_VIEWER_TLS_CERT: '', DSKCPY_VIEWER_TLS_KEY: '', SCRCPY_RUNTIME_DIR: path.join(hostRoot, 'bin') },
       onExit: () => { if (!quitting && host) { host.status = null; host.invitation = null;
@@ -96,6 +96,12 @@ else {
     handle('snapshot', () => ({ ...host.snapshot(), startup: startup.snapshot() }));
     handle('set-open-at-login', enabled => {
       const next = startup.set(enabled); update(host.snapshot()); return next;
+    });
+    handle('trusted-list', () => backend.request('trusted-list'));
+    handle('trusted-action', (action, id) => {
+      if (!['approve', 'reject', 'revoke', 'pause', 'resume'].includes(action)
+          || (['approve', 'reject', 'revoke'].includes(action) && !/^[a-f0-9]{32}$/.test(id))) throw new Error('Invalid device action');
+      return backend.request('trusted-action', { action, id });
     });
     handle('start', () => host.start());
     handle('stop', () => host.stop());
