@@ -1,0 +1,45 @@
+{
+  "prepared_at": "2026-11-11T12:56:33.689844+00:00",
+  "native_source": "4ec8e7fcaec7b4d558220afecdd54b494d6795aa",
+  "native_sha256": "f837ddf4a81139b360b47ab22fedc18af8de96102f741fb380d7c47f8a2d0bcc",
+  "master_reconciled": "2249d848cd33ca39cb6aeb043a1c6c6fc64110d5",
+  "native_equivalence": "git diff4ec..reviewed master -- app/src is empty; later native-source/build milestone does not change the tested native implementation",
+  "launcher_change": "Mac browser helper respects explicit native binary and validated dashboard port,refuses automatic reuse of a different running configuration",
+  "check_only": {
+    "nativeBuilt": true,
+    "guiBuilt": true,
+    "vpnOnline": true,
+    "privateMediaInterface": true,
+    "privateHttpsReady": true,
+    "dashboardPort": 27203,
+    "receiverPort": 27180,
+    "httpsPort": 8443
+  },
+  "negative_checks": [
+    "Invalid dashboard port rejects before service/capture",
+    "Missing explicit native binary rejects before VPN/service/capture"
+  ],
+  "integration_validation": {
+    "backend_pass": 195,
+    "optional_skips": 7,
+    "artifact_tests_pass": 7,
+    "production_build": "passed"
+  },
+  "physical_status": "Edge/Android over Wi-Fi+Tailscale/WebRTC: short stablevideo/smoothaudio/mutepass. Then phoneWi-FiOFF/mobiledata: video,input,typing456,audio/mutepass. Private full5min listening and Home/return remain unverified.",
+  "limits": [
+    "Existing private Serve route only; no network or account settings changed",
+    "Unsigned experimental arm64/macOS13 target; no clean minimum-OS or signing/notarization pass"
+  ],
+  "preflight_correction": {
+    "review_reproduction": "--check incorrectly reports nativeBuilt:true when explicit native override is an empty directory",
+    "resolution": "Reuse executable/PATH resolution and actual bounded --help Mac capability check,then shared installation verification; invalid explicit values never fall back",
+    "probe_bounds": "5000ms,SIGKILL for only its owned probe child,1MiB output",
+    "checks": "195 backend pass,seven optional skips;actual valid f837 and PATH selection pass;invalid directory/missing/non-executable/ordinary backend CLI rejects;real non-responsive help child is terminated;build pass",
+    "activation_limit": "Check-only/source change does not alter active known-valid f837 private stream"
+  },
+  "source_sha256": {
+    "gui/scripts/mac-browser-runtime.mjs": "37a58ff5c484d17a48879623f7148d210d5e594136c9f45640a049a6459b5874",
+    "gui/scripts/start-browser-macos.mjs": "0ee6d25907ba14342f733dc129cc834a2fa3fd3eebd0339f294e3c1fabf198c2",
+    "gui/server/mac-browser-runtime.test.mjs": "132dbc2c3a5166b8c931de9e57985cbe59647437acfcce38ccd61c197af7d98b"
+  }
+}

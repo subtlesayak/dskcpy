@@ -13,6 +13,10 @@ function takeJoinFragment() {
   return key;
 }
 let scannedKey = takeJoinFragment();
+function setRailLabel(id, label) {
+  $(id).setAttribute('aria-label', label); $(id).setAttribute('title', label);
+  $(`${id}-label`).textContent = label;
+}
 const canvas = $('display');
 const rtcDisplay = $('rtc-display');
 let rtcReceiver, mediaMode = 'webcodecs';
@@ -22,7 +26,10 @@ const context = canvas.getContext('2d', { alpha: false, desynchronized: true });
 let ws, video, audio, audioContext, videoConfig, configBytes, audioConfig;
 let authenticated = false, header = false, closing = false, paused = false, muted = true, touchEnabled = true;
 let frames = 0, statsAt = 0, nextAudio = 0, repeatTimer, repeatInterval;
-const sources = new Set();
+// Allow one preserved 100ms capture chunk plus bounded network/decoder jitter.
+// A larger discontinuity still resynchronizes instead of accumulating audio.
+const audioStartLead = .02, audioMaximumLead = .16, audioMaximumSources = 24;
+const sources = new Map(); // BufferSource -> scheduled end on the audio clock.
 const pointers = new Map();
 const pendingAudioAcks = [];
 let generation = 0;
@@ -31,9 +38,7 @@ let resumeAllowed = true;
 let audioGeneration = 0, fullscreenAttempt = 0, playbackAttempt = 0;
 const mediaAcks = createMediaAcknowledger(send);
 const controlTrays = [
-  { trigger: 'volume', panel: 'volume-controls', first: 'volume-down' },
-  { trigger: 'window', panel: 'window-controls', first: 'minimize' },
-  { trigger: 'more', panel: 'more-controls' },
+  { trigger: 'more', panel: 'more-controls', first: 'close-options' },
 ];
 let openControlTray = null;
 let selectDrag = false, touchGesture = null;
@@ -42,13 +47,23 @@ const keyboardInput = createBrowserKeyboard({ field: $('keyboard-input'), send,
   onError: (message) => { $('error').textContent = message; } });
 function hideKeyboard() {
   keyboardOpen = false; keyboardInput.setEnabled(false);
+  document.body.classList.remove('keyboard-open');
   $('keyboard-controls').hidden = true; $('keyboard').setAttribute('aria-expanded', 'false');
 }
 $('keyboard').addEventListener('click', () => {
   if (!keyboardSupported || viewOnly || paused || document.hidden || !touchEnabled) return;
+  setControlTray();
   keyboardOpen = !keyboardOpen; $('keyboard-controls').hidden = !keyboardOpen;
-  $('keyboard').setAttribute('aria-expanded', String(keyboardOpen)); keyboardInput.setEnabled(keyboardOpen);
+  document.body.classList.toggle('keyboard-open', keyboardOpen);
+  $('keyboard').setAttribute('aria-expanded', String(keyboardOpen));
+  fitCanvas();
+  // Mobile browsers accept focus only after the typing panel is visible,
+  // and while this original button gesture is still on the call stack.
+  keyboardInput.setEnabled(keyboardOpen);
 });
+$('close-keyboard').addEventListener('click', () => { hideKeyboard(); fitCanvas(); $('keyboard').focus(); });
+$('close-options').addEventListener('click', () => setControlTray(null, true));
+for (const id of ['volume', 'window']) $(id).addEventListener('toggle', () => releaseTouches());
 
 function send(bytes) {
   if (!authenticated || !header || ws?.readyState !== WebSocket.OPEN) return false;
@@ -56,7 +71,7 @@ function send(bytes) {
 }
 function action(value) { send(new Uint8Array([5, value])); }
 function stopAudio() {
-  for (const source of sources) { try { source.stop(); } catch { /* Already ended. */ } }
+  for (const source of sources.keys()) { try { source.stop(); } catch { /* Already ended. */ } }
   sources.clear(); nextAudio = 0;
 }
 function drainAudioAcks(all = false) {
@@ -65,7 +80,7 @@ function drainAudioAcks(all = false) {
 function audioUnavailable() {
   muted = true; stopAudio(); drainAudioAcks(true); action(11);
   if (audio && audio.state !== 'closed') audio.close(); audio = null;
-  $('audio').textContent = 'Audio unsupported'; $('audio').disabled = true;
+  setRailLabel('audio', 'Audio unsupported'); $('audio').disabled = true;
   $('audio').setAttribute('aria-label', 'Audio unsupported');
   $('audio').setAttribute('aria-pressed', 'false');
   $('error').textContent = 'Opus audio is unavailable in this browser. Video can continue.';
@@ -109,10 +124,10 @@ function disconnect() {
   document.body.classList.remove('is-streaming', 'controls-hidden');
   $('join').disabled = false; $('join').textContent = 'Connect';
   $('status').textContent = 'Disconnected · create a new code on the computer';
-  $('audio').textContent = 'Audio off'; $('audio').setAttribute('aria-pressed', 'false');
+  setRailLabel('audio', 'Audio off'); $('audio').setAttribute('aria-pressed', 'false');
   $('audio').disabled = false;
   $('pause').setAttribute('aria-pressed', 'false');
-  $('pause').textContent = 'Pause'; $('pause').setAttribute('aria-label', 'Pause video');
+  setRailLabel('pause', 'Pause video'); $('pause').setAttribute('aria-label', 'Pause video');
   $('audio').setAttribute('aria-label', 'Audio off');
   setControlTray(); $('show-controls').hidden = true;
   if (!document.hidden) $('session-key').focus();
@@ -188,7 +203,9 @@ function connect(key = null, requestedMode = preferredMode) {
       retryTimer = setTimeout(resumeSession, 250);
     } else {
       sessionExpected = false;
-      fail(event.code === 4002 ? 'The stream moved to another browser tab. Continue there.' : 'The session ended. Create a new link and code on the computer.');
+      fail(event.code === 1008 && event.reason === 'capture-permission'
+        ? 'On the Mac, allow Screen & System Audio Recording for Terminal/dskcpy, then restart dskcpy and scan a fresh QR.'
+        : event.code === 4002 ? 'The stream moved to another browser tab. Continue there.' : 'The session ended. Create a new link and code on the computer.');
     }
   });
   socket.addEventListener('message', (event) => {
@@ -217,8 +234,8 @@ function connect(key = null, requestedMode = preferredMode) {
         viewOnly = message.viewOnly === true;
         keyboardSupported = message.keyboard === true && !viewOnly;
         $('keyboard').hidden = !keyboardSupported;
-        touchEnabled = !viewOnly; $('touch').disabled = viewOnly;
-        $('touch').textContent = viewOnly ? 'Window · view only' : 'Touch on';
+        touchEnabled = !viewOnly; $('touch').disabled = viewOnly; $('drag-mode').disabled = viewOnly;
+        setRailLabel('touch', viewOnly ? 'Window · view only' : 'Touch on');
         $('touch').setAttribute('aria-pressed', String(touchEnabled));
         for (const id of ['volume', 'window']) $(id).hidden = viewOnly;
         $('audio').disabled = viewOnly;
@@ -244,14 +261,14 @@ function connect(key = null, requestedMode = preferredMode) {
       if (flags === 16) {
         stopAudio(); drainAudioAcks(true); audioGeneration++;
         if (audio && audio.state !== 'closed') audio.close(); audio = null;
-        $('audio').textContent = 'Audio unavailable'; $('audio').setAttribute('aria-label', 'Audio unavailable');
+        setRailLabel('audio', 'Audio unavailable'); $('audio').setAttribute('aria-label', 'Audio unavailable');
         $('audio').disabled = true; return;
       }
       if (flags === 4) {
         stopAudio(); // A fresh codec configuration also discards the old route's scheduled audio.
         audioConfig = payload.slice(); $('audio').disabled = false;
-        $('audio').textContent = muted ? 'Audio off' : 'Audio on';
-        $('audio').setAttribute('aria-label', $('audio').textContent);
+        setRailLabel('audio', muted ? 'Audio off' : 'Audio on');
+
         if (mediaMode !== 'webrtc') configureAudio(); return;
       }
       if (flags === 8) {
@@ -284,6 +301,7 @@ function connect(key = null, requestedMode = preferredMode) {
 
   function createVideoDecoder() {
     video ||= createVideoReceiver({ suspended: paused || document.hidden,
+      onRecovery: (message) => { if (mine === generation) $('status').textContent = message; },
       onError: (message) => { if (mine === generation) fail(message); },
       onKeyframe: () => { if (mine === generation) action(8); },
       onAck: (timestamp) => { if (mine === generation) mediaAcks.acknowledge(4, timestamp); },
@@ -318,15 +336,24 @@ function configureAudio() {
       try {
         if (mine !== generation || epoch !== audioGeneration) return;
         if (!muted && !paused && !document.hidden && audioContext?.state === 'running') {
-          if (nextAudio > audioContext.currentTime + .08 || sources.size >= 8) stopAudio();
+          const now = audioContext.currentTime;
+          // onended is dispatched on the main thread and may arrive late;
+          // completed sound must not consume the bounded future-source budget.
+          for (const [source, end] of sources) if (end <= now) sources.delete(source);
+          const duration = data.numberOfFrames / data.sampleRate;
+          if (!Number.isFinite(duration) || duration <= 0 || duration > audioMaximumLead - audioStartLead) return;
+          if (nextAudio + duration > now + audioMaximumLead || sources.size >= audioMaximumSources) stopAudio();
           const buffer = audioContext.createBuffer(data.numberOfChannels, data.numberOfFrames, data.sampleRate);
           for (let channel = 0; channel < data.numberOfChannels; channel++) {
             data.copyTo(buffer.getChannelData(channel), { planeIndex: channel, format: 'f32-planar' });
           }
           const source = audioContext.createBufferSource(); source.buffer = buffer; source.connect(audioContext.destination);
-          sources.add(source); source.onended = () => sources.delete(source);
-          nextAudio = Math.max(audioContext.currentTime + .005, nextAudio);
-          source.start(nextAudio); nextAudio += buffer.duration;
+          source.onended = () => sources.delete(source);
+          // Append continuously while prior sound is queued. Reapplying a
+          // minimum lead to every packet inserts gaps on small late arrivals.
+          const start = sources.size && nextAudio >= now ? nextAudio : now + audioStartLead;
+          source.start(start); nextAudio = start + buffer.duration;
+          sources.set(source, nextAudio);
         }
       } finally { data.close(); }
     } });
@@ -342,8 +369,8 @@ $('audio').addEventListener('click', async () => {
   if (mediaMode === 'webrtc') {
     const mine = generation, attempt = ++playbackAttempt;
     const updateButton = () => {
-      $('audio').textContent = muted ? 'Audio off' : 'Audio on';
-      $('audio').setAttribute('aria-label', $('audio').textContent);
+      setRailLabel('audio', muted ? 'Audio off' : 'Audio on');
+
       $('audio').setAttribute('aria-pressed', String(!muted));
     };
     muted = !muted; rtcDisplay.muted = muted; action(muted ? 11 : 10);
@@ -367,8 +394,8 @@ $('audio').addEventListener('click', async () => {
       muted = false; configureAudio(); if (!muted) action(10);
     } catch { $('error').textContent = 'Audio could not start. Check browser playback permissions.'; return; }
   }
-  if (!$('audio').disabled) $('audio').textContent = muted ? 'Audio off' : 'Audio on'; $('audio').setAttribute('aria-pressed', String(!muted));
-  $('audio').setAttribute('aria-label', $('audio').textContent);
+  if (!$('audio').disabled) setRailLabel('audio', muted ? 'Audio off' : 'Audio on'); $('audio').setAttribute('aria-pressed', String(!muted));
+
 });
 function updatePause() {
   if (!authenticated || !header || ws?.readyState !== WebSocket.OPEN) return;
@@ -392,7 +419,7 @@ function updatePause() {
   if (mediaMode !== 'webrtc' && !document.hidden && !muted && audioContext?.state !== 'running') {
     // Mobile browsers may suspend audio independently of the video connection.
     // Ask for a fresh tap instead of showing an inaccurate "Audio on" state.
-    muted = true; action(11); $('audio').textContent = 'Audio off';
+    muted = true; action(11); setRailLabel('audio', 'Audio off');
     $('audio').setAttribute('aria-label', 'Audio off'); $('audio').setAttribute('aria-pressed', 'false');
   }
   if (!document.hidden && !paused) configureAudio();
@@ -400,7 +427,7 @@ function updatePause() {
 }
 $('pause').addEventListener('click', () => {
   paused = !paused; updatePause();
-  $('pause').textContent = paused ? 'Resume' : 'Pause'; $('pause').setAttribute('aria-pressed', String(paused));
+  setRailLabel('pause', paused ? 'Resume video' : 'Pause video'); $('pause').setAttribute('aria-pressed', String(paused));
   $('pause').setAttribute('aria-label', paused ? 'Resume video' : 'Pause video');
 });
 document.addEventListener('visibilitychange', () => {
@@ -421,7 +448,7 @@ $('touch').addEventListener('click', () => {
   if (viewOnly) return;
   releaseTouches(); touchEnabled = !touchEnabled;
   if (!touchEnabled) hideKeyboard();
-  $('touch').textContent = touchEnabled ? 'Touch on' : 'Touch off'; $('touch').setAttribute('aria-pressed', String(touchEnabled));
+  setRailLabel('touch', touchEnabled ? 'Touch on' : 'Touch off'); $('touch').setAttribute('aria-pressed', String(touchEnabled));
 });
 function point(event) {
   const rect = canvas.getBoundingClientRect();
@@ -497,8 +524,9 @@ canvas.addEventListener('wheel', (event) => {
 }, { passive: false });
 canvas.addEventListener('contextmenu', (event) => { if (touchEnabled && !paused) event.preventDefault(); });
 $('drag-mode').addEventListener('click', () => {
+  if (viewOnly) return;
   releaseTouches(); selectDrag = !selectDrag;
-  $('drag-mode').textContent = selectDrag ? 'Drag: select' : 'Drag: scroll';
+  setRailLabel('drag-mode', selectDrag ? 'Select and drag' : 'Scroll gestures');
   $('drag-mode').setAttribute('aria-pressed', String(selectDrag));
 });
 $('disconnect').addEventListener('click', disconnect);
@@ -522,6 +550,7 @@ $('fullscreen').addEventListener('click', async () => {
     if (mine === generation && attempt === fullscreenAttempt && document.fullscreenElement && innerHeight > innerWidth) {
       $('orientation-help').textContent = 'This browser could not rotate automatically. Turn your phone sideways for landscape.';
       $('orientation-help').hidden = false;
+      fitCanvas();
     }
   }
 });
@@ -530,6 +559,7 @@ function unlockOrientation() {
 }
 function setControlTray(name = null, focus = false) {
   releaseTouches();
+  if (name) hideKeyboard();
   const previous = openControlTray;
   openControlTray = name;
   for (const tray of controlTrays) {
@@ -558,24 +588,45 @@ $('hide-controls').addEventListener('click', () => setControlsVisible(false));
 $('show-controls').addEventListener('click', () => setControlsVisible(true));
 function fitCanvas() {
   releaseTouches(false); // Soft-keyboard viewport changes must not cancel typing or composition.
-  const panel = $('stream-panel'), padding = getComputedStyle(panel);
-  const fullHeight = panel.clientHeight - parseFloat(padding.paddingTop) - parseFloat(padding.paddingBottom);
-  const fullWidth = panel.clientWidth - parseFloat(padding.paddingLeft) - parseFloat(padding.paddingRight);
+  $('control-panels').hidden = !(keyboardOpen || openControlTray || !$('orientation-help').hidden);
+  const panel = $('stream-panel'), viewport = $('receiver-viewport'), padding = getComputedStyle(viewport);
+  const fullHeight = viewport.clientHeight - parseFloat(padding.paddingTop) - parseFloat(padding.paddingBottom);
+  const fullWidth = viewport.clientWidth - parseFloat(padding.paddingLeft) - parseFloat(padding.paddingRight);
   panel.classList.toggle('controls-reserved', document.body.classList.contains('controls-hidden')
     && needsControlsRow(canvas.width, canvas.height, fullWidth, fullHeight));
   const bounds = $('stage').getBoundingClientRect();
   const size = fitDisplay(canvas.width, canvas.height, bounds.width, bounds.height);
   canvas.style.width = `${size.width}px`; canvas.style.height = `${size.height}px`;
   rtcDisplay.style.width = `${size.width}px`; rtcDisplay.style.height = `${size.height}px`;
+  const controls = $('primary-controls'), hint = $('rail-scroll-hint');
+  hint.hidden = true;
+  hint.hidden = !(controls.scrollHeight > controls.clientHeight + 1);
 }
 new ResizeObserver(fitCanvas).observe($('stage'));
+// Mobile browsers can resize only the visual viewport when the soft keyboard
+// opens. Fit the receiver to the visible area without releasing paired keys.
+const visualViewport = window.visualViewport;
+function fitVisualViewport() {
+  // Do not counteract browser pinch zoom by fitting back to its smaller view.
+  if (visualViewport?.height > 0 && (!visualViewport.scale || Math.abs(visualViewport.scale - 1) < .01)) {
+    document.documentElement?.style?.setProperty?.('--receiver-height', `${visualViewport.height}px`);
+    document.documentElement?.style?.setProperty?.('--receiver-top', `${Math.max(0, visualViewport.offsetTop || 0)}px`);
+  }
+  fitCanvas();
+  // The compact field is already inside the fitted viewport. scrollIntoView
+  // here can pan Android's visual viewport and hide the video on each key.
+}
+visualViewport?.addEventListener('resize', fitVisualViewport);
+visualViewport?.addEventListener('scroll', fitVisualViewport);
+if (visualViewport) fitVisualViewport();
 document.addEventListener('fullscreenchange', () => {
   if (!document.fullscreenElement) { fullscreenAttempt++; unlockOrientation(); $('orientation-help').hidden = true; }
-  $('fullscreen').textContent = document.fullscreenElement ? 'Exit full screen' : 'Full screen';
-  fitCanvas();
+  setRailLabel('fullscreen', document.fullscreenElement ? 'Exit full screen' : 'Full screen');
+  fitVisualViewport();
 });
 document.addEventListener('keydown', (event) => { if (event.key === 'Escape') {
   releaseTouches();
+  if (keyboardOpen) { hideKeyboard(); fitCanvas(); $('keyboard').focus(); }
   if (openControlTray) setControlTray(null, true);
   if (document.body.classList.contains('controls-hidden')) setControlsVisible(true);
 } });

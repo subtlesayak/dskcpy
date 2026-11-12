@@ -1,0 +1,123 @@
+{
+  "checked_at": "2026-11-11T11:31:35.490966+00:00",
+  "base_commit": "49d6b3a96328b3abc97240337cd214fd06427637",
+  "native_sha256": "b083ecfd69cf350e7cf831b767c1ebf36640c5e728ac79579f1fcc4c73331955",
+  "scope": "Right receiver rail, accessible typing/options panels, automatic authorized Android USB browser opening, bounded WebCodecs output drain",
+  "checks": {
+    "backend": {
+      "passed": 186,
+      "failed": 0,
+      "optional_skips": 7
+    },
+    "production_build": "TypeScript/Vite passed",
+    "rendered": "Synthetic color-pattern video; 320x640 and 844x390 layout, focus, right-side hidden-control gutter and fullscreen controls checked"
+  },
+  "physical": {
+    "prior_private_browser_baseline": "User confirmed visible video 20s and Calculator 123 from phone taps; audio stutters",
+    "usb": "Edge on Android 17 initially stalled at 5s without output; software H.264 unavailable. Bounded flush plus fresh IDR now stays connected with fresh decode ACKs; user confirms picture stays visible for 20 seconds.",
+    "usb_picture_and_keyboard": "PASS: user confirms video remains visible for 20 seconds and phone keyboard input; controlled 789 typing independently read in Mac Calculator accessibility state. USB stream left running.",
+    "audio": "FAIL: new combined candidate still beeps; native duplicate Resume epoch/encoder restart reproduced; correction pending with native owner",
+    "ui_observations": "PASS for the supplied Edge/Android phone: real portrait and landscape/fullscreen keyboard screenshots verify corrected fitting and compact controls. Aspect-ratio margins remain, and keyboard-open landscape desktop is necessarily small.",
+    "options_review": "User requested nav icons. Source now moves quick actions into the rail, pins Disconnect, collapses help and narrows the secondary menu; rendered/automated checks pass; phone confirmation pending."
+  },
+  "limitations": [
+    "Flushing stalled platform decoders may reduce FPS and increase IDR traffic; not a 60fps qualification",
+    "ACK timing is not physical input-to-display latency",
+    "No Safari/iOS test, VoiceOver pass, keyboard layout/IME qualification or universal compatibility claim",
+    "Native candidate predates later native utility fixes merged separately; binary unchanged",
+    "WebRTC audio-clock fix merged to master is not yet in this isolated runtime"
+  ],
+  "source_sha256": {
+    "gui/receiver/index.html": "cb7c365e07a89dfb417ea62e22270013d0bdb3f67f8fb77727eb5338c7e11b70",
+    "gui/receiver/receiver.css": "502e6917b1f8d671f6a1774c4a6909617da61ca7959a06c14b0a3eeea291bbce",
+    "gui/receiver/receiver.mjs": "98b03663f20c0ee6c17c226d23ee7f3778501dd36041f8982d2c172b1b81d673",
+    "gui/receiver/video.mjs": "cc25e3fc28b96c5c7f772e5a9f51cab8e7c4a3a6f6c882a472542fde968295e7",
+    "gui/scripts/launch.mjs": "79e2340b25c4e19ffb767bff208515bf1b1b45958c67f20e885c64593f189a5e",
+    "gui/server/browser-session.mjs": "1011f96e0f26ed472b68ff7dbd7ee1f4de1cb5d9b6bc97489dcdfe813c6e65ce",
+    "gui/server/service.mjs": "796f80207666de0c840567aaff530493cd10f61012e2c2ca7bd33907746ff473",
+    "gui/src/BrowserHostPanel.tsx": "2085e4eaf05800cf9e1a9d918dac88e26c166d116c3baea1b20f2f5667ecd672",
+    "tools/macos-usb-browser-start.sh": "d0bc038cb42a047aa678034c8eb843143c6b0d56e0ef9c97f229a8d9bc39e732"
+  },
+  "standards_reference": "https://www.w3.org/TR/webcodecs/#dom-videodecoder-flush",
+  "merged_master": "e5e8c6e3",
+  "runtime_note": "Master source merged after the live USB stream began; native artifact and loaded service remain unchanged. WebRTC audio fix loads on a future authorized launcher restart.",
+  "compact_typing": {
+    "source": "Inner receiver viewport fitted to visible height and offset; compact one-row typing strip; 56px icon rail with accessible labels; native text resizing retained; no forced scrollIntoView during keyboard resize",
+    "synthetic_geometry": {
+      "allContentInsideVisibleViewport": true,
+      "expectedVisibleBottom": 192,
+      "expectedVisibleTop": 12,
+      "fullscreen": true,
+      "outerHeight": 390,
+      "rects": {
+        "close-keyboard": {
+          "bottom": 181,
+          "height": 44,
+          "width": 44,
+          "x": 733,
+          "y": 137
+        },
+        "display": {
+          "bottom": 124,
+          "height": 108,
+          "width": 192,
+          "x": 298,
+          "y": 16
+        },
+        "hide-controls": {
+          "bottom": 188,
+          "height": 44,
+          "width": 52,
+          "x": 788,
+          "y": 144
+        },
+        "keyboard-input": {
+          "bottom": 181,
+          "height": 44,
+          "width": 716,
+          "x": 11,
+          "y": 137
+        },
+        "receiver-viewport": {
+          "bottom": 192,
+          "height": 180,
+          "width": 844,
+          "x": 0,
+          "y": 12
+        }
+      },
+      "syntheticOnly": true
+    },
+    "rendered_checks": [
+      "320x640 with simulated visible height 360",
+      "844x390 with simulated visible height 180",
+      "Fullscreen outer 390, inner visible height 180 and offset 12: video, field, Close and Hide all fit",
+      "RTL plus 200% root text size at 320px: 32px field grows to 66px, no text or horizontal overflow",
+      "Visible primary controls measure 44x44; Close 44x44; Hide at least 44px",
+      "Close/Escape focus restoration, scrollable Options and non-overlapping RTL Show controls checked"
+    ],
+    "physical": "PASS: user refreshed existing USB receiver and confirms entire Mac picture, typing field and Close fit above the real OS keyboard in portrait and landscape fullscreen. Supplied phone screenshots independently show desktop edges and controls above the keyboard. No new native binary/controller restart.",
+    "limits": [
+      "The synthetic viewport shim is a fixture, not a physical OS keyboard",
+      "No VoiceOver or Safari/iOS qualification",
+      "200% text-size check is separate from full browser-zoom qualification"
+    ]
+  },
+  "navigation_icons": {
+    "implemented": [
+      "Pause/resume and scroll/select-drag move into icon rail",
+      "Disconnect pinned outside the scrolling actions",
+      "Volume and window actions use labeled icons in compact expandable groups",
+      "Touch instructions and connection diagnostics collapsed; secondary panel width 208px on wider views"
+    ],
+    "verification": [
+      "176 backend tests pass; seven optional skips; TypeScript/Vite and diff checks pass",
+      "Actual synthetic browser Pause/Resume and Select/drag accessible states verified",
+      "844x390 no horizontal overflow; pinned Disconnect 52x44 at bottom 382",
+      "Simulated keyboard visible height 180: Disconnect bottom 172 and typing field bottom 165 remain visible",
+      "Pinned Disconnect tested on synthetic session; live user session untouched"
+    ],
+    "physical": "Pending user-chosen receiver refresh; preceding phone keyboard/layout pass remains tied to the previous assets"
+  },
+  "audio_scheduling_candidate": "doc/testing/mac/receiver-audio-scheduling.json; corrected f837 native passes USB continuous tone/mute, Home10s/return and five-minute audible soak; other transports/routes remain open"
+}

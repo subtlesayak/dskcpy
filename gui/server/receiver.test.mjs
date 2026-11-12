@@ -12,7 +12,7 @@ const parameters = new Uint8Array([0, 0, 1, 0x67, 0x64, 0, 0x28, 0, 0, 1, 0x68, 
 
 // Deterministic lifecycle tests against the actual receiver script. These model
 // delayed browser callbacks; rendered/device QA is separate from this harness.
-function receiver(t, { portrait = false, lockFails = false, webRtc = false, webCodecs = true, qrKey = '', keyboard = false, viewOnly = false } = {}) {
+function receiver(t, { portrait = false, lockFails = false, webRtc = false, webCodecs = true, qrKey = '', keyboard = false, viewOnly = false, visualHeight = 0, webAudio = false } = {}) {
   const timers = new Set(), sockets = [], decoders = [], orientation = [];
   let resize;
   const locationState = { protocol: 'https:', host: 'receiver.test', pathname: qrKey ? '/join' : '/', search: '', hash: qrKey ? `#connect=${qrKey}` : '' };
@@ -30,7 +30,10 @@ function receiver(t, { portrait = false, lockFails = false, webRtc = false, webC
     requestSubmit() { return this.emit('submit'); }
     setAttribute(name, value) { this.attrs.set(name, value); }
     removeAttribute(name) { this.attrs.delete(name); }
-    focus() { document.activeElement = this; }
+    focus() {
+      if (this === $('keyboard-input') && $('control-panels').hidden) return;
+      document.activeElement = this;
+    }
     setPointerCapture() {}
     getBoundingClientRect() { return { left: 0, top: 0, width: 800, height: 500 }; }
     getContext() { return { drawImage() {}, clearRect() {} }; }
@@ -40,7 +43,9 @@ function receiver(t, { portrait = false, lockFails = false, webRtc = false, webC
   }
   const elements = new Map();
   const $ = (id) => { if (!elements.has(id)) elements.set(id, new Target()); return elements.get(id); };
-  const document = new Target(); document.body = new Target(); document.getElementById = $;
+  const cssVariables = new Map();
+  const document = new Target(); document.body = new Target(); document.documentElement = new Target();
+  document.documentElement.style.setProperty = (key, value) => cssVariables.set(key, value); document.getElementById = $;
   document.exitFullscreen = async () => { document.fullscreenElement = null; document.emit('fullscreenchange'); };
   class Socket extends Target {
     static OPEN = 1; readyState = 1; sent = [];
@@ -58,14 +63,45 @@ function receiver(t, { portrait = false, lockFails = false, webRtc = false, webC
     close() { this.state = 'closed'; }
     output(timestamp) { this.decodeQueueSize = Math.max(0, this.decodeQueueSize - 1); this.callbacks.output({ timestamp, close() {} }); }
   }
+  const soundDecoders = [], audioSources = [], audioContexts = [];
+  class SoundDecoder extends Target {
+    state = 'unconfigured'; decodeQueueSize = 0;
+    constructor(callbacks) { super(); this.callbacks = callbacks; soundDecoders.push(this); }
+    configure() { this.state = 'configured'; }
+    decode() { this.emit('dequeue'); }
+    close() { this.state = 'closed'; }
+    output(frames = 480) {
+      const data = { numberOfChannels: 2, numberOfFrames: frames, sampleRate: 48000,
+        closed: false, copyTo(target) { target.fill(.01); }, close() { this.closed = true; } };
+      this.callbacks.output(data); return data;
+    }
+  }
+  class AudioContext {
+    state = 'running'; currentTime = 0;
+    constructor() { audioContexts.push(this); }
+    async resume() { this.state = 'running'; }
+    async close() { this.state = 'closed'; }
+    createBuffer(channels, frames, rate) {
+      const planes = Array.from({ length: channels }, () => new Float32Array(frames));
+      return { duration: frames / rate, getChannelData: channel => planes[channel] };
+    }
+    createBufferSource() {
+      const source = { stopped: false, connect() {}, start(at) { this.startAt = at; },
+        stop() { this.stopped = true; this.onended?.(); } };
+      audioSources.push(source); return source;
+    }
+  }
   const window = new Target(); window.isSecureContext = true;
+  if (webAudio) window.AudioDecoder = SoundDecoder;
+  if (visualHeight) { window.visualViewport = new Target(); window.visualViewport.height = visualHeight; }
   if (webCodecs) { window.VideoDecoder = Decoder; window.EncodedVideoChunk = true; }
   if (webRtc) window.RTCPeerConnection = true;
   window.history = { replaceState(_state, _title, url) { locationState.hash = ''; historyChanges.push(url); } };
   const context = vm.createContext({ ...protocol,
     createBrowserKeyboard,
     createVideoReceiver: (options) => createVideoReceiver({ ...options, Decoder }),
-    window, document, WebSocket: Socket, VideoDecoder: Decoder,
+    window, document, WebSocket: Socket, VideoDecoder: Decoder, AudioDecoder: SoundDecoder, AudioContext,
+    EncodedAudioChunk: class { constructor(value) { Object.assign(this, value); } },
     EncodedVideoChunk: class { constructor(value) { Object.assign(this, value); } },
     ResizeObserver: class { constructor(callback) { resize = callback; } observe() {} }, getComputedStyle: () => ({ paddingTop: '0', paddingRight: '0', paddingBottom: '0', paddingLeft: '0' }),
     location: locationState, performance: { now: () => 2000 }, AbortSignal,
@@ -89,7 +125,7 @@ function receiver(t, { portrait = false, lockFails = false, webRtc = false, webC
     new Uint8Array(bytes, 16).set(payload); socket.emit('message', { data: bytes });
   }
   media(0, 1, parameters);
-  return { $, document, window, socket, sockets, locationState, decoders, media, orientation, historyChanges, reflow: () => resize() };
+  return { $, document, window, socket, sockets, locationState, decoders, media, orientation, historyChanges, cssVariables, soundDecoders, audioSources, audioContexts, reflow: () => resize() };
 }
 
 test('suspension drains queued frames and ignores stale decoder callbacks after resume', async (t) => {
@@ -158,38 +194,35 @@ test('show-controls reserves a separate row only when neither letterbox margin f
   assert.equal(protocol.needsControlsRow(1920, 1080, 820, 460), true);
 });
 
-test('main-bar Volume and Window disclose one tray at a time and Escape restores focus', (t) => {
+test('Options groups secondary actions and Close/Escape restore focus to the right rail', (t) => {
   const h = receiver(t);
-  h.$('volume').emit('click');
-  assert.equal(h.$('volume-controls').hidden, false);
-  assert.equal(h.$('volume').attrs.get('aria-expanded'), 'true');
-  assert.equal(h.document.activeElement, h.$('volume-down'));
+  h.$('more').emit('click');
+  assert.equal(h.$('more-controls').hidden, false);
+  assert.equal(h.document.activeElement, h.$('close-options'));
   h.$('volume-down').emit('click'); h.$('volume-up').emit('click');
-  h.$('window').emit('click');
-  assert.equal(h.$('volume-controls').hidden, true);
-  assert.equal(h.$('window-controls').hidden, false);
   h.$('minimize').emit('click'); h.$('maximize').emit('click');
-  assert.deepEqual(h.socket.sent.filter((data) => Buffer.isBuffer(data) && data[0] === 5).slice(-4).map((data) => data[1]), [0, 1, 3, 4]);
-  h.document.emit('keydown', { key: 'Escape' });
-  assert.equal(h.$('window-controls').hidden, true);
-  assert.equal(h.document.activeElement, h.$('window'));
-  h.$('volume').emit('click'); h.$('hide-controls').emit('click');
-  assert.equal(h.$('volume-controls').hidden, true);
+  assert.deepEqual(h.socket.sent.filter(data => Buffer.isBuffer(data) && data[0] === 5).slice(-4).map(data => data[1]), [0, 1, 3, 4]);
+  h.$('close-options').emit('click');
+  assert.equal(h.$('more-controls').hidden, true);
+  assert.equal(h.document.activeElement, h.$('more'));
+  h.$('more').emit('click'); h.document.emit('keydown', { key: 'Escape' });
+  assert.equal(h.$('more-controls').hidden, true);
+  assert.equal(h.document.activeElement, h.$('more'));
+  h.$('more').emit('click'); h.$('hide-controls').emit('click');
+  assert.equal(h.$('more-controls').hidden, true);
   h.$('show-controls').emit('click');
-  assert.equal(h.$('volume').attrs.get('aria-expanded'), 'false');
-  h.$('more').emit('click'); assert.equal(h.$('more-controls').hidden, false);
-  h.$('window').emit('click'); assert.equal(h.$('more-controls').hidden, true);
-  h.$('disconnect').emit('click'); assert.equal(h.$('window-controls').hidden, true);
+  assert.equal(h.$('more').attrs.get('aria-expanded'), 'false');
+  h.$('disconnect').emit('click');
 });
 
-test('closing a Volume tray stops hold-to-repeat', async (t) => {
-  const h = receiver(t); h.$('volume').emit('click');
+test('closing a native volume disclosure stops hold-to-repeat', async (t) => {
+  const h = receiver(t); h.$('more').emit('click');
   h.$('volume-up').emit('pointerdown', { button: 0, pointerId: 10 });
-  await new Promise((resolve) => setTimeout(resolve, 590));
-  const count = () => h.socket.sent.filter((data) => Buffer.isBuffer(data) && data[0] === 5 && data[1] === 1).length;
+  await new Promise(resolve => setTimeout(resolve, 590));
+  const count = () => h.socket.sent.filter(data => Buffer.isBuffer(data) && data[0] === 5 && data[1] === 1).length;
   assert.ok(count() >= 2);
-  h.$('window').emit('click'); const stopped = count();
-  await new Promise((resolve) => setTimeout(resolve, 180));
+  h.$('volume').emit('toggle'); const stopped = count();
+  await new Promise(resolve => setTimeout(resolve, 180));
   assert.equal(count(), stopped); h.$('disconnect').emit('click');
 });
 
@@ -221,7 +254,7 @@ test('two-finger scroll emits no touch-down and never clicks with the remaining 
 
 test('select-drag is explicit; adding a second finger cancels the pressed contact before scrolling', (t) => {
   const h = receiver(t); h.$('drag-mode').emit('click');
-  assert.equal(h.$('drag-mode').textContent, 'Drag: select');
+  assert.equal(h.$('drag-mode').attrs.get('aria-label'), 'Select and drag');
   pointer(h, 'pointerdown', 1, 100, 200); pointer(h, 'pointermove', 1, 100, 180);
   pointer(h, 'pointerdown', 2, 200, 180); pointer(h, 'pointermove', 2, 200, 140);
   assert.deepEqual(inputs(h).map((data) => data[0] === 3 ? data[1] : 'scroll'), [0, 2, 3, 'scroll']);
@@ -256,7 +289,7 @@ test('browser-native mode connects without WebCodecs and forwards explicit audio
   assert.equal(h.decoders.length, 0);
   assert.equal(h.$('stream-panel').hidden, false);
   await h.$('audio').emit('click');
-  assert.equal(h.$('audio').textContent, 'Audio on');
+  assert.equal(h.$('audio').attrs.get('aria-label'), 'Audio on');
   assert.equal(h.$('rtc-display').muted, false);
   h.document.hidden = true; h.document.emit('visibilitychange');
   assert.equal(h.$('rtc-display').muted, true);
@@ -264,7 +297,7 @@ test('browser-native mode connects without WebCodecs and forwards explicit audio
   h.document.hidden = false; h.document.emit('visibilitychange');
   assert.equal(h.$('rtc-display').paused, false);
   await h.$('audio').emit('click');
-  assert.equal(h.$('audio').textContent, 'Audio off');
+  assert.equal(h.$('audio').attrs.get('aria-label'), 'Audio off');
   assert.equal(h.$('rtc-display').muted, true);
   const commands = h.socket.sent.filter((data) => Buffer.isBuffer(data) && data[0] === 5).map((data) => data[1]);
   assert.ok(commands.includes(10)); assert.equal(commands.at(-1), 11);
@@ -280,7 +313,7 @@ test('late browser audio rejection cannot change a disconnected receiver', async
   rejectPlay(new Error('Playback interrupted by teardown'));
   await enabling;
   assert.equal(h.$('error').textContent, '');
-  assert.equal(h.$('audio').textContent, 'Audio off');
+  assert.equal(h.$('audio').attrs.get('aria-label'), 'Audio off');
 });
 
 test('a superseded audio enable cannot report an error after the user mutes again', async (t) => {
@@ -292,7 +325,7 @@ test('a superseded audio enable cannot report an error after the user mutes agai
   rejectPlay(new Error('Playback interrupted by mute'));
   await enabling;
   assert.equal(h.$('error').textContent, '');
-  assert.equal(h.$('audio').textContent, 'Audio off');
+  assert.equal(h.$('audio').attrs.get('aria-label'), 'Audio off');
   assert.equal(h.$('rtc-display').muted, true);
   h.$('disconnect').emit('click');
 });
@@ -320,7 +353,7 @@ test('hiding during audio enable preserves mute intent and its accessible button
   await enabling;
   h.$('rtc-display').play = () => Promise.resolve();
   h.document.hidden = false; h.document.emit('visibilitychange');
-  assert.equal(h.$('audio').textContent, 'Audio on');
+  assert.equal(h.$('audio').attrs.get('aria-label'), 'Audio on');
   assert.equal(h.$('audio').attrs.get('aria-pressed'), 'true');
   assert.equal(h.$('rtc-display').muted, false);
   assert.equal(h.$('error').textContent, '');
@@ -331,7 +364,7 @@ test('a current browser playback denial still mutes audio and offers a retry', a
   const h = receiver(t, { webRtc: true, webCodecs: false });
   h.$('rtc-display').play = () => Promise.reject(new Error('Playback denied'));
   await h.$('audio').emit('click');
-  assert.equal(h.$('audio').textContent, 'Audio off');
+  assert.equal(h.$('audio').attrs.get('aria-label'), 'Audio off');
   assert.equal(h.$('audio').attrs.get('aria-pressed'), 'false');
   assert.equal(h.$('rtc-display').muted, true);
   assert.match(h.$('error').textContent, /Audio could not start/);
@@ -399,6 +432,8 @@ test('window view-only policy disables touch, keyboard, audio and desktop window
   const h = receiver(t, { keyboard: true, viewOnly: true, webRtc: true, webCodecs: false });
   assert.equal(h.$('keyboard').hidden, true); assert.equal(h.$('touch').disabled, true);
   assert.equal(h.$('audio').disabled, true); assert.equal(h.$('window').hidden, true);
+  assert.equal(h.$('drag-mode').disabled, true); h.$('drag-mode').emit('click');
+  assert.notEqual(h.$('drag-mode').attrs.get('aria-pressed'), 'true');
   h.$('touch').emit('click'); h.$('keyboard').emit('click'); await h.$('audio').emit('click');
   pointer(h, 'pointerdown', 1, 100, 100); pointer(h, 'pointerup', 1, 100, 100);
   assert.equal(inputs(h).length, 0);
@@ -414,5 +449,149 @@ test('soft-keyboard viewport reflow preserves pending physical key pairing', (t)
   const keys = h.socket.sent.filter((p) => Buffer.isBuffer(p) && p[0] === 8);
   assert.deepEqual(keys.map((p) => p[1]), [0, 1]);
   h.$('hide-controls').emit('click'); assert.equal(h.$('keyboard-controls').hidden, true);
+  h.$('disconnect').emit('click');
+});
+
+test('keyboard and Options panels are exclusive; close restores the keyboard trigger', (t) => {
+  const h = receiver(t, { keyboard: true });
+  h.$('keyboard').emit('click');
+  assert.equal(h.$('keyboard-controls').hidden, false);
+  assert.equal(h.$('control-panels').hidden, false);
+  assert.equal(h.document.activeElement, h.$('keyboard-input'));
+  h.$('more').emit('click');
+  assert.equal(h.$('keyboard-controls').hidden, true);
+  assert.equal(h.$('more-controls').hidden, false);
+  h.$('keyboard').emit('click');
+  assert.equal(h.$('more-controls').hidden, true);
+  assert.equal(h.$('keyboard-controls').hidden, false);
+  h.$('close-keyboard').emit('click');
+  assert.equal(h.$('keyboard-controls').hidden, true);
+  assert.equal(h.document.activeElement, h.$('keyboard'));
+  h.$('disconnect').emit('click');
+});
+
+test('a shrinking visual viewport keeps typing fitted without breaking paired key releases', (t) => {
+  const h = receiver(t, { keyboard: true, visualHeight: 600 });
+  h.$('keyboard').emit('click');
+  h.$('keyboard-input').emit('keydown', { code: 'ControlLeft', key: 'Control', ctrlKey: true });
+  h.window.visualViewport.height = 240; h.window.visualViewport.emit('resize');
+  assert.equal(h.cssVariables.get('--receiver-height'), '240px');
+  h.$('keyboard-input').emit('keyup', { code: 'ControlLeft', key: 'Control' });
+  const keys = h.socket.sent.filter(data => Buffer.isBuffer(data) && data[0] === 8);
+  assert.deepEqual(keys.map(data => [data[1], data.readUInt16BE(2)]), [[0, 224], [1, 224]]);
+  assert.equal(h.$('keyboard-controls').hidden, false);
+  h.$('disconnect').emit('click');
+});
+
+test('keyboard fitting retains viewport offset through fullscreen and does not force page scrolling', async (t) => {
+  const h = receiver(t, { keyboard: true, visualHeight: 600 }); let scrolls = 0;
+  h.$('keyboard-input').scrollIntoView = () => scrolls++;
+  h.$('keyboard').emit('click');
+  h.window.visualViewport.height = 180; h.window.visualViewport.offsetTop = 12;
+  h.window.visualViewport.emit('resize');
+  assert.equal(h.cssVariables.get('--receiver-height'), '180px');
+  assert.equal(h.cssVariables.get('--receiver-top'), '12px');
+  await h.$('fullscreen').emit('click');
+  assert.equal(h.cssVariables.get('--receiver-height'), '180px');
+  assert.equal(h.$('fullscreen').attrs.get('aria-label'), 'Exit full screen');
+  assert.equal(scrolls, 0); assert.equal(h.$('keyboard-controls').hidden, false);
+  h.$('disconnect').emit('click');
+});
+
+test('pinch zoom does not refit away the user magnification', (t) => {
+  const h = receiver(t, { keyboard: true, visualHeight: 600 });
+  h.window.visualViewport.scale = 2; h.window.visualViewport.height = 300;
+  h.window.visualViewport.offsetTop = 50; h.window.visualViewport.emit('resize');
+  assert.equal(h.cssVariables.get('--receiver-height'), '600px');
+  assert.equal(h.cssVariables.get('--receiver-top'), '0px');
+  h.$('disconnect').emit('click');
+});
+
+test('host capture denial explains the Mac recovery action instead of requesting another code alone', (t) => {
+  const h = receiver(t);
+  h.socket.readyState = 3; h.socket.emit('close', { code: 1008, reason: 'capture-permission' });
+  assert.match(h.$('error').textContent, /allow Screen & System Audio Recording/);
+  assert.match(h.$('error').textContent, /restart dskcpy/);
+  assert.match(h.$('status').textContent, /^Disconnected/);
+});
+
+
+test('rail pause/resume releases typing and retains an explicit accessible playback state', (t) => {
+  const h = receiver(t, { keyboard: true });
+  h.$('keyboard').emit('click');
+  h.$('keyboard-input').emit('keydown', { code: 'ControlLeft', key: 'Control', ctrlKey: true });
+  h.$('pause').emit('click');
+  assert.equal(h.$('keyboard-controls').hidden, true);
+  assert.equal(h.$('pause').attrs.get('aria-label'), 'Resume video');
+  assert.equal(h.$('pause').attrs.get('aria-pressed'), 'true');
+  assert.equal(h.socket.sent.filter(p => Buffer.isBuffer(p) && p[0] === 8).at(-1)[1], 2);
+  h.$('pause').emit('click');
+  assert.equal(h.$('pause').attrs.get('aria-label'), 'Pause video');
+  assert.equal(h.$('pause').attrs.get('aria-pressed'), 'false');
+  const commands = h.socket.sent.filter(p => Buffer.isBuffer(p) && p[0] === 5).map(p => p[1]);
+  assert.ok(commands.includes(7)); assert.equal(commands.at(-1), 8);
+  h.$('disconnect').emit('click');
+});
+
+
+async function audioReceiver(t) {
+  const h = receiver(t, { webAudio: true });
+  h.media(0, 4, new Uint8Array(19));
+  await h.$('audio').emit('click');
+  return h;
+}
+
+test('WebCodecs audio preserves a fresh 100ms burst without canceling scheduled sound', async (t) => {
+  const h = await audioReceiver(t);
+  for (let i = 0; i < 10; i++) h.soundDecoders[0].output();
+  assert.equal(h.audioSources.length, 10);
+  assert.equal(h.audioSources.filter(s => s.stopped).length, 0);
+  for (let i = 1; i < h.audioSources.length; i++) {
+    const before = h.audioSources[i - 1], after = h.audioSources[i];
+    assert.ok(Math.abs(after.startAt - before.startAt - before.buffer.duration) < 1e-9);
+  }
+  const last = h.audioSources.at(-1);
+  assert.ok(last.startAt + last.buffer.duration < .25);
+  h.$('disconnect').emit('click');
+});
+
+test('WebCodecs audio appends a slightly late packet while prior sound is still scheduled', async (t) => {
+  const h = await audioReceiver(t); h.soundDecoders[0].output();
+  const before = h.audioSources[0], expected = before.startAt + before.buffer.duration;
+  h.audioContexts[0].currentTime = expected - .002;
+  h.soundDecoders[0].output();
+  assert.ok(Math.abs(h.audioSources[1].startAt - expected) < 1e-9);
+  h.$('disconnect').emit('click');
+});
+
+test('WebCodecs audio mute and backgrounding cancel sound and ignore old decoder output', async (t) => {
+  const h = await audioReceiver(t), old = h.soundDecoders[0]; old.output();
+  await h.$('audio').emit('click');
+  assert.equal(h.audioSources[0].stopped, true);
+  old.output(); assert.equal(h.audioSources.length, 1);
+  await h.$('audio').emit('click'); const current = h.soundDecoders.at(-1); current.output();
+  h.document.hidden = true; h.document.emit('visibilitychange');
+  assert.equal(h.audioSources.at(-1).stopped, true);
+  assert.equal(current.output().closed, true); assert.equal(h.audioSources.length, 2);
+  h.$('disconnect').emit('click');
+});
+
+test('WebCodecs audio remains bounded during excessive input and recovers after an underrun', async (t) => {
+  const h = await audioReceiver(t);
+  for (let i = 0; i < 80; i++) h.soundDecoders[0].output();
+  const active = h.audioSources.filter(s => !s.stopped);
+  assert.ok(active.length <= 24);
+  assert.ok(active.at(-1).startAt + active.at(-1).buffer.duration < .25);
+  h.audioContexts[0].currentTime = 3;
+  h.soundDecoders[0].output();
+  assert.ok(h.audioSources.at(-1).startAt > 3 && h.audioSources.at(-1).startAt < 3.1);
+  h.$('disconnect').emit('click');
+});
+
+test('WebCodecs audio closes oversized output instead of allocating an unbounded playback buffer', async (t) => {
+  const h = await audioReceiver(t);
+  assert.equal(h.soundDecoders[0].output(48000).closed, true);
+  assert.equal(h.audioSources.length, 0);
+  h.soundDecoders[0].output(); assert.equal(h.audioSources.length, 1);
   h.$('disconnect').emit('click');
 });

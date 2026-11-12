@@ -6,9 +6,10 @@ export function browserJoinUrl(address, key) {
       || url.search || url.hash || url.pathname !== '/') throw new Error('Invalid receiver address.');
   // Fragments are not sent in HTTP requests. The receiver clears this from
   // the current history entry before authentication; never persist this URL.
-  // A distinct path forces a document load when a scanner reuses an older
-  // receiver tab that predates automatic fragment handling.
-  url.pathname = '/join';
+  // Use an independent public navigation ID, never a key or key fingerprint.
+  // Even an existing /join tab must load a fresh document and current scripts
+  // when Android's VIEW intent or a camera scanner reuses it.
+  url.pathname = `/join/${crypto.randomUUID().replaceAll('-', '')}`;
   url.hash = `connect=${key}`;
   return url.href;
 }
