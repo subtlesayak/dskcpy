@@ -58,3 +58,23 @@ real software keyboards, private-VPN reachability, permissions or hardware audio
 [Playwright browser documentation](https://playwright.dev/docs/browsers#webkit)
 explains those differences. Separate physical tests remain required before
 claiming support or activating an update on a user's remote host.
+
+## ICE-lite SDP scope
+
+The pinned werift 0.27.0 serializer emits `a=ice-lite` inside media sections.
+[RFC 8839 §5.3](https://www.rfc-editor.org/rfc/rfc8839.html#section-5.3)
+defines this flag at session level only. The host now moves that known generated
+flag before the first media section and consolidates duplicate copies. All other
+SDP lines, including candidate addresses, credentials, fingerprints, codecs and
+ordering, remain unchanged. Invalid or missing host-generated ICE-lite offers
+fail closed. There is no new ICE server, interface discovery, public relay,
+trickle signaling, client answer rewrite or change to authentication.
+
+A regression on the real generated two-track offer fails before this correction;
+serialization, idempotence, bounds and real private-peer media checks pass after
+it. This standards correction alone has not established WebKit WebRTC media.
+A diagnostic WebKit answer reaches stable signaling and parses the offered UDP
+candidates, but its statistics show no remote candidates or candidate pairs.
+Both media and data-channel werift offers stall, while a native WebKit peer pair
+connects. The connection failure remains open; it must not be labeled a codec
+failure, a proven OS-permission cause or a Safari compatibility fix.

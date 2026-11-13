@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { RTCPeerConnection, useH264, useOPUS } from 'werift';
-import { createRtcMedia, privateRtcBind, rtpTimestamp } from './browser-rtc.mjs';
+import { createRtcMedia, privateRtcBind, rtpTimestamp, sessionScopedIceLite } from './browser-rtc.mjs';
 
 const configuration = Buffer.from('000000016742c01e0102030000000168ce3c80', 'hex');
 const key = Buffer.from('0000000165888401020304', 'hex');
@@ -38,6 +38,9 @@ test('real private ICE/DTLS/SRTP peers exchange native H264 and Opus without pub
   receiver.onTrack.subscribe((track) => track.onReceiveRtp.subscribe((packet) => packets.push({ kind: track.kind, packet })));
   assert.equal(await sender.frame(key, 0n, true), false);
   const offer = await sender.offer();
+  const lines = offer.sdp.split('\r\n');
+  assert.equal(lines.filter(line => line === 'a=ice-lite').length, 1, 'ICE-lite is a single session flag');
+  assert.ok(lines.indexOf('a=ice-lite') < lines.findIndex(line => line.startsWith('m=')), 'ICE-lite must precede all media sections');
   const candidates = offer.sdp.split('\r\n').filter((line) => line.startsWith('a=candidate:'));
   assert.ok(candidates.length > 0);
   assert.ok(candidates.every((line) => line.split(' ')[4] === '127.0.0.1'));
@@ -140,4 +143,21 @@ test('a dropped concurrent audio packet leaves a sample-clock gap without retain
   assert.equal(await media.sound(Buffer.from([0xf0, 0xff, 0xfe]), 1000002n), true);
   assert.deepEqual(packets.map((p) => p.header.timestamp), [48000, 48960]);
   assert.equal((packets[1].header.sequenceNumber - packets[0].header.sequenceNumber) & 0xffff, 1);
+});
+
+
+test('ICE-lite serialization changes only the known flag and is idempotent', () => {
+  const before = 'v=0\r\ns=owned-test\r\na=group:BUNDLE 0 1\r\nm=video 9 UDP/TLS/RTP/SAVPF 96\r\na=ice-lite\r\na=ice-ufrag:test-only\r\na=candidate:1 1 udp 1 127.0.0.1 12345 typ host\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\na=ice-lite\r\na=rtpmap:111 opus/48000/2\r\n';
+  const expected = before.replaceAll('a=ice-lite\r\n', '').replace('m=video', 'a=ice-lite\r\nm=video');
+  assert.equal(sessionScopedIceLite(before), expected);
+  assert.equal(sessionScopedIceLite(expected), expected);
+  assert.equal(sessionScopedIceLite(before).replace('a=ice-lite\r\n', ''), before.replaceAll('a=ice-lite\r\n', ''));
+});
+
+test('missing or invalid host-generated ICE-lite descriptions fail closed', () => {
+  for (const value of [null, {}, '', 'v=0\n' + 'a=ice-lite\nm=audio 9 RTP/AVP 0\n',
+    'v=0\r\na=ice-lite\r\n', 'v=0\r\nm=audio 9 RTP/AVP 0\r\n',
+    'v=0\r\na=ice-lite\r\nm=audio 9 RTP/AVP 0\r\n' + 'x'.repeat(32768)]) {
+    assert.throws(() => sessionScopedIceLite(value), /private media offer|Private media offer/);
+  }
 });
