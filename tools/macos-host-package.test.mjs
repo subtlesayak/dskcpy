@@ -10,7 +10,7 @@ test('portable Mac host accepts arm64 system dependencies and declared deploymen
   assert.throws(() => inspectMachO(commands.replace('minos 13.0', 'minos 14.0'), libraries, 'arm64'), /deployment target/);
   assert.throws(() => inspectMachO(commands.replace('minos 13.0', 'minos 13.1'), libraries, 'arm64'), /deployment target/);
   assert.throws(() => inspectMachO('', libraries, 'arm64'), /deployment target/);
-  for (const unsafe of ['/opt/homebrew/lib/libopus.dylib', '@rpath/libopus.dylib', '/tmp/libopus.dylib']) {
+  for (const unsafe of ['/opt/homebrew/lib/libopus.dylib', '@rpath/libopus.dylib', '/tmp/libopus.dylib', '/usr/lib/../../opt/private.dylib', '/System/Library/../../../tmp/private.dylib']) {
     assert.throws(() => inspectMachO(commands, libraries + `\t${unsafe} (compatibility version 1.0.0)\n`, 'arm64'), /Non-system/);
   }
 });
@@ -25,4 +25,14 @@ test('Intel inspection is explicit, preserves minimum/linkage gates and rejects 
   assert.throws(() => inspectMachO(commands, libraries, 'x86_64', 13, 'x64'), /Unsupported/);
   assert.throws(() => inspectMachO(commands.replace('minos 13.0', 'minos 14.0'), libraries, 'x86_64', 13, 'x86_64'), /deployment target/);
   assert.throws(() => inspectMachO(commands, libraries + '\t@rpath/libbad.dylib (compatibility version 1.0.0)\n', 'x86_64', 13, 'x86_64'), /Non-system/);
+});
+
+
+test('Mac deployment guard includes patch versions and rejects non-macOS build platforms', () => {
+  for (const arch of ['arm64', 'x86_64']) {
+    for (const version of ['13.0.1', '13.1', '14.0']) assert.throws(() => inspectMachO(commands.replace('minos 13.0', `minos ${version}`), libraries, arch, 13, arch), /deployment target/);
+    for (const version of ['10.13', '12.6.1', '13.0.0']) assert.equal(inspectMachO(commands.replace('minos 13.0', `minos ${version}`), libraries, arch, 13, arch).architecture, arch);
+    for (const platform of [2, 6, 7, 10]) assert.throws(() => inspectMachO(commands.replace('platform 1', `platform ${platform}`), libraries, arch, 13, arch), /macOS build platform/);
+    assert.throws(() => inspectMachO(commands.replace(' platform 1\n', ''), libraries, arch, 13, arch), /macOS build platform/);
+  }
 });

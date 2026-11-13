@@ -14,19 +14,29 @@ export function macHostArchitecture(nodeArchitecture = process.arch) {
 export function inspectMachO(loadCommands, libraries, architectures, minimum = 13, expected = 'arm64') {
   if (!['arm64', 'x86_64'].includes(expected)) throw Error('Unsupported Mac host architecture');
   if (!architectures.trim().split(/\s+/).includes(expected)) throw new Error(`Hosting executable lacks ${expected}`);
+  if (!/^\d+(?:\.\d+)*$/.test(String(minimum))) throw Error('Invalid minimum macOS version');
+  const ceiling = String(minimum).split('.').map(Number);
+  const exceeds = version => {
+    const parts = version.split('.').map(Number);
+    for (let i = 0; i < Math.max(parts.length, ceiling.length); i++) {
+      const difference = (parts[i] || 0) - (ceiling[i] || 0);
+      if (difference) return difference > 0;
+    }
+    return false;
+  };
   const blocks = loadCommands.split(/Load command \d+/);
   const targets = blocks.flatMap((block) => {
+    if (/cmd LC_BUILD_VERSION\b/.test(block) && !/\bplatform 1\b/.test(block)) throw Error('Expected a macOS build platform');
     const match = /cmd LC_BUILD_VERSION\b/.test(block) ? /\bminos (\d+(?:\.\d+)*)/.exec(block)
       : /cmd LC_VERSION_MIN_MACOSX\b/.test(block) ? /\bversion (\d+(?:\.\d+)*)/.exec(block) : null;
     return match ? [match[1]] : [];
   });
-  if (!targets.length || targets.some((target) => Number(target.split('.')[0]) > minimum
-      || (Number(target.split('.')[0]) === minimum && Number(target.split('.')[1] || 0) > 0))) {
+  if (!targets.length || targets.some(exceeds)) {
     throw new Error('Executable deployment target exceeds the declared macOS 13.0 minimum or is missing');
   }
   const dependencies = libraries.split(/\r?\n/).slice(1).filter((line) => line.trim())
     .map((line) => line.trim().replace(/ \(compatibility version.*$/, ''));
-  if (!dependencies.length || dependencies.some((lib) => !lib.startsWith('/System/Library/') && !lib.startsWith('/usr/lib/'))) {
+  if (!dependencies.length || dependencies.some((lib) => lib !== path.posix.normalize(lib) || (!lib.startsWith('/System/Library/') && !lib.startsWith('/usr/lib/')))) {
     throw new Error('Non-system dynamic dependency found; Homebrew/rpath libraries cannot be shipped as a portable host');
   }
   return { architecture: expected, deploymentTargets: targets, systemLibraries: dependencies };
