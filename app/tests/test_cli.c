@@ -301,5 +301,16 @@ int main(int argc, char *argv[]) {
     test_reverse_socket();
     test_reverse_audio_option();
     test_mac_capture_options();
+    struct scrcpy_cli_args clip = {.opts = scrcpy_options_default};
+    char *clipboard[] = {"scrcpy", "--reverse-display", "--reverse-socket=1234", "--reverse-keyboard", "--reverse-clipboard"};
+#if defined(_WIN32) || defined(HAVE_REVERSE_MACOS)
+    assert(scrcpy_parse_args(&clip, ARRAY_LEN(clipboard), clipboard)); assert(clip.opts.reverse_clipboard);
+#else
+    assert(!scrcpy_parse_args(&clip, ARRAY_LEN(clipboard), clipboard));
+#endif
+    clip.opts = scrcpy_options_default;
+    char *no_key[] = {"scrcpy", "--reverse-display", "--reverse-socket=1234", "--reverse-clipboard"};
+    assert(!scrcpy_parse_args(&clip, ARRAY_LEN(no_key), no_key));
+
     return 0;
 }

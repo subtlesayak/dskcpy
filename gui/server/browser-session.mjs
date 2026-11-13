@@ -3,11 +3,12 @@ import { WebSocket } from 'ws';
 import { SrdParser, validBrowserInput, MAX_PACKET } from './browser-protocol.mjs';
 import { ack, avcParameters, touchPacket } from '../receiver/protocol.mjs';
 import { createRtcMedia } from './browser-rtc.mjs';
+import { createClipboardBroker } from './browser-clipboard.mjs';
 
 // Keep the native transport alive across a bounded browser suspension. Never
 // retain video frames: only the wire header and codec parameter sets are replayed.
 export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lifetimeMs,
-  mediaMode = 'webcodecs', rtcBind, keyboard = false, viewOnly = false, textFocus = false,
+  mediaMode = 'webcodecs', rtcBind, keyboard = false, viewOnly = false, textFocus = false, clipboard = false,
   captureRecovery = false, nativeEndGraceMs = 15000, rtcMediaFactory = createRtcMedia, onChange = () => {} }) {
   let native, peer, closed = false, ready = false, nativeTimer, awayTimer;
   let listener, nativeEndTimer, recovering = false, restarting = false;
@@ -19,6 +20,12 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
   const focusSupported = textFocus && keyboard && !viewOnly;
   let focusAt = -Infinity, focusSubscribed = false;
   let keyboardStatusSubscribed = false, lastKeyboardStatus = null;
+  const clipboardSupported = clipboard && keyboard && !viewOnly;
+  const clipboardBroker = createClipboardBroker({ capable: clipboardSupported,
+    allowed: () => ready && !closed && !suspended && !capturePaused && !recovering && Boolean(native),
+    sendNative: packet => { if (!native || native.destroyed) return false; native.write(packet); return true; },
+    respond: (target, result) => { if (target === peer && target.readyState === WebSocket.OPEN && target.bufferedAmount < 65536) target.send(JSON.stringify(result)); },
+  });
   function keyboardStatus(status) {
     if (!keyboard || viewOnly || !['ready','blocked','unsupported'].includes(status) || closed) return;
     lastKeyboardStatus = status;
@@ -61,6 +68,7 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
     finally { if (rtcGeneration === mine) negotiating = false; }
   }
   function releaseTouches() {
+    clipboardBroker.disable();
     for (const [id, point] of touches) native?.write(touchPacket(3, id, point.x, point.y, width, height));
     touches.clear();
     if (keyboard) native?.write(Buffer.from([8, 2, 0, 0, 0]));
@@ -96,7 +104,7 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
   }
   function announce() {
     if (!ready || !peer) return;
-    peer.send(JSON.stringify({ type: 'authenticated', mediaMode, keyboard, viewOnly, textFocus: focusSupported, keyboardStatus: keyboard && !viewOnly }));
+    peer.send(JSON.stringify({ type: 'authenticated', mediaMode, keyboard, viewOnly, textFocus: focusSupported, keyboardStatus: keyboard && !viewOnly, clipboard: clipboardSupported }));
     if (wireHeader) forward(wireHeader);
     if (videoConfig && mediaMode === 'webcodecs') forward(videoConfig);
     if (audioConfig) forward(audioConfig);
@@ -108,6 +116,7 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
     if (closed) { ws.close(1000); return; }
     if (peer && peer !== ws) detach(peer, true);
     keyboardStatusSubscribed = false;
+    clipboardBroker.disable();
     peer = ws; alive = true; rateAt = Date.now(); events = 0;
     // Optional messages require this viewer's explicit acknowledgement. A
     // restored/older cached page must not inherit another socket's subscription.
@@ -123,6 +132,8 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
       if (Date.now() - rateAt >= 1000) { rateAt = Date.now(); events = 0; }
       if (++events > 1000 || native?.writableLength > 65536) { close(); return; }
       if (!binary) {
+        if (message.toString() === 'clipboard-enable') { if (!clipboardBroker.enable(ws)) close(); return; }
+        if (message.toString() === 'clipboard-disable') { clipboardBroker.disable(); return; }
         if (message.toString() === 'text-focus-subscribe') {
           if (!focusSupported || !ready) { close(); return; }
           focusSubscribed = true; return;
@@ -150,7 +161,7 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
       }
       // Never apply old geometry, ACKs or text to a new capture epoch.
       if (recovering) return;
-      if (!native || !validBrowserInput(message, width, height, { keyboard })) { close(); return; }
+      if (!native || !validBrowserInput(message, width, height, { keyboard, clipboard: clipboardSupported })) { close(); return; }
       if (viewOnly && ![4, 6].includes(message[0])
           && !(message[0] === 5 && [7, 8, 9, 11].includes(message[1]))) { close(); return; }
       if ([4, 6].includes(message[0])) {
@@ -163,7 +174,9 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
         return;
       }
       if (capturePaused && ![4,6,5].includes(message[0])) return;
+      if (message[0] === 10) { if (!clipboardBroker.request(ws, message)) close(); return; }
       if (message[0] === 5 && [7,8].includes(message[1])) capturePaused = message[1] === 7;
+      if (capturePaused) clipboardBroker.disable();
       if (message[0] === 3) {
         const id = message.readBigUInt64BE(2).toString();
         if (message[1] === 3) touches.clear();
@@ -225,6 +238,7 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
         if (suspended) command(7);
       } else {
         const flags = packet.readUInt32BE(12);
+        if (flags === 32) { clipboardBroker.reply(packet.subarray(16)); return; }
         if ((flags & 1) || (flags === 2 && !videoConfig)) {
           const parameters = avcParameters(packet.subarray(16));
           if (parameters.length) {
@@ -295,7 +309,7 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
       });
       if (closed) { listener.close(); return; }
       ready = true; nativeTimer = setTimeout(close, 10000); announce();
-      await onConnect({ port: listener.address().port, keyboard, viewOnly, textFocus: focusSupported, focusHint, keyboardStatus,
+      await onConnect({ port: listener.address().port, keyboard, viewOnly, textFocus: focusSupported, focusHint, keyboardStatus, clipboard: clipboardSupported,
         captureRecovery: canRecover, restartNative, close, get closed() { return closed; } });
     } catch { close(); }
   }

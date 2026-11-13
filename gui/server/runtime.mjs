@@ -101,6 +101,9 @@ export async function inspectReadiness(runtime, runCommand) {
     return [connection, { ready: failed.length === 0, message: failed[0]?.message || 'Local components are ready.', required }];
   }));
   return { checks, transports, features: {
+    browserClipboard: ['darwin','win32'].includes(platform) && supported && nativeHelp.includes('browser-clipboard-v1')
+      && nativeHelp.includes('--reverse-clipboard') && nativeHelp.includes('--reverse-keyboard')
+      && (platform === 'win32' ? nativeHelp.includes('browser-keyboard-v1') : macBackend),
     browserTextFocus: platform === 'darwin' && macBackend && nativeHelp.includes('--reverse-keyboard') && nativeHelp.includes('--reverse-text-focus'),
     browserCaptureRecovery: platform === 'darwin' && macBackend && nativeHelp.includes('browser-capture-recovery-v1'),
     browserKeyboard: nativeHelp.includes('--reverse-keyboard') && ((platform === 'darwin' && macBackend)

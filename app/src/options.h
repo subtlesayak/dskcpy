@@ -346,6 +346,7 @@ struct scrcpy_options {
     bool list_reverse_windows;
     bool reverse_text_focus; // Optional stdout metadata; requires browser keyboard.
     bool reverse_keyboard; // Browser-only Windows/Mac opt-in; never inferred from Android.
+    bool reverse_clipboard; // Separate full-desktop, per-invitation clipboard consent.
     uint16_t reverse_socket; // Authenticated GUI proxy on loopback; no ADB.
     const char *start_app;
     bool vd_destroy_content;

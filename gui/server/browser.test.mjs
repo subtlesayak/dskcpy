@@ -577,3 +577,37 @@ for(const policy of [{keyboard:false},{keyboard:true,viewOnly:true}]){
   ws.send('keyboard-status-subscribe');await ended;assert.equal(f.receiver.status().connected,false);
  });
 }
+
+test('clipboard is current-viewer opt-in and native metadata is never forwarded as a media frame or status', async t => {
+  const {clipboardRequest}=await import('../receiver/clipboard.mjs');
+  const f=await fixture(t,{inputPolicy:{keyboard:true,clipboard:true}}),ws=await login(f),received=[];
+  f.native().on('data',chunk=>received.push(chunk));
+  assert.equal(JSON.parse(ws.received.find(x=>!x.binary).data).clipboard,true);
+  // A native unsolicited payload cannot disclose text to an unnegotiated page.
+  const payload=(id,text)=>{const b=Buffer.from(text),p=Buffer.alloc(8+b.length);p.writeUInt32BE(id,2);p.writeUInt16BE(b.length,6);b.copy(p,8);return p;};
+  f.native().write(packet(0,32,payload(77,'unsolicited fixture')));
+  await new Promise(r=>setTimeout(r,15));assert.ok(!ws.received.some(x=>x.data.includes('unsolicited fixture')));
+  ws.send('clipboard-enable');ws.send(clipboardRequest(0,13));
+  await until(()=>Buffer.concat(received).includes(Buffer.from(clipboardRequest(0,1))));
+  f.native().write(packet(0,32,payload(1,'PRIVATE_FIXTURE_ONLY')));
+  await until(()=>ws.received.some(x=>!x.binary&&x.data.includes('clipboard-result')));
+  const result=JSON.parse(ws.received.find(x=>!x.binary&&x.data.includes('clipboard-result')).data);
+  assert.deepEqual(result,{type:'clipboard-result',op:0,id:13,status:0,text:'PRIVATE_FIXTURE_ONLY'});
+  assert.ok(!JSON.stringify(f.receiver.status()).includes('PRIVATE_FIXTURE_ONLY'));
+  assert.equal(ws.received.filter(x=>x.binary).length,1,'only the stream header is a media message');
+  ws.send('clipboard-disable');const before=received.length;ws.send(clipboardRequest(0,14));await once(ws,'close');
+  assert.ok(!Buffer.concat(received.slice(before)).includes(Buffer.from(clipboardRequest(0,2))));
+});
+for (const policy of [{keyboard:true},{keyboard:true,clipboard:true,viewOnly:true},{clipboard:true}]) test('clipboard cannot elevate host policy '+JSON.stringify(policy),async t=>{
+  const f=await fixture(t,{inputPolicy:policy}),ws=await login(f);assert.equal(JSON.parse(ws.received.find(x=>!x.binary).data).clipboard,false);
+  ws.send('clipboard-enable');const [code]=await once(ws,'close');assert.equal(code,1008);
+});
+
+test('a remembered grant cannot carry clipboard permission even if an internal caller supplies it',async t=>{
+  let native;const receiver=createBrowserReceiver({configuredPort:0,trustedDevices:{allowed:()=>true,snapshot:()=>({available:false,paused:false,devices:[]})},onConnect:async bridge=>{
+    assert.equal(bridge.clipboard,false);native=net.connect(bridge.port,'127.0.0.1');native.on('error',()=>{});await once(native,'connect');native.write(header);
+  }});t.after(async()=>{native?.destroy();await receiver.shutdown();});
+  const grant={id:'fixture',digest:'fixture',origin:''},invitation=await receiver.invite('local',{keyboard:true,clipboard:true},grant);grant.origin=invitation.url.slice(0,-1);
+  const ws=new WebSocket(invitation.url.replace('http:','ws:')+'stream',{origin:grant.origin});ws.on('error',()=>{});t.after(()=>ws.terminate());await once(ws,'open');
+  const first=once(ws,'message');ws.send(invitation.key);const [bytes,binary]=await first;assert.equal(binary,false);assert.equal(JSON.parse(bytes).clipboard,false);
+});

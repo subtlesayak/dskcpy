@@ -32,6 +32,7 @@ parent.on('message', async ({ data }) => {
       case 'readiness': {
         const readiness = (await api('/api/status')).readiness;
         value = { ready: Boolean(readiness?.transports?.browser?.ready), keyboard: readiness?.features?.browserKeyboard === true,
+          clipboard: readiness?.features?.browserClipboard === true,
           adb: readiness?.checks?.some(check => check.id === 'adb' && check.ready) === true }; break;
       }
       case 'usb-devices': {
@@ -53,7 +54,7 @@ parent.on('message', async ({ data }) => {
           browserSerial = usbDevices.resolve(data.args?.device, result.devices);
         }
         value = await api('/api/browser/invite', { browserTransport: mode, ...(browserSerial ? { browserSerial } : {}),
-          maxSize: 1600, maxFps: 30, bitRateMbps: 8 }); break;
+          browserClipboard: data.args?.clipboard === true, maxSize: 1600, maxFps: 30, bitRateMbps: 8 }); break;
       }
       case 'stop': value = await api('/api/stream/stop', {}); break;
       case 'shutdown': {

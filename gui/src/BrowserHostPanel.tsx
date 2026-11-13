@@ -28,6 +28,7 @@ export default function BrowserHostPanel({ status, config, online, onStatus }: {
   const [transport, setTransport] = useState('local');
   const [windows, setWindows] = useState<{ id: number; ownerPid: number; title: string; application: string }[]>([]);
   const [selectedWindow, setSelectedWindow] = useState('');
+  const [clipboardAllowed, setClipboardAllowed] = useState(false);
   const [windowBusy, setWindowBusy] = useState(false);
   const keyTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const invitationHeading = useRef<HTMLHeadingElement>(null);
@@ -62,6 +63,7 @@ export default function BrowserHostPanel({ status, config, online, onStatus }: {
                 : selectedWindow && !windows.some((w) => windowKey(w) === selectedWindow) ? 'Select an available window before creating the invitation.'
                   : needsSetup ? 'Set up a secure link, or choose USB cable or This computer.' : '';
 
+  useEffect(() => { if (!active) setClipboardAllowed(false); }, [active]);
   useEffect(() => {
     if (browser?.connected) { setKey(''); setMessage(''); setCopied(''); clearTimeout(keyTimer.current); }
   }, [browser?.connected]);
@@ -93,7 +95,7 @@ export default function BrowserHostPanel({ status, config, online, onStatus }: {
         headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...config,
           windowId: windows.find((window) => windowKey(window) === selectedWindow)?.id,
           windowOwnerPid: windows.find((window) => windowKey(window) === selectedWindow)?.ownerPid,
-          browserTransport: mode, browserSerial: config.connection === 'usb' ? config.serial : undefined }) });
+          browserClipboard: clipboardAllowed && !selectedWindow, browserTransport: mode, browserSerial: config.connection === 'usb' ? config.serial : undefined }) });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || 'Could not create a link. Try again.');
       // The mutation response is authoritative; do not wait for the SSE/poll refresh.
@@ -150,7 +152,7 @@ export default function BrowserHostPanel({ status, config, online, onStatus }: {
       <div className="browser-mode-grid">
         {modes.map(({ id, label, detail, icon: Icon }) => <label className="browser-mode" key={id}>
           <input type="radio" name="browser-connection" value={id} checked={mode === id} onChange={() => {
-            setTransport(id); setError(''); setMessage(''); setCopied('');
+            setTransport(id); setClipboardAllowed(false); setError(''); setMessage(''); setCopied('');
           }} />
           <Icon size={20} aria-hidden="true" />
           <span><strong>{label}</strong><small>{detail}</small></span>
@@ -161,7 +163,7 @@ export default function BrowserHostPanel({ status, config, online, onStatus }: {
     {status.hostPlatform === 'macOS' && status.readiness?.features?.macWindowCapture && <fieldset disabled={active || busy || windowBusy}>
       <legend>Choose what to share</legend>
       <label htmlFor="browser-capture-target">Capture target</label>
-      <select id="browser-capture-target" value={selectedWindow} onChange={(event) => setSelectedWindow(event.target.value)}>
+      <select id="browser-capture-target" value={selectedWindow} onChange={(event) => { setSelectedWindow(event.target.value); setClipboardAllowed(false); }}>
         <option value="">Entire desktop · video, audio and control</option>
         {selectedWindow && !windows.some((w) => windowKey(w) === selectedWindow)
           && <option value={selectedWindow} disabled>Selected window is no longer available</option>}
@@ -175,6 +177,12 @@ export default function BrowserHostPanel({ status, config, online, onStatus }: {
         : 'Refresh to choose a single window. Window names stay in this local picker.'}</p>
     </fieldset>}
 
+    {status.readiness?.features?.browserClipboard && !selectedWindow && mode !== 'local' && !active && <fieldset className="browser-clipboard-permission" disabled={busy}>
+      <legend>Clipboard access</legend>
+      <label><input type="checkbox" checked={clipboardAllowed} onChange={event => setClipboardAllowed(event.target.checked)} aria-describedby="browser-clipboard-help" /> Allow text clipboard for this invitation</label>
+      <p id="browser-clipboard-help" className="action-note">The receiving browser can explicitly read or replace this computer’s text clipboard and paste into its active app. Off by default; no background sync or remembered clipboard access.</p>
+    </fieldset>}
+    {active && browser?.clipboardAllowed && <p className="action-note">Text clipboard tools are allowed for this invitation. Stop sharing to end clipboard access.</p>}
     <div className="browser-step">
       <h3><span className="browser-step-number" aria-hidden="true">2</span>{active ? 'Connection prepared' : mode === 'usb' ? 'Open the receiver on your phone' : 'Create a link and code'}</h3>
       {mode === 'local' ? <p>Try it in another browser tab on this computer. This link will not work on a phone unless you choose USB cable.</p>

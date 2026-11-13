@@ -15,6 +15,7 @@
 #include "reverse_macos_keyboard.h"
 #include "reverse_macos_focus.h"
 #include "reverse_macos_recovery.h"
+#include "reverse_macos_clipboard.h"
 #include "receiver.h"
 #include "options.h"
 #include "util/binary.h"
@@ -61,6 +62,8 @@ struct mac_state {
     uint32_t window_id;
     uint32_t window_owner;
     bool keyboard_enabled, keys[256]; // Input-thread ownership.
+    bool clipboard_enabled, clipboard_pending; // Request protected by keyboard_mutex.
+    struct sc_reverse_clipboard_request clipboard_request;
 };
 
 static bool mac_window_bounds(uint32_t window_id, uint32_t owner, CGRect *bounds) {
@@ -264,7 +267,7 @@ static bool mac_send(struct mac_state *s, const void *data, size_t size, int64_t
     bool audio = flags & (SC_REVERSE_AUDIO_CONFIG | SC_REVERSE_AUDIO_PACKET | SC_REVERSE_AUDIO_UNAVAILABLE);
     struct sc_reverse_watchdog *watchdog = audio ? &s->audio_watchdog : &s->watchdog;
     sc_reverse_watchdog_begin(watchdog, av_gettime_relative());
-    if (audio ? flags == SC_REVERSE_AUDIO_PACKET : !(flags & 1u)) sc_reverse_watchdog_submit(watchdog, pts);
+    if (audio ? flags == SC_REVERSE_AUDIO_PACKET : (flags == 0 || flags == 2)) sc_reverse_watchdog_submit(watchdog, pts);
     sc_mutex_unlock(&s->mutex);
     bool ok = net_send_all(s->video_socket, header, sizeof(header)) == sizeof(header)
            && net_send_all(s->video_socket, data, size) == (ssize_t)size;
@@ -544,6 +547,7 @@ static void mac_cancel_input(struct mac_state *s) {
 }
 static void mac_cancel_keyboard(struct mac_state *s) {
     sc_mutex_lock(&s->keyboard_mutex);
+    s->clipboard_pending = false; memset(&s->clipboard_request, 0, sizeof(s->clipboard_request));
     bool allowed = AXIsProcessTrusted(), pending = false;
     for (unsigned usage = 0; usage < 256; ++usage) if (s->keys[usage]) {
         if (!allowed) { pending = true; continue; }
@@ -584,6 +588,53 @@ static void mac_keyboard(struct sc_receiver *receiver, const struct sc_device_ms
             if (!down) break;
         }
     }
+}
+static enum sc_clipboard_status mac_clipboard_read(void *context, char *text, size_t *length) {
+    (void)context; return sc_macos_clipboard_read(NSPasteboard.generalPasteboard, text, length);
+}
+static bool mac_clipboard_write(void *context, const char *text, size_t length) {
+    (void)context; return sc_macos_clipboard_write(NSPasteboard.generalPasteboard, text, length);
+}
+static bool mac_clipboard_paste(void *context) {
+    struct mac_state *s = context;
+    for (unsigned i = 0; i < 256; ++i) if (s->keys[i]) return false;
+    CGEventFlags held = CGEventSourceFlagsState(kCGEventSourceStateCombinedSessionState);
+    if (held & (kCGEventFlagMaskCommand | kCGEventFlagMaskControl | kCGEventFlagMaskAlternate | kCGEventFlagMaskShift)) return false;
+    CGEventRef events[] = { sc_reverse_macos_key_event(227, true, 8, false), sc_reverse_macos_key_event(25, true, 8, false),
+        sc_reverse_macos_key_event(25, false, 8, false), sc_reverse_macos_key_event(227, false, 0, false) };
+    bool ready = events[0] && events[1] && events[2] && events[3];
+    for (unsigned i = 0; i < 4; ++i) if (events[i]) { if (ready) CGEventPost(kCGHIDEventTap, events[i]); CFRelease(events[i]); }
+    return ready;
+}
+static void mac_clipboard(struct sc_receiver *receiver, const struct sc_device_msg *msg, void *context) {
+    (void)receiver; struct mac_state *s = &((__bridge SCMacState *)context)->state;
+    if (!s->clipboard_enabled || mac_session_ended(s)) return;
+    sc_mutex_lock(&s->keyboard_mutex);
+    if (msg->reverse_clipboard.op == SC_CLIPBOARD_CANCEL) {
+        s->clipboard_pending = false; memset(&s->clipboard_request, 0, sizeof(s->clipboard_request));
+        sc_mutex_unlock(&s->keyboard_mutex); return;
+    }
+    // Only one operation at a time. No content is queued across frame/session
+    // boundaries; a concurrent duplicate gets no replay or second OS operation.
+    if (!s->clipboard_pending && !mac_session_ended(s) && !atomic_load(&s->paused)) {
+        s->clipboard_request = msg->reverse_clipboard; s->clipboard_pending = true;
+    }
+    sc_mutex_unlock(&s->keyboard_mutex);
+}
+static void mac_clipboard_tick(struct mac_state *s) {
+    if (!s->clipboard_enabled) return;
+    uint8_t output[8 + SC_REVERSE_CLIPBOARD_MAX]; size_t size = 0;
+    static const struct sc_reverse_clipboard_callbacks callbacks = {mac_clipboard_read, mac_clipboard_write, mac_clipboard_paste};
+    sc_mutex_lock(&s->keyboard_mutex);
+    if (s->clipboard_pending) {
+        bool allowed = s->clipboard_enabled && s->keyboard_enabled && !s->window_id && !mac_session_ended(s)
+            && !atomic_load(&s->paused) && AXIsProcessTrusted() && mac_display_matches(s);
+        size = sc_reverse_clipboard_process(&s->clipboard_request, allowed, &callbacks, s, output);
+        s->clipboard_pending = false; memset(&s->clipboard_request, 0, sizeof(s->clipboard_request));
+    }
+    sc_mutex_unlock(&s->keyboard_mutex);
+    if (size && !mac_session_ended(s)) mac_send(s, output, size, 0, SC_REVERSE_CLIPBOARD_PACKET);
+    memset(output, 0, sizeof(output));
 }
 static CGPoint mac_centroid(struct mac_state *s) {
     return CGPointMake((s->contacts[0].point.x + s->contacts[1].point.x) / 2,
@@ -853,6 +904,7 @@ sc_reverse_display_macos_run(sc_socket video_socket, sc_socket control_socket, c
             s->window_id = options->reverse_window;
             s->window_owner = window ? (uint32_t)window.owningApplication.processID : 0;
             s->keyboard_enabled = options->reverse_keyboard && !window;
+            s->clipboard_enabled = options->reverse_clipboard && s->keyboard_enabled;
             double scale = s->display_pixels_wide / s->display_bounds.size.width;
             uint32_t source_width = window ? (uint32_t)ceil(window.frame.size.width * scale) : (uint32_t)s->display_pixels_wide;
             uint32_t source_height = window ? (uint32_t)ceil(window.frame.size.height * scale) : (uint32_t)s->display_pixels_high;
@@ -873,7 +925,7 @@ sc_reverse_display_macos_run(sc_socket video_socket, sc_socket control_socket, c
             sc_write32be(header + 8, s->width); sc_write32be(header + 12, s->height);
             if (net_send_all(video_socket, header, sizeof(header)) != sizeof(header)) return SCRCPY_EXIT_FAILURE;
             s->start_us = av_gettime_relative();
-            static const struct sc_receiver_callbacks callbacks = {.on_ended = mac_ended, .on_reverse_touch = mac_touch, .on_reverse_scroll = mac_scroll, .on_reverse_keyboard = mac_keyboard,
+            static const struct sc_receiver_callbacks callbacks = {.on_ended = mac_ended, .on_reverse_touch = mac_touch, .on_reverse_scroll = mac_scroll, .on_reverse_keyboard = mac_keyboard, .on_reverse_clipboard = mac_clipboard,
                 .on_reverse_frame_ack = mac_ack, .on_reverse_system_action = mac_action, .on_reverse_audio_ack = mac_audio_ack};
             struct sc_receiver receiver;
             if (!sc_receiver_init(&receiver, control_socket, &callbacks, (__bridge void *)owner)) return SCRCPY_EXIT_FAILURE;
@@ -963,6 +1015,7 @@ sc_reverse_display_macos_run(sc_socket video_socket, sc_socket control_socket, c
                 int previous_focus = -2;
                 for (;;) {
                     if (mac_gui_quit(gui_pipe) || atomic_load(&s->quit)) { result = SCRCPY_EXIT_SUCCESS; break; }
+                    mac_clipboard_tick(s);
                     int64_t display_now = av_gettime_relative();
                     if (display_now >= display_check_us) {
                         display_check_us = display_now + 250000;

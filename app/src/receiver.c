@@ -167,6 +167,11 @@ process_msg(struct sc_receiver *receiver, struct sc_device_msg *msg) {
             if (receiver->cbs->on_reverse_keyboard)
                 receiver->cbs->on_reverse_keyboard(receiver, msg, receiver->cbs_userdata);
             break;
+        case DEVICE_MSG_TYPE_REVERSE_CLIPBOARD:
+            if (receiver->cbs->on_reverse_clipboard) receiver->cbs->on_reverse_clipboard(receiver, msg, receiver->cbs_userdata);
+            // The receiver buffer is reused; erase the owned parsed text copy.
+            memset(&msg->reverse_clipboard, 0, sizeof(msg->reverse_clipboard));
+            break;
         case DEVICE_MSG_TYPE_REVERSE_SCROLL:
             if (receiver->cbs->on_reverse_scroll) {
                 receiver->cbs->on_reverse_scroll(receiver, msg, receiver->cbs_userdata);

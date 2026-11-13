@@ -6,7 +6,11 @@ bool sc_reverse_keyboard_usage(uint16_t usage) {
 
 // Validate the wire's UTF-8 without depending on a platform text decoder.
 bool sc_reverse_keyboard_text(const uint8_t *data, size_t size) {
-    if (!size || size > SC_REVERSE_TEXT_MAX) return false;
+    return sc_reverse_text_valid(data, size, SC_REVERSE_TEXT_MAX);
+}
+
+bool sc_reverse_text_valid(const uint8_t *data, size_t size, size_t maximum) {
+    if (!size || size > maximum) return false;
     for (size_t i = 0; i < size;) {
         uint32_t point = data[i++], minimum = 0;
         unsigned remaining = 0;

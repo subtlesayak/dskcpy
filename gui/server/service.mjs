@@ -410,6 +410,7 @@ export function createControlService({
         // injected events back into its own typing field. Local preview omits it.
         textFocus: mode !== 'local' && !config.windowId && readiness.features?.browserTextFocus === true,
         keyboard: mode !== 'local' && !config.windowId && readiness.features?.browserKeyboard === true,
+        clipboard: mode !== 'local' && !config.windowId && config.browserClipboard === true && readiness.features?.browserClipboard === true,
         rememberProfile: mode === 'internet' && !config.windowId ? { maxSize: config.maxSize, maxFps: config.maxFps, bitRateMbps: config.bitRateMbps } : null }, grant);
       if (usbDevice) {
         const runtime = currentRuntime();
@@ -506,7 +507,8 @@ export function createControlService({
       const session = reconnectSession;
       if (config.windowId && (platform !== 'darwin' || !state.readiness?.features?.macWindowCapture))
         throw new Error('This native host cannot capture a selected Mac window.');
-      const args = buildScrcpyArgs({ ...config, browserKeyboard: browserBridge?.keyboard === true, browserTextFocus: browserBridge?.textFocus === true }, internetBridge?.port);
+      const args = buildScrcpyArgs({ ...config, browserKeyboard: browserBridge?.keyboard === true, browserTextFocus: browserBridge?.textFocus === true,
+        browserClipboard: browserBridge?.clipboard === true }, internetBridge?.port);
       state.command = formatCommand(path.basename(runtime.executable), args);
       appendLog('gui', 'Starting ' + state.command);
       const child = spawnProcess(runtime.executable, args, {

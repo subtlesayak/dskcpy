@@ -47,13 +47,13 @@ export interface WirelessService {
 }
 
 export interface BridgeStatus {
-  browser?: { waiting: boolean; connected: boolean; url: string | null; remote: boolean; remoteAvailable: boolean; mode: string; expiresAt: string | null };
+  browser?: { waiting: boolean; connected: boolean; clipboardAllowed?: boolean; url: string | null; remote: boolean; remoteAvailable: boolean; mode: string; expiresAt: string | null };
   reconnecting: boolean;
   reconnectAttempt: number;
   reconnectLimit: number;
   nextRetryAt: string | null;
   readiness: {
-    features?: { browserKeyboard: boolean; macWindowCapture: boolean };
+    features?: { browserKeyboard: boolean; macWindowCapture: boolean; browserClipboard?: boolean };
     checks: { id: string; label: string; ready: boolean; message: string }[];
     transports: Record<ConnectionMode, { ready: boolean; message: string; required: string[] }>;
     checkedAt: string;

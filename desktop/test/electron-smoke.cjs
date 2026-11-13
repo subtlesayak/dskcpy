@@ -31,6 +31,7 @@ app.whenReady().then(async () => {
   const readiness = await backend.readiness();
   assert.equal(readiness.ready, ['darwin', 'win32'].includes(process.platform));
   assert.equal(readiness.adb, false);
+  assert.equal(readiness.clipboard, false);
   assert.deepEqual(await backend.usbDevices(), { devices: [], error: true });
   stage = 'utility-idle';
   assert.deepEqual(await backend.status(), { running: false, browser: { waiting: false, connected: false } });
@@ -59,6 +60,7 @@ app.whenReady().then(async () => {
     assert.ok(['internet', 'usb'].includes(connection)); state = { ...state, connection, phase: connection === 'usb' ? 'usb-device' : 'ready', usb: { available: true, error: false, selected: null, devices: [] } };
     window.webContents.send('host:changed', state); return state;
   });
+  handle('clipboard-allowed', allowed => { assert.equal(typeof allowed,'boolean'); return state; });
   handle('usb-device', id => { assert.equal(id, 'synthetic'); return state; });
   handle('start', () => {
     state = { ...state, phase: 'inviting', canStop: true, invitation: {
@@ -89,6 +91,7 @@ app.whenReady().then(async () => {
     const copied = await window.dskcpyHost.copyInvitation();
     await window.dskcpyHost.stop(); await wait('Your computer, wherever you are');
     await window.dskcpyHost.setOpenAtLogin(true); await window.dskcpyHost.setOpenAtLogin(false);
+    await window.dskcpyHost.setClipboardAllowed(true); await window.dskcpyHost.setClipboardAllowed(false);
     await window.dskcpyHost.setConnection('usb'); await wait('Connect your Android phone');
     await window.dskcpyHost.selectUsbDevice('synthetic');
     await window.dskcpyHost.setConnection('internet'); await wait('Your computer, wherever you are');
@@ -96,7 +99,7 @@ app.whenReady().then(async () => {
     if (!devices.available || devices.devices.length || devices.pending.length) throw Error('Empty synthetic device registry unavailable');
     const paused = await window.dskcpyHost.trustedAction('pause');
     if (!paused.paused || paused.devices.length) throw Error('Synthetic remembered pause IPC failed');
-    return { bridgeLoaded: true, nodeUnavailable: true, rendererStartStopEvents: true, syntheticCopy: copied, syntheticStartupIpc: true, rememberedDeviceIpc: true, usbPreloadIpc: true, utilityMissingAdbHandled: true };
+    return { bridgeLoaded: true, nodeUnavailable: true, rendererStartStopEvents: true, syntheticCopy: copied, syntheticStartupIpc: true, rememberedDeviceIpc: true, usbPreloadIpc: true, utilityMissingAdbHandled: true, clipboardConsentIpc: true };
   })()`);
   stage = 'renderer-validation';
   assert.deepEqual(errors, []); assert.equal(window.isVisible(), false);

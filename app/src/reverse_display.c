@@ -28,6 +28,7 @@
 # include <windows.h>
 # include "reverse_windows_keyboard.h"
 # include "reverse_windows_input.h"
+# include "reverse_windows_clipboard.h"
 # include <d3d11.h>
 # include <dxgi1_2.h>
 
@@ -104,6 +105,7 @@ struct reverse_display_state {
     sc_mutex touch_mutex;
     struct sc_reverse_touch touch;
     struct sc_windows_keyboard keyboard; // Protected by touch_mutex, including teardown.
+    HWND clipboard_window; // Hidden message-only owner; only with explicit opt-in.
     enum sc_windows_key_result keyboard_status;
     int64_t keyboard_cleanup_after;
     int touch_left, touch_top, touch_width, touch_height;
@@ -1657,6 +1659,45 @@ reverse_cancel_keyboard(struct reverse_display_state *state) {
     sc_mutex_unlock(&state->touch_mutex);
 }
 
+static enum sc_clipboard_status reverse_clipboard_read(void *context, char *text, size_t *length) {
+    return sc_windows_clipboard_read(((struct reverse_display_state *)context)->clipboard_window, text, length);
+}
+static bool reverse_clipboard_write(void *context, const char *text, size_t length) {
+    return sc_windows_clipboard_write(((struct reverse_display_state *)context)->clipboard_window, text, length);
+}
+static bool reverse_clipboard_paste(void *context) {
+    struct reverse_display_state *s = context;
+    if (s->keyboard.blocked || s->keyboard.release_pending) return false;
+    for (unsigned i = 0; i < 256; ++i) if (s->keyboard.down[i]) return false;
+    for (unsigned i = 224; i <= 231; ++i) if (reverse_keyboard_modifier_down(i, NULL)) return false;
+    enum sc_windows_key_result down = sc_windows_keyboard_key(&s->keyboard, 0, 25, 1);
+    enum sc_windows_key_result up = sc_windows_keyboard_key(&s->keyboard, 1, 25, 0);
+    if (down != SC_WINDOWS_KEY_OK || up != SC_WINDOWS_KEY_OK) {
+        sc_windows_keyboard_release(&s->keyboard); reverse_keyboard_status(s, SC_WINDOWS_KEY_BLOCKED); return false;
+    }
+    return true;
+}
+static void reverse_receiver_on_clipboard(struct sc_receiver *receiver, const struct sc_device_msg *msg, void *context) {
+    (void)receiver; struct reverse_display_state *s = context;
+    if (msg->reverse_clipboard.op == SC_CLIPBOARD_CANCEL) return;
+    static const struct sc_reverse_clipboard_callbacks callbacks = {reverse_clipboard_read, reverse_clipboard_write, reverse_clipboard_paste};
+    uint8_t output[8 + SC_REVERSE_CLIPBOARD_MAX];
+    sc_mutex_lock(&s->touch_mutex);
+    bool allowed = s->options->reverse_clipboard && s->options->reverse_keyboard && s->options->reverse_socket
+        && s->clipboard_window && !atomic_load(&s->stopped) && !atomic_load(&s->fatal_error)
+        && !atomic_load(&s->video_paused) && atomic_load(&s->stream_ready);
+    size_t size = sc_reverse_clipboard_process(&msg->reverse_clipboard, allowed, &callbacks, s, output);
+    sc_mutex_unlock(&s->touch_mutex);
+    if (size && !atomic_load(&s->stopped)) {
+        uint8_t header[16]; sc_write32be(header, (uint32_t)size); sc_write64be(header + 4, 0); sc_write32be(header + 12, SC_REVERSE_CLIPBOARD_PACKET);
+        sc_mutex_lock(&s->send_mutex);
+        bool sent = reverse_send_bytes(s->video_socket, header, sizeof(header)) && reverse_send_bytes(s->video_socket, output, size);
+        sc_mutex_unlock(&s->send_mutex);
+        if (!sent) atomic_store(&s->fatal_error, true);
+    }
+    memset(output, 0, sizeof(output));
+}
+
 static void
 reverse_receiver_on_keyboard(struct sc_receiver *receiver, const struct sc_device_msg *msg, void *userdata) {
     (void) receiver;
@@ -2083,6 +2124,7 @@ sc_reverse_display_run(sc_socket video_socket, sc_socket control_socket,
     static const struct sc_receiver_callbacks receiver_cbs = {
         .on_ended = reverse_receiver_on_ended,
         .on_reverse_keyboard = reverse_receiver_on_keyboard,
+        .on_reverse_clipboard = reverse_receiver_on_clipboard,
         .on_reverse_touch = reverse_receiver_on_touch,
         .on_reverse_scroll = reverse_receiver_on_scroll,
         .on_reverse_frame_ack = reverse_receiver_on_frame_ack,
@@ -2097,6 +2139,7 @@ sc_reverse_display_run(sc_socket video_socket, sc_socket control_socket,
         return SCRCPY_EXIT_FAILURE;
     }
 
+    if (options->reverse_clipboard) state.clipboard_window = CreateWindowExW(0, L"STATIC", L"", 0, 0, 0, 0, 0, HWND_MESSAGE, NULL, GetModuleHandleW(NULL), NULL);
     bool receiver_started = false;
     bool ok = sc_receiver_start(&state.receiver);
     if (ok) {
@@ -2183,6 +2226,7 @@ stop:
     reverse_cancel_touches(&state); // Also covers worker-start failures.
     reverse_cancel_keyboard(&state);
     sc_receiver_destroy(&state.receiver);
+    if (state.clipboard_window) DestroyWindow(state.clipboard_window);
     sc_mutex_destroy(&state.touch_mutex);
     sc_mutex_destroy(&state.watchdog_mutex);
     sc_mutex_destroy(&state.send_mutex);
