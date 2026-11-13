@@ -76,11 +76,13 @@ else {
       onExit: () => { if (!quitting && host) { host.status = null; host.invitation = null;
         host.error = 'The sharing service closed. Reopen dskcpy to try again.'; host.emit(); } },
     });
-    host = new HostController({ backend, onChange: update, checkSetup: async () => {
-      const route = await privateRoute.check();
+    host = new HostController({ backend, onChange: update, checkSetup: async connection => {
+      // Cable setup does not inspect or modify Tailscale, routes or accounts.
+      const route = connection === 'usb' ? { connected: false, ready: false } : await privateRoute.check();
       await backend.ensure(route);
       const readiness = await backend.readiness();
-      return { route, permissions: permissions(), runtimeReady: readiness.ready, features: { keyboard: readiness.keyboard } };
+      const usb = connection === 'usb' ? { available: readiness.adb, ...(readiness.adb ? await backend.usbDevices() : { devices: [], error: false }) } : undefined;
+      return { route, usb, permissions: permissions(), runtimeReady: readiness.ready, features: { keyboard: readiness.keyboard } };
     } });
     window = new BrowserWindow({ width: 620, height: 740, minWidth: 360, minHeight: 420,
       title: 'dskcpy Host', backgroundColor: '#0a1419', show: false,
@@ -104,6 +106,8 @@ else {
       return backend.request('trusted-action', { action, id });
     });
     handle('start', () => host.start());
+    handle('connection', connection => host.setConnection(connection));
+    handle('usb-device', id => host.selectUsbDevice(id));
     handle('stop', () => host.stop());
     handle('refresh', () => refresh());
     handle('screen-permission', async () => {

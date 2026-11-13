@@ -82,3 +82,61 @@ test('private setup requires a dedicated private origin and preserves conflictin
   ]) { const result = inspectPrivateRoute(status, bad); assert.equal(result.ready, false); assert.equal(result.conflict, true); }
   assert.equal(hostPhase({ status: blank(), runtimeReady: true, permissions: { screen: true, control: true }, route: { connected: true, conflict: true } }), 'route-conflict');
 });
+
+function usbFixture(devices = [{ id: 'b'.repeat(32), name: 'Test phone', state: 'ready' }]) {
+  const f = fixture(); let invited;
+  f.setup.usb = { available: true, error: false, devices };
+  f.setup.route = { connected: false, ready: false };
+  f.backend.invite = async args => { invited = args;
+    return { mode: 'usb', url: 'http://127.0.0.1:27180/', key: 'a'.repeat(32), expiresAt: 301000, openedOnPhone: true,
+      status: { running: false, browser: { waiting: true, connected: false } } }; };
+  return { ...f, invited: () => invited };
+}
+test('USB setup works without a private route and asks the utility to auto-open the selected phone', async () => {
+  const f = usbFixture(); await f.host.setConnection('usb');
+  assert.equal(f.host.snapshot().phase, 'ready'); assert.equal(f.invited(), undefined);
+  await f.host.start();
+  assert.deepEqual(f.invited(), { mode: 'usb', device: 'b'.repeat(32) });
+  assert.equal(f.host.snapshot().phase, 'inviting'); assert.equal(f.host.snapshot().invitation.openedOnPhone, true);
+  assert.match(f.host.snapshot().invitation.joinUrl, /^http:\/\/127.0.0.1:27180\/join\//);
+  await f.host.setConnection('internet'); assert.equal(f.host.connection, 'usb', 'an owned invitation cannot be reconfigured');
+});
+test('USB setup distinguishes missing tool, cable, authorization, enumeration failure and selection', async () => {
+  for (const [usb, phase] of [
+    [{ available: false }, 'usb-tool'], [{ available: true, devices: [] }, 'usb-device'],
+    [{ available: true, error: true }, 'usb-device'],
+    [{ available: true, devices: [{ id: '1', state: 'unauthorized' }] }, 'usb-authorize'],
+    [{ available: true, devices: [{ id: '1', state: 'offline' }] }, 'usb-device'],
+    [{ available: true, devices: [{ id: '1', state: 'ready' }, { id: '2', state: 'ready' }] }, 'usb-select'],
+  ]) {
+    const f = usbFixture(); Object.assign(f.setup.usb, usb); await f.host.setConnection('usb'); await f.host.start();
+    assert.equal(f.host.snapshot().phase, phase); assert.equal(f.invited(), undefined);
+  }
+});
+test('USB selection is explicit for multiple phones and invalidated when the selected phone disappears', async () => {
+  const f = usbFixture([{ id: '1', state: 'ready' }, { id: '2', state: 'ready' }, { id: '3', state: 'unauthorized' }]);
+  await f.host.setConnection('usb'); assert.throws(() => f.host.selectUsbDevice('3'));
+  f.host.selectUsbDevice('2'); assert.equal(f.host.snapshot().phase, 'ready');
+  f.setup.usb.devices = [{ id: '1', state: 'ready' }, { id: '4', state: 'ready' }];
+  await f.host.start(); assert.equal(f.host.snapshot().phase, 'usb-select'); assert.equal(f.invited(), undefined);
+});
+test('USB invitation validation never accepts a network address, credentials or mismatched mode', () => {
+  const base = { mode: 'usb', key: 'a'.repeat(32), expiresAt: 301000 };
+  for (const url of ['http://localhost:27180/', 'http://127.0.0.1:9999/', 'https://host.test/', 'http://127.0.0.1:27180/?secret=x', 'http://user@127.0.0.1:27180/'])
+    assert.throws(() => validateInvitation({ ...base, url }, new URL(url).origin, 1000, 'usb'));
+  assert.throws(() => validateInvitation({ ...base, mode: 'internet', url: 'http://127.0.0.1:27180/' }, 'http://127.0.0.1:27180', 1000, 'usb'));
+});
+test('cancelling USB setup invalidates delayed enumeration and never creates an invitation', async () => {
+  const f = usbFixture(); await f.host.setConnection('usb'); let release;
+  f.host.checkSetup = () => new Promise(resolve => { release = resolve; });
+  const start = f.host.start(); await tick(); await f.host.stop(); release(f.setup); await start;
+  assert.equal(f.invited(), undefined); assert.equal(f.host.snapshot().canStop, false);
+});
+test('a selected phone disappearing cannot silently redirect Start to the only remaining phone', async () => {
+  const f = usbFixture([{ id: '1', state: 'ready' }, { id: '2', state: 'ready' }]);
+  await f.host.setConnection('usb'); f.host.selectUsbDevice('1');
+  f.setup.usb.devices = [{ id: '2', state: 'ready' }];
+  await f.host.start(); assert.equal(f.invited(), undefined); assert.equal(f.host.snapshot().phase, 'usb-select');
+  await f.host.start(); assert.equal(f.invited(), undefined, 'a second Start cannot clear the target-loss latch');
+  f.host.selectUsbDevice('2'); await f.host.start(); assert.deepEqual(f.invited(), { mode: 'usb', device: '2' });
+});

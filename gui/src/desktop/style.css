@@ -46,3 +46,12 @@ footer svg { flex-shrink: 0; margin-block-start: 2px; }
 .remembered-devices ul { padding-inline-start: 20px; }
 .remembered-devices button { min-block-size: 44px; padding: 10px 14px; margin-block: 5px; font-size: 14px; }
 .remembered-device-request { border: 1px solid #67dbf6; border-radius: 12px; padding: 14px; margin-block: 12px; }
+
+.connection-choice, .usb-phones { min-inline-size: 0; border: 1px solid #56707e; border-radius: 16px; padding: 16px; margin: 0 0 28px; display: grid; gap: 12px; }
+.connection-choice legend, .usb-phones legend { padding-inline: 6px; font-weight: 650; }
+.connection-choice label, .usb-phones label { display: flex; gap: 12px; align-items: center; min-block-size: 46px; cursor: pointer; overflow-wrap: anywhere; }
+.connection-choice input, .usb-phones input { flex-shrink: 0; inline-size: 20px; block-size: 20px; accent-color: #67dbf6; }
+.connection-choice input:focus-visible, .usb-phones input:focus-visible { outline: 3px solid #67dbf6; outline-offset: 4px; }
+.connection-choice svg { flex-shrink: 0; }
+.connection-choice small, .usb-phones small { display: block; color: #b7c9d2; font-size: .8125rem; }
+.connection-choice:disabled label, .usb-phones label:has(input:disabled) { cursor: default; }

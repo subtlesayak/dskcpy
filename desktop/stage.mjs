@@ -6,10 +6,12 @@ import { isolatedWindowsEnvironment } from './collect-windows-runtime.mjs';
 import { fileURLToPath } from 'node:url';
 import { inventory, hashFile } from '../tools/build-identity.mjs';
 import { inspectMachO } from '../release/package_macos_host.mjs';
+import { stageAdb } from './stage-adb.mjs';
 
 const execute = promisify(execFile);
 const repository = fileURLToPath(new URL('../', import.meta.url));
-export async function stageHost({ native, output = path.join(repository, 'desktop/stage'), licenses }) {
+export async function stageHost({ native, output = path.join(repository, 'desktop/stage'), licenses, adb }) {
+  if (!adb) throw Error('Supply the pinned platform-tools directory');
   if (!['darwin', 'win32'].includes(process.platform)) throw new Error('Build on the target host platform.');
   const filename = process.platform === 'win32' ? 'scrcpy.exe' : 'scrcpy';
   if (!(await lstat(native)).isFile() || path.basename(native) !== filename) throw new Error('Choose a native host executable.');
@@ -31,7 +33,7 @@ export async function stageHost({ native, output = path.join(repository, 'deskto
   const appDir = path.join(output, 'app'), hostDir = path.join(output, 'host');
   await mkdir(path.join(appDir, 'desktop'), { recursive: true });
   await mkdir(path.join(appDir, 'gui')); await mkdir(path.join(hostDir, 'bin'), { recursive: true });
-  for (const file of ['main.cjs', 'preload.cjs', 'service-entry.cjs', 'host-controller.mjs', 'owned-backend.mjs', 'private-route.mjs', 'startup-preference.mjs'])
+  for (const file of ['main.cjs', 'preload.cjs', 'service-entry.cjs', 'host-controller.mjs', 'owned-backend.mjs', 'private-route.mjs', 'startup-preference.mjs', 'usb-devices.mjs'])
     await cp(path.join(repository, 'desktop', file), path.join(appDir, 'desktop', file));
   for (const file of ['server', 'receiver', 'dist', 'dist-desktop', 'package.json', 'package-lock.json'])
     await cp(path.join(repository, 'gui', file), path.join(appDir, 'gui', file), { recursive: true });
@@ -55,6 +57,11 @@ export async function stageHost({ native, output = path.join(repository, 'deskto
   for (const file of ['scrcpy.png', 'disconnected.png', 'icon.ico'])
     await cp(path.join(repository, 'app/data', file), path.join(hostDir, 'bin', file));
   if (licenses) await cp(licenses, path.join(hostDir, 'licenses'), { recursive: true, dereference: false });
+  // The app's fixed ADB path must work without Homebrew, Android Studio or PATH.
+  // A missing declared input is a packaging failure, not a user setup task.
+  // The supplied native license directory may already include this notice.
+  await rm(path.join(hostDir, 'licenses/adb-NOTICE.txt'), { force: true });
+  const usbRuntime = await stageAdb(adb, hostDir);
   const npmArgs = ['ci', '--omit=dev', '--ignore-scripts', '--no-audit', '--prefix', appDir];
   const npmCli = process.env.npm_execpath || path.join(path.dirname(process.execPath), 'node_modules/npm/bin/npm-cli.js');
   await execute(process.platform === 'win32' ? process.execPath : 'npm', process.platform === 'win32' ? [npmCli, ...npmArgs] : npmArgs,
@@ -68,7 +75,7 @@ export async function stageHost({ native, output = path.join(repository, 'deskto
   const { stdout: commit } = await execute('git', ['rev-parse', 'HEAD'], { cwd: repository });
   const { stdout: changes } = await execute('git', ['status', '--porcelain'], { cwd: repository });
   const manifest = { schemaVersion: 1, product: 'dskcpy-host-desktop-development', sourceCommit: commit.trim(), sourceModified: Boolean(changes.trim()),
-    nativeSha256: await hashFile(native), platform: process.platform, architecture: process.arch, linkage,
+    nativeSha256: await hashFile(native), platform: process.platform, architecture: process.arch, linkage, usbRuntime,
     qualification: { helpOnly: true, nativePhysicalTest: false, desktopPhysicalTest: false,
       signed: false, notarized: false, nativeNoticesIncluded: Boolean(licenses), thirdPartyNoticesReviewed: false, publicReleaseReady: false },
     files: await inventory(output) };
@@ -76,9 +83,9 @@ export async function stageHost({ native, output = path.join(repository, 'deskto
   return manifest;
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const [native, licenses] = process.argv.slice(2);
-  if (!native) { console.error('Usage: node desktop/stage.mjs NATIVE [NATIVE_LICENSES_DIRECTORY]'); process.exitCode = 1; }
-  else stageHost({ native: path.resolve(native), licenses: licenses && path.resolve(licenses) })
+  const [native, licenses, adb] = process.argv.slice(2);
+  if (!native || !adb) { console.error('Usage: node desktop/stage.mjs NATIVE NATIVE_LICENSES_DIRECTORY PLATFORM_TOOLS_DIRECTORY'); process.exitCode = 1; }
+  else stageHost({ native: path.resolve(native), licenses: licenses && licenses !== '-' ? path.resolve(licenses) : undefined, adb: path.resolve(adb) })
     .then(result => console.log(`Staged ${result.files.length} files. Development build; release qualification remains open.`))
     .catch(() => { console.error('Staging failed. Check native capabilities, dependencies, built GUI and the new output directory.'); process.exitCode = 1; });
 }
