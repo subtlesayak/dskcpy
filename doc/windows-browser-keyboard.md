@@ -20,6 +20,8 @@ balanced Unicode down/up pairs, including surrogate pairs. Power/eject actions
 are not inferred from arbitrary keyboard usages. Unusual OEM/keypad layouts and
 applications that do not accept Unicode packet input need physical qualification.
 Receiver IME preedit stays local; this is committed text, not remote IME-state sync.
+Num Lock uses the physical set-1 code 0045, not the E045 legacy-message form in
+[Microsoft's scan-code table](https://learn.microsoft.com/en-us/windows/win32/inputdev/about-keyboard-input#scan-codes).
 
 Only accepted remote DOWN events enter the cleanup ledger. Release runs on
 pause, Stop, receiver end, geometry change and teardown, serialized with existing

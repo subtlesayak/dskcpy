@@ -24,6 +24,9 @@ int main(void) {
     sc_windows_keyboard_mapping(79,&event);assert(event.code==0x4d&&event.extended);
     sc_windows_keyboard_mapping(228,&event);assert(event.code==0x1d&&event.extended);
     sc_windows_keyboard_mapping(224,&event);assert(event.code==0x1d&&!event.extended);
+    // Num Lock's physical set-1 code is 0045. E045 in the Windows table
+    // denotes its legacy-message representation, not the mapping API's code.
+    sc_windows_keyboard_mapping(83,&event);assert(event.code==0x45&&!event.extended);
     assert(sc_windows_keyboard_key(&state,0,224,1)==SC_WINDOWS_KEY_OK);
     assert(sc_windows_keyboard_key(&state,0,4,1)==SC_WINDOWS_KEY_OK);
     assert(sc_windows_keyboard_key(&state,0,4,1)==SC_WINDOWS_KEY_OK); // Repeat.
@@ -88,6 +91,8 @@ int main(void) {
         for(size_t j=0;j<sizeof(pairs)/sizeof(pairs[0]);j++){
             UINT scan=MapVirtualKeyExW(pairs[j].vk,MAPVK_VK_TO_VSC_EX,layouts[i]);
             assert(sc_windows_keyboard_mapping(pairs[j].usage,&event));
+            if(event.code!=(scan&0xff)||event.extended!=((scan&0xff00)==0xe000))
+                fprintf(stderr,"Mapping mismatch: usage=%u vk=%u native=%04x planned=%04x\n",(unsigned)pairs[j].usage,pairs[j].vk,scan,(unsigned)(event.code|(event.extended?0xe000:0)));
             assert(event.code==(scan&0xff));assert(event.extended==((scan&0xff00)==0xe000));
         }
         checked=true;break;
