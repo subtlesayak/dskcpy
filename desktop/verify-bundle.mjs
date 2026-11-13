@@ -6,6 +6,7 @@ import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { macHostArchitecture } from '../release/package_macos_host.mjs';
 import { hashFile } from '../tools/build-identity.mjs';
 import { verifyRuntimeNotices } from './runtime-notices.mjs';
 const execute = promisify(execFile);
@@ -13,6 +14,8 @@ const execute = promisify(execFile);
 export async function verifyBundle(resources) {
   const app = path.resolve(resources, 'app'), host = path.resolve(resources, 'host');
   const manifest = JSON.parse(await readFile(path.join(host, 'build-manifest.json'), 'utf8'));
+  if (manifest.platform !== process.platform || manifest.architecture !== process.arch
+      || (process.platform === 'darwin' && (manifest.linkage?.architecture !== macHostArchitecture() || manifest.usbRuntime?.linkage?.architecture !== macHostArchitecture()))) throw Error('Candidate architecture differs from this verification host');
   // Validate all first-party code/assets and native runtime before importing
   // bundled modules or executing even --help from the candidate.
   const payload = await verifyRuntimePayload(path.resolve(resources), manifest);

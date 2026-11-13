@@ -54,7 +54,7 @@ key. No device upgrade was performed for this source change.
 ## Separate Mac hosting candidate
 
 The inherited `release/build_macos.sh` remains the Android-to-computer client
-target. A separate Apple-silicon **macOS 13.0 deployment target** builds the
+target. Separate native Apple-silicon and Intel **macOS 13.0 deployment targets** build the
 experimental host, GUI and browser receiver:
 
 ```sh
@@ -63,15 +63,15 @@ bash release/build_macos_host.sh release/work/host-arm64
 release/work/host-arm64/Start-dskcpy-host.command --check
 ```
 
-Choose a new output directory for every candidate. The build uses an isolated
-`macos-host13-native-static` dependency cache and enables `reverse_macos`,
+On an Intel Mac use native x64 Node/tools and an output such as `release/work/host-x64`; Apple silicon uses native arm64 Node/tools. These are separate builds, not a universal binary or cross/Rosetta build. No emulation runtime is installed. Choose a new output directory for every candidate. The build uses an isolated
+`macos-host13-arm64-native-static` or `macos-host13-x86_64-native-static` dependency cache and enables `reverse_macos`,
 libopus encoding and VideoToolbox. It builds pinned SDL, dav1d, Opus and FFmpeg
 sources with the deployment target rather than bundling local Homebrew runtime
 libraries. Opus's pinned checksum is from its [official release](https://opus-codec.org/downloads/).
 ADB is included from the existing pinned platform-tools archive. The installable
 Android companion and standalone server remain separate matching artifacts.
 
-Packaging checks arm64, deployment targets and system-only dynamic linkage for
+Packaging checks the selected native arm64/x86_64 slice, deployment targets and system-only dynamic linkage for
 both native host and ADB. It includes icons, GUI production dependencies,
 browser assets, licenses and a manifest of relative paths/sizes/SHA-256 hashes,
 source commit/modification status, build/wire identity and qualification limits.

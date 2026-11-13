@@ -6,7 +6,7 @@ module.exports = {
   files: ['**/*'],
   extraResources: [{ from: path.join(__dirname, 'stage/host'), to: 'host' }],
   // Development artifacts only. Release signing/notarization is a separate gate.
-  mac: { target: [{ target: 'dir', arch: ['arm64'] }], identity: null,
+  mac: { target: [{ target: 'dir', arch: [process.arch] }], identity: null,
     category: 'public.app-category.utilities', minimumSystemVersion: '13.0',
     extendInfo: { NSHighResolutionCapable: true,
       NSScreenCaptureUsageDescription: 'Share this computer’s screen with a device you invite.',

@@ -20,7 +20,12 @@ process_args() {
             exit 1
         fi
         # Never reuse or poison the inherited Android-to-Mac dependency cache.
-        DIRNAME="macos-host13-$BUILD_TYPE-$LINK_TYPE"
+        MAC_HOST_ARCH="${DSKCPY_MAC_HOST_ARCH:-$(uname -m)}"
+        if [[ "$(uname -s)" != Darwin || ! "$MAC_HOST_ARCH" =~ ^(arm64|x86_64)$ || "$MAC_HOST_ARCH" != "$(uname -m)" ]]; then
+            echo 'Mac hosting dependencies require the matching native arm64 or x86_64 host.' >&2
+            exit 1
+        fi
+        DIRNAME="macos-host13-$MAC_HOST_ARCH-$BUILD_TYPE-$LINK_TYPE"
     fi
 
     if [[ "$BUILD_TYPE" != native && "$BUILD_TYPE" != cross ]]
@@ -50,7 +55,7 @@ process_args() {
     fi
 }
 
-DEPS_DIR=$(dirname ${BASH_SOURCE[0]})
+DEPS_DIR=$(dirname "${BASH_SOURCE[0]}")
 cd "$DEPS_DIR"
 
 PATCHES_DIR="$PWD/patches"

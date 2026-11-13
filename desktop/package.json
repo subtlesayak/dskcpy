@@ -7,7 +7,7 @@
   "main": "main.cjs",
   "scripts": {
     "test": "node --test test/*.test.mjs",
-    "package:mac": "electron-builder --config electron-builder.cjs --mac dir --arm64 --publish never",
+    "package:mac": "node package-mac.mjs",
     "package:windows": "electron-builder --config electron-builder.cjs --win dir --x64 --publish never"
   },
   "devDependencies": {
