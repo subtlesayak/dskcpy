@@ -8,6 +8,7 @@ import { openInternetBridge, summarizeTailnet } from './internet.mjs';
 import { resolveRuntime, inspectReadiness } from './runtime.mjs';
 import { parseMdnsServices } from './discovery.mjs';
 import { createBrowserReceiver } from './browser.mjs';
+import { createTrustedDevices } from './trusted-devices.mjs';
 import { browserJoinUrl } from '../receiver/protocol.mjs';
 
 import {
@@ -32,6 +33,7 @@ export function createControlService({
   stopGraceMs = 3000,
   reconnectDelayMs = 1500,
   browserPort = Number(environment.DSKCPY_VIEWER_PORT || 27180),
+  trustedDevicesPath = environment.DSKCPY_TRUST_STORE || null,
 } = {}) {
   const guiDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   const repoDir = path.resolve(guiDir, '..');
@@ -50,8 +52,10 @@ export function createControlService({
   let windowCatalogAttempt = null;
   let browserUsbCleanup = null;
   let browserUsbCleanupPending = Promise.resolve();
+  const trustedDevices = createTrustedDevices({ filename: trustedDevicesPath });
   const browserReceiver = createBrowserReceiver({ configuredPort: browserPort,
-    origin: environment.DSKCPY_VIEWER_ORIGIN,
+    origin: environment.DSKCPY_VIEWER_ORIGIN, trustedDevices,
+    onTrustedConnect: grant => prepareBrowser({ ...grant.profile, browserTransport: 'internet' }, grant),
     rtcBind: environment.DSKCPY_VIEWER_RTC_BIND || '127.0.0.1',
     tls: environment.DSKCPY_VIEWER_TLS_CERT && environment.DSKCPY_VIEWER_TLS_KEY ? {
       cert: environment.DSKCPY_VIEWER_TLS_CERT, key: environment.DSKCPY_VIEWER_TLS_KEY,
@@ -368,10 +372,10 @@ export function createControlService({
     }
   }
 
-  async function prepareBrowser(rawConfig) {
+  async function prepareBrowser(rawConfig, grant = null) {
     if (shuttingDown || state.running || startAttempt || browserPreparation
         || browserReceiver.status().waiting || browserReceiver.status().connected) {
-      throw new Error('Stop the current stream or browser invitation first.');
+      throw Object.assign(new Error('Stop the current stream or browser invitation first.'), { code: 'HOST_BUSY' });
     }
     const attempt = new AbortController();
     browserPreparation = attempt;
@@ -401,7 +405,8 @@ export function createControlService({
       const invitation = await browserReceiver.invite(mode, { viewOnly: Boolean(config.windowId),
         // Typing into a receiver focused on the host itself would feed the
         // injected events back into its own typing field. Local preview omits it.
-        keyboard: mode !== 'local' && !config.windowId && readiness.features?.browserKeyboard === true });
+        keyboard: mode !== 'local' && !config.windowId && readiness.features?.browserKeyboard === true,
+        rememberProfile: mode === 'internet' && !config.windowId ? { maxSize: config.maxSize, maxFps: config.maxFps, bitRateMbps: config.bitRateMbps } : null }, grant);
       if (usbDevice) {
         const runtime = currentRuntime();
         const args = ['-s', usbDevice.serial, 'reverse'];
@@ -760,12 +765,23 @@ export function createControlService({
         writeJson(response, 200, await windowCatalogAttempt);
         return;
       }
+      if (request.method === 'GET' && url.pathname === '/api/browser/trusted') {
+        await trustedDevices.ready; writeJson(response, 200, browserReceiver.trustedStatus()); return;
+      }
+      if (request.method === 'POST' && url.pathname === '/api/browser/trusted') {
+        const body = await readJson(request);
+        if (!['approve', 'reject', 'revoke', 'pause', 'resume'].includes(body.action)
+            || (['approve', 'reject', 'revoke'].includes(body.action) && !/^[a-f0-9]{32}$/.test(body.id))) throw new Error('Invalid device action.');
+        writeJson(response, 200, await browserReceiver.trustAction(body.action, body.id)); return;
+      }
       if (request.method === 'POST' && url.pathname === '/api/browser/invite') {
         writeJson(response, 201, await prepareBrowser(await readJson(request)));
         return;
       }
       if (request.method === 'POST' && url.pathname === '/api/stream/stop') {
-        writeJson(response, 202, stopStream());
+        stopStream();
+        if (trustedDevices.snapshot().available) await browserReceiver.trustAction('pause');
+        writeJson(response, 202, publicState());
         return;
       }
       if (url.pathname.startsWith('/api/')) {
@@ -786,6 +802,7 @@ export function createControlService({
   heartbeat.unref();
 
   async function listen() {
+    await browserReceiver.standby();
     await new Promise((resolve, reject) => {
       server.once('error', reject);
       server.listen(port, host, () => { server.off('error', reject); resolve(); });

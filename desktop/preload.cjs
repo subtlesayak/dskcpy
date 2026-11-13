@@ -1,6 +1,8 @@
 const { contextBridge, ipcRenderer } = require('electron');
 // No general IPC, filesystem, shell or URL-opening primitive enters the page.
 contextBridge.exposeInMainWorld('dskcpyHost', Object.freeze({
+  trustedList: () => ipcRenderer.invoke('host:trusted-list'),
+  trustedAction: (action, id) => ipcRenderer.invoke('host:trusted-action', action, id),
   snapshot: () => ipcRenderer.invoke('host:snapshot'),
   start: () => ipcRenderer.invoke('host:start'),
   stop: () => ipcRenderer.invoke('host:stop'),

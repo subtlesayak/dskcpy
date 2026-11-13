@@ -1,3 +1,5 @@
+import { rememberedBrowser } from './remembered.mjs';
+import { receiverIsAway } from './lifecycle.mjs';
 import { BROWSER_RESUME_MS, avcCodec, avcParameters, touchPacket, scrollPacket, takeDecodedTimestamps, fitDisplay, createMediaAcknowledger, needsControlsRow, parseJoinFragment } from './protocol.mjs';
 import { createRtcReceiver } from './rtc.mjs';
 import { createVideoReceiver } from './video.mjs';
@@ -19,6 +21,8 @@ function setRailLabel(id, label) {
 }
 const canvas = $('display');
 const rtcDisplay = $('rtc-display');
+const away = () => receiverIsAway({ hidden: document.hidden, pictureInPictureElement: document.pictureInPictureElement, video: rtcDisplay, presentationMode: rtcDisplay.webkitPresentationMode });
+const remembered = rememberedBrowser({ reconnect: () => { resumeAllowed = true; void resumeSession(); } });
 let rtcReceiver, mediaMode = 'webcodecs';
 let keyboardSupported = false, keyboardOpen = false, viewOnly = false;
 const preferredMode = 'RTCPeerConnection' in window ? 'webrtc' : 'webcodecs';
@@ -153,7 +157,7 @@ function disconnect() {
   $('join-panel').hidden = false; $('stream-panel').hidden = true;
   document.body.classList.remove('is-streaming', 'controls-hidden');
   $('join').disabled = false; $('join').textContent = 'Connect';
-  $('status').textContent = 'Disconnected · create a new code on the computer';
+  $('status').textContent = 'Disconnected · reconnect with a remembered browser or use a new code';
   setRailLabel('audio', 'Audio off'); $('audio').setAttribute('aria-pressed', 'false');
   $('audio').disabled = false;
   $('pause').setAttribute('aria-pressed', 'false');
@@ -165,27 +169,27 @@ function disconnect() {
 }
 
 async function resumeSession() {
-  if (document.hidden || ws || probing || !supported || !resumeAllowed) return;
-  if (sessionExpected && resumeDeadline && Date.now() > resumeDeadline) {
-    fail('The session expired while you were away. Create a new code on the computer.'); return;
-  }
+  if (away() || ws || probing || !supported || !resumeAllowed) return;
   probing = true;
   const mine = generation;
   try {
     const response = await fetch('/stream/session', { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(5000) });
     const sessionInfo = response.ok ? await response.json() : {};
     const available = sessionInfo.resumable;
-    if (mine !== generation || ws || document.hidden) return;
+    if (mine !== generation || ws || away()) return;
     if (available) {
       sessionExpected = true; resumeDeadline ||= Date.now() + BROWSER_RESUME_MS;
       $('error').textContent = ''; connect(null, sessionInfo.mediaMode || preferredMode);
-    } else if (sessionExpected) {
-      // Do not POST on an expired session: it has already been revoked.
-      sessionExpected = false;
-      fail('This session ended or expired. Create a new code on the computer.');
+    } else {
+      const ticket = await remembered.ticket();
+      if (mine !== generation || ws || away()) return;
+      if (ticket) { sessionExpected = false; resumeDeadline = 0; connect(ticket); }
+      else if (sessionExpected) { sessionExpected = false; fail('This session ended. Reconnect with a remembered browser or pair using a new invitation.'); }
     }
-  } catch {
-    if (mine === generation && sessionExpected) {
+  } catch (error) {
+    if (mine === generation) $('error').textContent = error.message || 'Could not reconnect. Check the private connection.';
+    if (mine === generation && [400, 403].includes(error.status)) { sessionExpected = false; fail(error.message); return; }
+    if (mine === generation && (sessionExpected || error.status === 409)) {
       $('status').textContent = 'Reconnecting…';
       retryTimer = setTimeout(resumeSession, 1500);
     }
@@ -227,7 +231,7 @@ function connect(key = null, requestedMode = preferredMode) {
     clearTimeout(timeout);
     if (mine !== generation) return;
     releaseTouches(); clearMedia(); ws = null; authenticated = false; updateArrowAvailability();
-    if (sessionExpected && ![1000, 1008, 4000, 4002].includes(event.code)) {
+    if (sessionExpected && ![1008, 4000, 4002].includes(event.code)) {
       resumeDeadline ||= Date.now() + BROWSER_RESUME_MS;
       $('status').textContent = document.hidden ? 'Paused while away' : 'Reconnecting…';
       retryTimer = setTimeout(resumeSession, 250);
@@ -262,6 +266,7 @@ function connect(key = null, requestedMode = preferredMode) {
         if (mediaMode === 'webcodecs' && !('VideoDecoder' in window)) throw new Error('This connection needs WebCodecs. Use the private VPN link for browser-native video.');
         authenticated = true; sessionExpected = true;
         viewOnly = message.viewOnly === true;
+        remembered.authenticated(viewOnly);
         keyboardSupported = message.keyboard === true && !viewOnly;
         updateArrowAvailability();
         $('keyboard').hidden = !keyboardSupported;
@@ -432,30 +437,30 @@ function updatePause() {
   updateArrowAvailability();
   if (!authenticated || !header || ws?.readyState !== WebSocket.OPEN) return;
   releaseTouches(); stopAudio();
-  if (paused || document.hidden) hideKeyboard();
+  if (paused || away()) hideKeyboard();
   suspendDecoder();
-  if (!document.hidden && !paused) video?.resume();
-  ws.send(document.hidden ? 'suspend' : 'resume');
-  action(paused || document.hidden ? 7 : 8);
-  if (document.hidden) resumeDeadline ||= Date.now() + BROWSER_RESUME_MS;
+  if (!away() && !paused) video?.resume();
+  ws.send(away() ? 'suspend' : 'resume');
+  action(paused || away() ? 7 : 8);
+  if (away()) resumeDeadline ||= Date.now() + BROWSER_RESUME_MS;
   else resumeDeadline = 0;
   if (mediaMode === 'webrtc') {
     const mine = generation, attempt = ++playbackAttempt;
-    if (document.hidden || paused) { rtcDisplay.muted = true; rtcDisplay.pause?.(); }
+    if (away() || paused) { rtcDisplay.muted = true; rtcDisplay.pause?.(); }
     else { rtcDisplay.muted = muted; void rtcDisplay.play?.().catch(() => {
       if (mine === generation && attempt === playbackAttempt && authenticated) {
         $('error').textContent = 'Tap Resume to restart browser playback.';
       }
     }); }
   }
-  if (mediaMode !== 'webrtc' && !document.hidden && !muted && audioContext?.state !== 'running') {
+  if (mediaMode !== 'webrtc' && !away() && !muted && audioContext?.state !== 'running') {
     // Mobile browsers may suspend audio independently of the video connection.
     // Ask for a fresh tap instead of showing an inaccurate "Audio on" state.
     muted = true; action(11); setRailLabel('audio', 'Audio off');
     $('audio').setAttribute('aria-label', 'Audio off'); $('audio').setAttribute('aria-pressed', 'false');
   }
-  if (!document.hidden && !paused) configureAudio();
-  $('status').textContent = document.hidden ? 'Paused while away' : paused ? 'Video paused' : 'Resuming…';
+  if (!away() && !paused) configureAudio();
+  $('status').textContent = away() ? 'Paused while away' : paused ? 'Video paused' : 'Resuming…';
 }
 $('pause').addEventListener('click', () => {
   paused = !paused; updatePause();
@@ -465,8 +470,9 @@ $('pause').addEventListener('click', () => {
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) clearTimeout(connectionTimer);
   updatePause();
-  if (!document.hidden) void resumeSession();
+  if (!away()) void resumeSession();
 });
+for (const name of ['enterpictureinpicture', 'leavepictureinpicture', 'webkitpresentationmodechanged']) rtcDisplay.addEventListener(name, () => { updatePause(); if (!away()) void resumeSession(); });
 window.addEventListener('blur', releaseTouches);
 window.addEventListener('pagehide', () => {
   releaseTouches(); stopAudio(); clearTimeout(connectionTimer);

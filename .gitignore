@@ -27,3 +27,6 @@ local.properties
 !.env.example
 *.jks
 *.keystore
+
+# Reused local desktop dependency links are never source.
+/desktop/node_modules

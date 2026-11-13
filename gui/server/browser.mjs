@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { createBrowserSession } from './browser-session.mjs';
 import { BROWSER_RESUME_MS } from '../receiver/protocol.mjs';
+import { deviceDigest, deviceName, TRUST_LIFETIME_MS } from './trusted-devices.mjs';
 
 const assets = new Map([
   ['/', ['index.html', 'text/html; charset=utf-8']],
@@ -16,6 +17,8 @@ const assets = new Map([
   ['/video.mjs', ['video.mjs', 'text/javascript; charset=utf-8']],
   ['/keyboard.mjs', ['keyboard.mjs', 'text/javascript; charset=utf-8']],
   ['/protocol.mjs', ['protocol.mjs', 'text/javascript; charset=utf-8']],
+  ['/remembered.mjs', ['remembered.mjs', 'text/javascript; charset=utf-8']],
+  ['/lifecycle.mjs', ['lifecycle.mjs', 'text/javascript; charset=utf-8']],
   ['/receiver.css', ['receiver.css', 'text/css; charset=utf-8']],
 ]);
 
@@ -33,15 +36,18 @@ export function receiverOrigin(value) {
 // Remote access is opt-in via a user-managed Tailscale Serve HTTPS proxy.
 export function createBrowserReceiver({ configuredPort = 27180, origin,
   tls, rtcBind = '127.0.0.1', onConnect, onChange = () => {}, invitationMs = 300000, authMs = 5000,
-  resumeMs = BROWSER_RESUME_MS, lifetimeMs = 12 * 60 * 60 * 1000 } = {}) {
+  resumeMs = BROWSER_RESUME_MS, lifetimeMs = 12 * 60 * 60 * 1000, trustedDevices, onTrustedConnect } = {}) {
   const remoteOrigin = receiverOrigin(origin);
-  let port;
+  let port, closed = false;
   let listening;
   let secureServer;
   let mode = 'local';
   let invitation = null;
   let session = null;
   let expiresAt = null;
+  let trustedTicket = null, enrollment = null, trustedConnecting = false, accessGeneration = 0;
+  let rememberProfile = null;
+  const deviceCookie = 'dskcpy_device_v1';
   let inputPolicy = { keyboard: false, viewOnly: false };
   let expiryTimer;
   let failures = 0;
@@ -54,6 +60,7 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
   const allowedOrigin = (value) => localOrigins().includes(value) || Boolean(remoteOrigin && value === remoteOrigin);
   const cookieName = () => `dskcpy_resume_${port}`;
   function mayResume(req) {
+    if (session?.deviceId && !trustedDevices?.enabled(session.deviceId)) return false;
     if (!session?.token || req.headers.host !== new URL(session.origin).host) return false;
     if (req.headers.origin && req.headers.origin !== session.origin) return false;
     if (req.headers['sec-fetch-site'] === 'cross-site') return false;
@@ -65,6 +72,88 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
     candidate.fill(0); return accepted;
   }
 
+  const cookieValue = req => (req.headers.cookie || '').split(';').map(p => p.trim())
+    .find(p => p.startsWith(`${deviceCookie}=`))?.slice(deviceCookie.length + 1);
+  const sameOrigin = req => req.headers.origin === remoteOrigin
+    && req.headers.host === new URL(remoteOrigin).host && req.headers['sec-fetch-site'] !== 'cross-site';
+  const enrollmentActive = () => enrollment && enrollment.expiresAt > Date.now() && enrollment.source === session;
+  function trustedStatus() {
+    return { ...(trustedDevices?.snapshot() || { available: false, paused: true, devices: [] }),
+      pending: enrollmentActive() ? [{ id: enrollment.id, name: enrollment.name, expiresAt: enrollment.expiresAt }] : [] };
+  }
+  async function trustAction(action, id) {
+    await trustedDevices?.ready;
+    if (!trustedDevices) throw new Error('Remembered access is unavailable.');
+    if (action === 'approve') {
+      if (!enrollmentActive() || enrollment.id !== id || !session?.rememberProfile) throw new Error('This device request expired. Ask the device to try again.');
+      const pending = enrollment;
+      await trustedDevices.approve({ id: pending.id, digest: pending.digest, name: pending.name,
+        origin: pending.origin, profile: session.rememberProfile });
+      if (session === pending.source) session.deviceId = pending.id;
+      if (enrollment === pending) enrollment = null;
+    } else if (action === 'reject') {
+      if (enrollment?.id === id) enrollment = null;
+    } else if (action === 'revoke') {
+      accessGeneration++;
+      if (trustedTicket?.id === id || session?.deviceId === id) cancel();
+      await trustedDevices.revoke(id);
+    } else if (action === 'pause') {
+      accessGeneration++; trustedDevices.block(); cancel(); await trustedDevices.pause(true);
+    } else if (action === 'resume') {
+      await trustedDevices.pause(false); await ensureListening('internet');
+    } else throw new Error('Unknown device action.');
+    onChange(); return trustedStatus();
+  }
+  async function readTrustBody(req) {
+    if (!String(req.headers['content-type'] || '').startsWith('application/json')) throw new Error('Expected JSON.');
+    let body = '';
+    for await (const chunk of req) { body += chunk; if (Buffer.byteLength(body) > 1024) throw new Error('Request too large.'); }
+    const value = JSON.parse(body);
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid request.');
+    return value;
+  }
+  async function trustedRequest(req, res) {
+    const json = (code, value) => res.writeHead(code, { 'Content-Type': 'application/json' }).end(JSON.stringify(value));
+    if (!remoteOrigin || !sameOrigin(req) || !trustedDevices || req.method !== 'POST') { json(403, { error: 'Use the private HTTPS receiver.' }); return; }
+    try {
+      await trustedDevices.ready;
+      const body = await readTrustBody(req);
+      if (req.url === '/stream/remember') {
+        if (!mayResume(req) || !session?.rememberProfile || !trustedDevices.snapshot().available) throw new Error('Pair through a full-desktop private invitation first.');
+        if (enrollmentActive()) throw new Error('A device approval is already waiting on the host.');
+        const token = randomBytes(32).toString('base64url');
+        enrollment = { id: randomBytes(16).toString('hex'), digest: deviceDigest(token),
+          name: deviceName(body.name), origin: remoteOrigin, source: session, expiresAt: Date.now() + 300000 };
+        res.setHeader('Set-Cookie', `${deviceCookie}=${token}; HttpOnly; Secure; SameSite=Strict; Path=/stream; Max-Age=${TRUST_LIFETIME_MS / 1000}`);
+        onChange(); json(202, { status: 'pending' }); return;
+      }
+      if (req.url === '/stream/remember/status') {
+        const token = cookieValue(req), digest = token && deviceDigest(token);
+        const pending = enrollmentActive() && enrollment.digest === digest;
+        const device = trustedDevices.find(token, remoteOrigin, true);
+        json(200, { status: pending ? 'pending' : device ? 'approved' : 'unavailable', paused: trustedDevices.snapshot().paused }); return;
+      }
+      if (req.url !== '/stream/trusted/connect') { json(404, {}); return; }
+      const device = trustedDevices.find(cookieValue(req), remoteOrigin);
+      if (!device) { json(403, { error: trustedDevices.snapshot().paused ? 'Remembered access is paused on the host.' : 'Pair this browser again using a new invitation.' }); return; }
+      if (trustedConnecting || invitation || session) { json(409, { error: 'The host already has an active connection or invitation. Try again when it is free.' }); return; }
+      trustedConnecting = true;
+      const mine = accessGeneration;
+      try {
+        let result;
+        try { result = await onTrustedConnect(device); }
+        catch (error) {
+          if (error.code === 'HOST_BUSY') { json(409, { error: 'The previous session is still closing. Reconnecting shortly.' }); return; }
+          throw new Error('The host could not start sharing. Check its capture permissions and connection.');
+        }
+        if (mine !== accessGeneration || !trustedDevices.allowed(device.id, device.digest)) {
+          if (trustedTicket?.id === device.id) cancel();
+          throw new Error('Remembered access was paused or revoked.');
+        }
+        json(201, { key: result.key });
+      } finally { trustedConnecting = false; }
+    } catch (error) { json(400, { error: error.message }); }
+  }
   function status() {
     return { waiting: Boolean(invitation), connected: Boolean(session),
       url: port ? viewerUrl() : null, remote: !['local', 'usb'].includes(mode),
@@ -74,6 +163,7 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
     clearTimeout(expiryTimer);
     invitation?.fill(0);
     invitation = null;
+    trustedTicket = null; enrollment = null;
     expiresAt = null;
     session?.close();
     for (const socket of sockets) socket.terminate();
@@ -92,6 +182,7 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
     const asset = assets.get(req.url)
       || (/^\/join\/[a-f0-9]{32}$/.test(req.url) ? assets.get('/join') : undefined);
     if (!allowedHost(req.headers.host)) { res.writeHead(403).end(); return; }
+    if (['/stream/remember', '/stream/remember/status', '/stream/trusted/connect'].includes(req.url)) { await trustedRequest(req, res); return; }
     if (req.url === '/stream/session' && req.method === 'GET') {
       const resumable = mayResume(req);
       res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ resumable,
@@ -125,9 +216,11 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
   const upgrade = (req, socket, head) => {
     const resume = mayResume(req);
     const mediaMode = req.url === '/stream/webrtc' && mode !== 'usb' ? 'webrtc' : 'webcodecs';
-    if (!['/stream', '/stream/webrtc'].includes(req.url)
+    if (closed || !['/stream', '/stream/webrtc'].includes(req.url)
         || (resume && mediaMode !== session.mediaMode)
         || !allowedHost(req.headers.host) || !allowedOrigin(req.headers.origin)
+        || (!resume && trustedTicket && (req.headers.origin !== trustedTicket.origin
+          || req.headers.host !== new URL(trustedTicket.origin).host))
         || (!resume && (!invitation || session || failures >= 10)) || sockets.size >= 4) {
       socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');
       return;
@@ -146,7 +239,8 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
         const accepted = invitation && candidate.length === invitation.length
           && timingSafeEqual(candidate, invitation);
         candidate.fill(0);
-        if (!accepted || session) {
+        if (!accepted || session || (trustedTicket && (!trustedDevices.allowed(trustedTicket.id, trustedTicket.digest)
+          || req.headers.origin !== trustedTicket.origin || req.headers.host !== new URL(trustedTicket.origin).host))) {
           if (++failures >= 10) cancel();
           ws.close(1008, 'Session key rejected or expired.');
           return;
@@ -154,6 +248,7 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
         invitation.fill(0); invitation = null;
         clearTimeout(expiryTimer); expiresAt = null;
         for (const other of sockets) if (other !== ws) other.terminate();
+        const deviceId = trustedTicket?.id; trustedTicket = null;
         const token = Buffer.from(req.resumeToken);
         const active = createBrowserSession({ socket: ws, onConnect, resumeMs, lifetimeMs,
           mediaMode, rtcBind, ...inputPolicy, onChange, onClose: () => {
@@ -162,7 +257,8 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
           if (session === active) session = null;
           onChange();
         } });
-        session = Object.assign(active, { token, origin: req.headers.origin });
+        session = Object.assign(active, { token, origin: req.headers.origin, deviceId,
+          rememberProfile: mode === 'internet' && !inputPolicy.viewOnly ? rememberProfile : null });
         onChange();
         await active.start();
       });
@@ -170,8 +266,8 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
   };
   server.on('upgrade', upgrade);
 
-  async function invite(connection = 'local', policy = {}) {
-    if (invitation || session) throw new Error('A browser session is already open. Stop it first.');
+  async function ensureListening(connection) {
+    if (closed) throw new Error('The host has closed.');
     if (!['local', 'usb', 'wifi', 'ip', 'internet'].includes(connection)) throw new Error('Choose a browser connection method.');
     if (!['local', 'usb'].includes(connection) && !remoteOrigin) {
       throw new Error('Configure a trusted HTTPS receiver address before using Wi-Fi, IP or Internet. USB and local tests work without certificates.');
@@ -196,23 +292,35 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
       });
       secureServer = secure;
     }
+  }
+  async function invite(connection = 'local', policy = {}, grant = null) {
+    if (invitation || session) throw new Error('A browser session is already open. Stop it first.');
+    await ensureListening(connection);
+    if (invitation || session) throw new Error('A browser session is already open. Stop it first.');
+    if (grant && !trustedDevices?.allowed(grant.id, grant.digest)) throw new Error('Remembered access was paused or revoked.');
+    trustedTicket = grant;
+    rememberProfile = policy.rememberProfile || null;
     mode = connection;
     inputPolicy = { keyboard: policy.keyboard === true && policy.viewOnly !== true, viewOnly: policy.viewOnly === true };
     invitation = randomBytes(24);
     failures = 0;
-    expiresAt = new Date(Date.now() + invitationMs).toISOString();
-    expiryTimer = setTimeout(cancel, invitationMs);
+    const duration = grant ? 15000 : invitationMs;
+    expiresAt = new Date(Date.now() + duration).toISOString();
+    expiryTimer = setTimeout(cancel, duration);
     onChange();
     return { key: invitation.toString('base64url'), ...status() };
   }
   async function shutdown() {
+    if (closed) return; closed = true; accessGeneration++;
     cancel();
     await pendingCleanup;
     wss.close();
     if (listening) await new Promise((resolve) => { server.close(resolve); server.closeAllConnections(); });
     if (secureServer) await new Promise((resolve) => { secureServer.close(resolve); secureServer.closeAllConnections(); });
   }
-  return { invite, status, cancel, shutdown, get port() { return port; } };
+  return { invite, status, cancel, shutdown, trustedStatus, trustAction,
+    async standby() { await trustedDevices?.ready; if (remoteOrigin && trustedDevices?.snapshot().devices.length) { await ensureListening('internet'); mode = 'internet'; } },
+    get port() { return port; } };
 }
 
 export function isPrivateBind(value) {

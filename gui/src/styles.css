@@ -382,3 +382,6 @@ select { min-width: 0; height: 37px; padding-inline: 8px; color: var(--text); ba
 @media (forced-colors: active) {
   .browser-mode:has(:checked), .browser-mode:has(:focus-visible) { outline: 2px solid Highlight; outline-offset: 2px; }
 }
+.remembered-devices { border-block-start: 1px solid var(--border, #304a58); margin-block: 20px; padding-block: 16px; overflow-wrap: anywhere; }
+.remembered-devices button { min-block-size: 44px; margin: 4px; }
+.remembered-device-request { padding: 14px; border: 1px solid #67dbf6; border-radius: 12px; margin-block: 12px; }

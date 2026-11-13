@@ -42,14 +42,14 @@ export class OwnedBackend {
     })().finally(() => { this.opening = null; });
     return this.opening;
   }
-  request(action) {
+  request(action, args) {
     const child = this.child;
     if (!child) return Promise.reject(new Error('Open the sharing service first.'));
     const id = ++this.sequence;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => { this.pending.delete(id); reject(new Error('The sharing service took too long.')); }, 20000);
       this.pending.set(id, { resolve, reject, timer, child });
-      try { child.postMessage({ id, action }); }
+      try { child.postMessage({ id, action, args }); }
       catch (error) { clearTimeout(timer); this.pending.delete(id); reject(error); }
     });
   }

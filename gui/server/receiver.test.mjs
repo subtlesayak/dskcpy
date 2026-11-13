@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
+import { rememberedBrowser } from '../receiver/remembered.mjs';
+import { receiverIsAway } from '../receiver/lifecycle.mjs';
 import * as protocol from '../receiver/protocol.mjs';
 import { createVideoReceiver } from '../receiver/video.mjs';
 import { createBrowserKeyboard, keyboardUsage, keyPacket } from '../receiver/keyboard.mjs';
@@ -98,7 +100,10 @@ function receiver(t, { portrait = false, lockFails = false, webRtc = false, webC
   if (webRtc) window.RTCPeerConnection = true;
   window.history = { replaceState(_state, _title, url) { locationState.hash = ''; historyChanges.push(url); } };
   const context = vm.createContext({ ...protocol,
-    createBrowserKeyboard, keyboardUsage, keyPacket,
+    createBrowserKeyboard, keyboardUsage, keyPacket, receiverIsAway,
+    rememberedBrowser: options => rememberedBrowser({ ...options, document, location: locationState,
+      fetch: (...args) => context.fetch(...args),
+      setTimeout: (fn, ms) => { const timer = setTimeout(fn, ms); timers.add(timer); return timer; }, clearTimeout }),
     createVideoReceiver: (options) => createVideoReceiver({ ...options, Decoder }),
     window, document, WebSocket: Socket, VideoDecoder: Decoder, AudioDecoder: SoundDecoder, AudioContext,
     EncodedAudioChunk: class { constructor(value) { Object.assign(this, value); } },
@@ -126,7 +131,7 @@ function receiver(t, { portrait = false, lockFails = false, webRtc = false, webC
     new Uint8Array(bytes, 16).set(payload); socket.emit('message', { data: bytes });
   }
   media(0, 1, parameters);
-  return { $, document, window, socket, sockets, locationState, decoders, media, orientation, historyChanges, cssVariables, soundDecoders, audioSources, audioContexts, reflow: () => resize() };
+  return { context, $, document, window, socket, sockets, locationState, decoders, media, orientation, historyChanges, cssVariables, soundDecoders, audioSources, audioContexts, reflow: () => resize() };
 }
 
 test('suspension drains queued frames and ignores stale decoder callbacks after resume', async (t) => {
@@ -598,6 +603,41 @@ test('WebCodecs audio closes oversized output instead of allocating an unbounded
 });
 
 
+test('PiP keeps browser-native video and audio running while the original page is hidden', async t => {
+  const h = receiver(t, { webRtc: true, webCodecs: false });
+  await h.$('audio').emit('click');
+  h.document.pictureInPictureElement = h.$('rtc-display');
+  h.document.hidden = true; h.document.emit('visibilitychange');
+  assert.equal(h.$('rtc-display').paused, false);
+  assert.equal(h.$('rtc-display').muted, false);
+  assert.equal(h.socket.sent.at(-2), 'resume');
+  assert.ok(!h.socket.sent.includes('suspend'));
+  h.document.pictureInPictureElement = null; h.$('rtc-display').emit('leavepictureinpicture');
+  assert.equal(h.$('rtc-display').paused, true);
+  assert.ok(h.socket.sent.includes('suspend'));
+  h.$('disconnect').emit('click');
+});
+
+test('an expired session uses a saved credential and explicit Disconnect suppresses automatic retry', async t => {
+  const h = receiver(t, { webRtc: true, webCodecs: false });
+  await new Promise(setImmediate);
+  let requests = [];
+  h.context.fetch = async url => {
+    requests.push(url);
+    return { ok: true, json: async () => url.endsWith('/session') ? { resumable: false }
+      : url.endsWith('/remember/status') ? { status: 'approved', paused: false } : { key: 'r'.repeat(32) } };
+  };
+  h.socket.readyState = 3; h.socket.emit('close', { code: 1000 });
+  await new Promise(resolve => setTimeout(resolve, 280));
+  assert.ok(requests.includes('/stream/trusted/connect'));
+  assert.equal(h.sockets.length, 2);
+  h.sockets[1].emit('open'); assert.equal(h.sockets[1].sent[0], 'r'.repeat(32));
+  h.$('disconnect').emit('click'); const before = h.sockets.length;
+  h.document.emit('visibilitychange'); h.window.emit('pageshow'); await new Promise(setImmediate);
+  assert.equal(h.sockets.length, before);
+});
+
+
 test('arrow pad sends complete direction pairs without opening the soft keyboard', t => {
   const h = receiver(t, { keyboard: true });
   assert.equal(h.$('arrows').hidden, false); assert.equal(h.$('arrows').disabled, false);
@@ -646,15 +686,19 @@ test('arrow pad and typing panel are exclusive and Escape restores the arrow tri
 
 
 for (const [elapsed, expectedSockets] of [[180000,2],[300001,1]]) {
-  test(`browser recovery ${elapsed}ms away uses the shared five-minute limit`, async (t) => {
+  test(`browser recovery ${elapsed}ms away honors host recovery and remembered-access policy`, async (t) => {
     let clock=1000;
     const h=receiver(t,{now:()=>clock,resumable:true});
     await new Promise(setImmediate); // Let the initial unauthenticated probe finish.
     h.document.hidden=true;h.document.emit('visibilitychange');
     h.socket.readyState=3;h.socket.emit('close',{code:1006});
-    clock+=elapsed;h.document.hidden=false;h.document.emit('visibilitychange');
+    clock+=elapsed;
+    // This candidate trusts the host's expiry and can separately request a new
+    // remembered grant. No remembered ticket is available in this fixture.
+    h.context.fetch=async()=>({ok:true,json:async()=>({resumable:elapsed<300000})});
+    h.document.hidden=false;h.document.emit('visibilitychange');
     await new Promise(setImmediate);
     assert.equal(h.sockets.length,expectedSockets);
-    if(expectedSockets===1)assert.match(h.$('error').textContent,/expired while you were away/);
+    if(expectedSockets===1)assert.match(h.$('error').textContent,/session ended/);
   });
 }

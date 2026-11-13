@@ -1,3 +1,4 @@
+import os from 'node:os';
 import { execFile } from 'node:child_process';
 import { stat } from 'node:fs/promises';
 import http from 'node:http';
@@ -91,7 +92,7 @@ function occupiedError(port) {
 export async function launch({ args = [], environment = process.env, repoDir = defaultRepo,
   probe = probeDashboard, inspect = checkInstallation, readiness = checkRuntime,
   open = openDashboard, log = console.log,
-  createService = async (options) => (await import('../server/service.mjs')).createControlService(options),
+  createService = async (options) => (await import('../server/service.mjs')).createControlService({ ...options, trustedDevicesPath: options.environment?.DSKCPY_TRUST_STORE || path.join(os.homedir(), '.dskcpy', 'remembered-devices.json') }),
 } = {}) {
   const options = parseOptions(args, environment);
   if (options.help) {

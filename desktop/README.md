@@ -106,16 +106,24 @@ node node_modules/typescript/bin/tsc --noEmit
 cd ..
 PLAYWRIGHT_BROWSERS_PATH=desktop/.browsers node desktop/node_modules/playwright/cli.js install chromium
 PLAYWRIGHT_BROWSERS_PATH=desktop/.browsers node desktop/test/beginner-ui.mjs
+PLAYWRIGHT_BROWSERS_PATH=desktop/.browsers node desktop/test/remembered-ui.mjs
+PLAYWRIGHT_BROWSERS_PATH=desktop/.browsers node desktop/test/remembered-cookie.mjs
 ```
 
 Service integration uses a fake no-capture executable and a new ephemeral
 controller. Headless UI checks use synthetic state and an owned static server;
 they never create a real invitation, read the screen, change permissions, or
 contact a running host. `node desktop/test/run-electron-smoke.mjs` checks the
-assembled app’s real Electron renderer/preload and utility IPC in a hidden
+assembled app’s real Electron renderer/preload and utility IPC, including an empty temporary remembered-device registry and pause, in a hidden
 window with a fake --help-only native. The main host shell, OS permission and
 startup APIs, clipboard writes and Tailscale are not invoked. This is distinct
-from desktop media/TCC qualification. Screenshots are test fixtures, not hardware proof.
+from desktop media/TCC qualification. Screenshots are test fixtures, not hardware proof. The remembered-cookie check
+uses a fully intercepted synthetic HTTPS origin and temporary Chromium profile,
+not a certificate bypass or a real VPN/TLS endpoint. It verifies cookie flags,
+JavaScript isolation at the matching path, browser and fixture-host restarts,
+and revocation with synthetic grants, then deletes the owned profile/registry.
+The temporary-session bootstrap is supplied by the fixture; this test does not
+claim a physical first-pairing, TLS, media, or Android browser result.
 
 ## Beginner release gates still open
 
@@ -126,11 +134,11 @@ from desktop media/TCC qualification. Screenshots are test fixtures, not hardwar
 3. Qualify the implemented opt-in launch-at-login setting on installed/signed
    builds and across upgrades. Source reads never enroll it; user toggles use
    fixed app identity and verify OS approval. Login opens the tray only and
-   leaves screen sharing stopped. Awake/restart guidance remains.
-4. Explicit remembered-device enrollment, readable names and revocation so a
-   previously approved personal device can reconnect without someone in the
-   office creating another five-minute invitation. Temporary invite access is
-   not silently promoted to permanent trust.
+   does not start capture by itself. Approved remembered browsers may reconnect when saved access is enabled. Awake/restart guidance remains.
+4. Physically qualify the opt-in remembered-browser enrollment, names, pause,
+   revocation and long reconnect implemented in this source candidate. See
+   [remembered browsers](../doc/remembered-browsers.md). Temporary invitation
+   access is never silently promoted to remembered access.
 5. Integrate account-free USB/LAN into the same guided flow, automatic Android
    USB opening, and actionable peer/reachability checks for private networks.
 6. Complete Windows keyboard/IME, relevant browser/device matrix, failure and
@@ -146,12 +154,15 @@ The existing receiver can resume the same browser session after a brief drop or
 background period, within about two minutes, while the host remains running.
 Keep Tailscale connected, reopen the same receiver tab and let it retry; refresh
 once if needed. Disconnect explicitly ends that session. An expired session or
-restarted host needs a new one-use invitation from the Mac; an old QR is not a
-remembered-device credential.
+restarted host needs either an explicitly approved remembered browser in this
+source candidate or a new one-use invitation from the Mac. An old QR is not a
+remembered-device credential. The running Terminal baseline has not been
+updated by building this candidate.
 
 Shutdown/restart ends the stream. The existing Terminal host has no verified
 reboot recovery. The prototype’s optional login setting opens the tray after
-user login and leaves sharing stopped; it does not unlock the Mac, keep a
+user login; an approved browser can request capture only when remembered
+access is enabled and the private route is available. It does not unlock the Mac, keep a
 user-session VPN alive before login, or authorize a permanent receiver. Do not
 promise phone-only recovery across cold boot. Qualify signed app startup,
 private-route availability, explicit remembered-device authentication and owner
