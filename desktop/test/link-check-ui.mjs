@@ -58,6 +58,7 @@ try { for (const variant of [{ width: 620, height: 740, reason: 'certificate' },
     await page.getByRole('heading', { name: 'Checking your private link', exact: true }).waitFor(); resolveProbe({ ready: false, reason: variant.reason });
     await page.getByRole('button', { name: 'Try again', exact: true }).waitFor(); assert.equal(invites, 0);
     assert.match(await page.locator('.description').innerText(), /try again/);
+    assert.equal(await page.getByRole('alert').innerText(), host.snapshot().error);
     assert.equal(await page.locator('.qr').count(), 0); assert.equal(host.snapshot().route.verified, false);
     assert.equal(await page.locator('.setup-list li').last().locator('.done').count(), 0);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);

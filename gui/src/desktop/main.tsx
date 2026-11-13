@@ -92,7 +92,7 @@ function App() {
       {phase !== 'inviting' && <div className={`hero-icon ${phase === 'sharing' ? 'is-sharing' : ''}`}><Monitor aria-hidden="true" size={34} /></div>}
       <p className="eyebrow">{setup ? 'SET UP YOUR COMPUTER' : phase === 'sharing' ? 'CONNECTED' : 'BROWSER RECEIVER · NO APP NEEDED'}</p>
       <h1 ref={heading} tabIndex={-1}>{content.title}</h1>
-      <p className="description">{state?.error || (phase === 'sharing' && !state?.features.keyboard
+      <p className="description"><span role="alert">{state?.error || ''}</span>{!state?.error && (phase === 'sharing' && !state?.features.keyboard
         ? 'The connected device can see your whole screen, hear desktop audio and use the mouse. Stop sharing to end its access.' : content.description)}</p>
       {setup && state && <ol className="setup-list" aria-label="Setup progress">
         {[['Screen access', state.permissions.screen], ['Mouse and keyboard', state.permissions.control], [usb ? 'USB phone' : 'Private connection', usb ? Boolean(state.usb?.selected) : state.route.ready && state.route.verified !== false]].map(([label, done], i) =>
