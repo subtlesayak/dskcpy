@@ -49,7 +49,8 @@ export function createBrowserKeyboard({ field, send, canSend, onError = () => {}
     if (down.size) send(keyPacket(2));
     down.clear();
   }
-  function release() { releaseKeys(); composing = false; clearPreview(); }
+  function release() { releaseKeys(); composing = false; }
+  function clearContext() { release(); clearPreview(); }
   function selection() {
     const start = Number.isInteger(field.selectionStart) ? Math.min(field.selectionStart, preview.length) : preview.length;
     const end = Number.isInteger(field.selectionEnd) ? Math.min(field.selectionEnd, preview.length) : preview.length;
@@ -57,8 +58,9 @@ export function createBrowserKeyboard({ field, send, canSend, onError = () => {}
   }
   function stroke(usage, count = 1, mask = 0) {
     if (!count) return;
-    for (let i = 0; i < count; i++) send(keyPacket(0, usage, mask));
-    send(keyPacket(1, usage));
+    for (let i = 0; i < count; i++) {
+      send(keyPacket(0, usage, mask)); send(keyPacket(1, usage));
+    }
   }
   function rank(offset) { return parts(preview.slice(0, offset)).length; }
   function selectRemote(anchor, focus) {
@@ -94,7 +96,7 @@ export function createBrowserKeyboard({ field, send, canSend, onError = () => {}
   function changed() {
     if (!allowed()) { clearPreview(); return; }
     const value = field.value;
-    if (value === preview) { syncSelection(); return; }
+    if (value === preview) return;
     if (value.length > 512 || /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(value)) {
       paint(); onError('Send up to 512 characters without unsupported control characters at a time.'); return;
     }
@@ -109,23 +111,32 @@ export function createBrowserKeyboard({ field, send, canSend, onError = () => {}
     const end = preview.length - old.slice(old.length - suffix).join('').length;
     const inserted = next.slice(prefix, next.length - suffix).join('');
     const target = [field.selectionStart, field.selectionEnd, field.selectionDirection];
-    selectRemote(start, end);
-    if (end > start) stroke(42);
+    // Replace from the end of the changed range with balanced Backspaces.
+    // Native IME completion must not depend on synthetic Shift selection.
+    selectRemote(end, end);
+    stroke(42, parts(preview.slice(start, end)).length);
     insertText(inserted);
     preview = value; remoteAnchor = remoteFocus = start + inserted.length;
     if (Number.isInteger(target[0]) && Number.isInteger(target[1])) {
-      field.setSelectionRange?.(target[0], target[1], target[2]); syncSelection();
+      field.setSelectionRange?.(target[0], target[1], target[2]);
     }
     trimPreview();
   }
   function editPreview(usage) {
-    syncSelection();
-    let start = Math.min(remoteAnchor, remoteFocus), end = Math.max(remoteAnchor, remoteFocus);
+    const [anchor, focus] = selection();
+    let start = Math.min(anchor, focus), end = Math.max(anchor, focus);
     if (start === end && usage === 42) start = boundaries(preview).filter(offset => offset < start).at(-1) ?? start;
     if (start === end && usage === 76) end = boundaries(preview).find(offset => offset > end) ?? end;
     const value = usage === 40 ? '\n' : '';
-    preview = preview.slice(0, start) + value + preview.slice(end);
-    remoteAnchor = remoteFocus = start + value.length; paint(); trimPreview();
+    if (usage === 40) {
+      selectRemote(end, end); stroke(42, parts(preview.slice(start, end)).length); stroke(40);
+      preview = preview.slice(0, start) + value + preview.slice(end);
+      remoteAnchor = remoteFocus = start + 1; paint(); trimPreview(); return;
+    }
+    if (start === end && !value) { selectRemote(start, start); stroke(usage); return; }
+    field.value = preview.slice(0, start) + value + preview.slice(end);
+    field.setSelectionRange?.(start + value.length, start + value.length);
+    changed();
   }
   function movePreview(code, shifted) {
     const left = Math.min(remoteAnchor, remoteFocus), right = Math.max(remoteAnchor, remoteFocus);
@@ -148,7 +159,7 @@ export function createBrowserKeyboard({ field, send, canSend, onError = () => {}
     if (!usage) return;
     event.preventDefault();
     const plain = !event.ctrlKey && !event.metaKey && !event.altKey;
-    if (plain && [40,42,76].includes(usage)) editPreview(usage);
+    if (plain && [40,42,76].includes(usage)) { editPreview(usage); return; }
     else if (plain && ['ArrowLeft','ArrowRight'].includes(event.code)) { syncSelection(); movePreview(event.code, event.shiftKey); }
     else if (usage < 224) clearPreview();
     down.set(event.code, usage); send(keyPacket(0, usage, modifiers(event)));
@@ -159,7 +170,7 @@ export function createBrowserKeyboard({ field, send, canSend, onError = () => {}
     if (!allowed()) { release(); return; }
     down.delete(event.code); send(keyPacket(1, usage, modifiers(event)));
   });
-  field.addEventListener('compositionstart', () => { syncSelection(); composing = true; });
+  field.addEventListener('compositionstart', () => { composing = true; });
   field.addEventListener('compositionend', event => {
     composing = false;
     if (!field.value && event.data && !preview) field.value = event.data;
@@ -173,18 +184,14 @@ export function createBrowserKeyboard({ field, send, canSend, onError = () => {}
     if (event.cancelable === false) return;
     const usage = event.inputType === 'deleteContentBackward' ? 42 : event.inputType === 'deleteContentForward' ? 76
       : ['insertLineBreak','insertParagraph'].includes(event.inputType) ? 40 : 0;
-    if (usage) { event.preventDefault(); editPreview(usage); stroke(usage); }
-    else syncSelection();
-  });
-  field.ownerDocument?.addEventListener('selectionchange', () => {
-    if (field.ownerDocument.activeElement === field) syncSelection();
+    if (usage) { event.preventDefault(); editPreview(usage); }
   });
   // A native IME suggestion can briefly blur/refocus the field before its
   // replacement arrives. Releasing held keys must not forget the text already
   // sent, or the completed word would be appended after its existing prefix.
   field.addEventListener('blur', releaseKeys);
-  const leaveTyping = event => { if (event.target && event.target !== field) release(); };
+  const leaveTyping = event => { if (event.target && event.target !== field) clearContext(); };
   field.ownerDocument?.addEventListener('pointerdown', leaveTyping);
   field.ownerDocument?.addEventListener('focusin', leaveTyping);
-  return { release, setEnabled(value) { if (!value) release(); armed = value; if (armed) field.focus(); } };
+  return { release, setEnabled(value) { if (!value) clearContext(); armed = value; if (armed) field.focus(); } };
 }
