@@ -541,7 +541,7 @@ test('rail pause/resume releases typing and retains an explicit accessible playb
   assert.equal(h.$('pause').attrs.get('aria-label'), 'Pause video');
   assert.equal(h.$('pause').attrs.get('aria-pressed'), 'false');
   const commands = h.socket.sent.filter(p => Buffer.isBuffer(p) && p[0] === 5).map(p => p[1]);
-  assert.ok(commands.includes(7)); assert.equal(commands.at(-1), 8);
+  assert.ok(commands.includes(7)); assert.deepEqual(commands.slice(-2), [8, 11]);
   h.$('disconnect').emit('click');
 });
 
@@ -946,4 +946,30 @@ test('phone shortcut controls send one balanced chord and obey pause, touch, vie
   h.socket.emit('message', { data: JSON.stringify({ type: 'text-focus', focused: true }) });
   assert.equal(h.$('shortcuts').attrs.get('aria-expanded'), 'true'); assert.equal(h.$('keyboard-controls').hidden, true);
   h.$('disconnect').emit('click');
+});
+
+test('a muted WebCodecs page reapplies native audio-off after resume', t => {
+  const h = receiver(t, { webAudio: true });
+  const resume = h.socket.sent.lastIndexOf('resume');
+  assert.ok(resume >= 0);
+  const after = h.socket.sent.slice(resume + 1).filter(p => Buffer.isBuffer(p) && p[0] === 5);
+  assert.ok(after.some(p => p[1] === 11), 'mute must follow resume because suspended sessions reject earlier audio commands');
+  assert.equal(after.some(p => p[1] === 10), false, 'a fresh muted page must not enable native audio');
+});
+
+test('WebCodecs resume enables audio only with prior consent and a running AudioContext', async t => {
+  const h = await audioReceiver(t);
+  h.$('pause').emit('click');
+  let commands = h.socket.sent.filter(p => Buffer.isBuffer(p) && p[0] === 5);
+  assert.equal(commands.at(-1)[1], 11);
+  h.$('pause').emit('click');
+  commands = h.socket.sent.filter(p => Buffer.isBuffer(p) && p[0] === 5);
+  assert.equal(commands.at(-1)[1], 10);
+  h.audioContexts[0].state = 'suspended';
+  const before = h.socket.sent.length;
+  h.window.emit('pageshow');
+  commands = h.socket.sent.slice(before).filter(p => Buffer.isBuffer(p) && p[0] === 5);
+  assert.equal(commands.some(p => p[1] === 10), false);
+  assert.equal(commands.at(-1)[1], 11);
+  assert.equal(h.$('audio').attrs.get('aria-label'), 'Audio off');
 });
