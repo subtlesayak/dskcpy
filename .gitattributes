@@ -3,5 +3,8 @@
 gradlew text eol=lf
 dskcpy.properties text eol=lf
 
+# Pinned upstream notices must retain their exact checked bytes on Windows too.
+desktop/notices/*-LICENSE.txt -text
+
 # Unified-diff context lines intentionally contain a single space.
 doc/testing/mac/patches/*.patch -whitespace

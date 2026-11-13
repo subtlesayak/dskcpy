@@ -29,6 +29,9 @@ jobs:
       - run: npm test --prefix gui
       - run: npm run build --prefix gui
       - name: Check isolated beginner desktop app source
+        # Bash's -e wrapper stops on a failed test on both matrix platforms.
+        # PowerShell otherwise continues to later successful node --check calls.
+        shell: bash
         env:
           ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
         run: |

@@ -11,6 +11,8 @@ Staging retains that bundled notice and adds this primary notice under
 a dependency upgrade requires a fresh source/notice review. No build or runtime
 network fetch is added. Bundle verification checks the pinned bytes and manifest
 entry, independently of the manifest's supplied hash.
+Git attributes disable line-ending conversion for the pinned notice; a temporary
+checkout fixture verifies its exact bytes with Windows automatic line endings.
 
 This closes one observed missing-file gap. Full dependency, Electron/native
 notice and source-offer review, signing, installer and platform qualification

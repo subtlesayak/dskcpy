@@ -5,6 +5,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { WERIFT_NOTICE, stageRuntimeNotices, verifyRuntimeNotices } from '../runtime-notices.mjs';
 import { inventory } from '../../tools/build-identity.mjs';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { createHash } from 'node:crypto';
+const execute = promisify(execFile);
 
 async function fixture(t, overrides = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'dskcpy-notices-'));
@@ -50,4 +54,21 @@ test('linked notice files are rejected even when their bytes match', { skip: pro
   await rm(f.notice); const target = path.join(f.root, 'notice-target.txt');
   await writeFile(target, original); await symlink(target, f.notice);
   await assert.rejects(verifyRuntimeNotices(f.app, f.host, manifest), /changed runtime notice/);
+});
+test('Git checkout with automatic Windows line endings preserves the pinned upstream bytes', async t => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'dskcpy-notice-checkout-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const emptyHooks = path.join(root, 'empty-hooks'); await mkdir(emptyHooks);
+  const relative = `desktop/notices/${WERIFT_NOTICE.file}`, notice = path.join(root, relative);
+  await mkdir(path.dirname(notice), { recursive: true });
+  await writeFile(path.join(root, '.gitattributes'), await readFile(new URL('../../.gitattributes', import.meta.url)));
+  await writeFile(notice, await readFile(new URL(`../notices/${WERIFT_NOTICE.file}`, import.meta.url)));
+  const git = args => execute('git', ['-c', 'core.autocrlf=true', '-c', 'core.eol=crlf',
+    '-c', `core.hooksPath=${emptyHooks}`, '-c', `init.templateDir=${emptyHooks}`,
+    '-c', 'core.fsmonitor=false', '-c', `core.attributesFile=${os.devNull}`, ...args], { cwd: root, timeout: 10000 });
+  await git(['init', '--quiet']);
+  await git(['add', '.gitattributes', relative]);
+  await rm(notice);
+  await git(['checkout-index', '--force', '--all']);
+  assert.equal(createHash('sha256').update(await readFile(notice)).digest('hex'), WERIFT_NOTICE.sha256);
 });
