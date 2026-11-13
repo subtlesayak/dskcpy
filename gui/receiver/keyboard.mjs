@@ -31,8 +31,8 @@ function modifiers(event) {
   return (event.ctrlKey ? 1 : 0) | (event.shiftKey ? 2 : 0) | (event.altKey ? 4 : 0) | (event.metaKey ? 8 : 0);
 }
 
-// Focused browser input adapter with a retained local typing preview. Only the explicitly focused typing field
-// receives keys; nothing is read from the clipboard or saved to browser storage.
+// Only the explicit typing field receives keys. Its recent preview stays local;
+// nothing is read from the clipboard or saved to browser storage.
 export function createBrowserKeyboard({ field, send, canSend, onError = () => {} }) {
   const down = new Map();
   let armed = false, composing = false, preview = '', remoteAnchor = 0, remoteFocus = 0;
@@ -45,10 +45,11 @@ export function createBrowserKeyboard({ field, send, canSend, onError = () => {}
     field.setSelectionRange?.(Math.min(anchor, focus), Math.max(anchor, focus), anchor > focus ? 'backward' : 'forward');
   }
   function clearPreview() { preview = ''; remoteAnchor = remoteFocus = 0; paint(); }
-  function release() {
+  function releaseKeys() {
     if (down.size) send(keyPacket(2));
-    down.clear(); composing = false; clearPreview();
+    down.clear();
   }
+  function release() { releaseKeys(); composing = false; clearPreview(); }
   function selection() {
     const start = Number.isInteger(field.selectionStart) ? Math.min(field.selectionStart, preview.length) : preview.length;
     const end = Number.isInteger(field.selectionEnd) ? Math.min(field.selectionEnd, preview.length) : preview.length;
@@ -178,6 +179,12 @@ export function createBrowserKeyboard({ field, send, canSend, onError = () => {}
   field.ownerDocument?.addEventListener('selectionchange', () => {
     if (field.ownerDocument.activeElement === field) syncSelection();
   });
-  field.addEventListener('blur', release);
+  // A native IME suggestion can briefly blur/refocus the field before its
+  // replacement arrives. Releasing held keys must not forget the text already
+  // sent, or the completed word would be appended after its existing prefix.
+  field.addEventListener('blur', releaseKeys);
+  const leaveTyping = event => { if (event.target && event.target !== field) release(); };
+  field.ownerDocument?.addEventListener('pointerdown', leaveTyping);
+  field.ownerDocument?.addEventListener('focusin', leaveTyping);
   return { release, setEnabled(value) { if (!value) release(); armed = value; if (armed) field.focus(); } };
 }

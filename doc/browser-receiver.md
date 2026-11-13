@@ -184,9 +184,9 @@ available, use USB, private Tailscale HTTPS, or the native Android receiver.
   the macOS handler requires a fresh native build and manual device validation.
 - Pause/Resume stops capture while paused; returning from a hidden tab requests a
   fresh keyframe. Switching away suspends capture and releases held contacts.
-  Returning within two minutes, including after a page reload, reconnects the
+  Returning within five minutes, including after a page reload, reconnects the
   same browser to the existing native stream. No old video frames are replayed.
-  After two minutes away, the session ends and a new code is required. A network
+  After five minutes away, the session ends and a new code is required. A network
   failure may take up to ten seconds to detect before this grace period starts.
 - Resume uses a separate, host-only, HttpOnly, SameSite=Strict cookie scoped to
   the receiver connection path (Secure over HTTPS). The connection code is never

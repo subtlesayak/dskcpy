@@ -145,10 +145,31 @@ test('retained IME commits and uncancelable mobile edits are applied exactly onc
   assert.equal(e.field.value,'a日'); assert.equal(e.host(),'host:a日');
 });
 
-test('long typing retains a bounded recent preview without truncating host text; blur clears locally only', () => {
+test('long typing retains a bounded recent preview without truncating host text; closing clears locally only', () => {
   const e=editor(); let expected='';
   for(let i=0;i<1200;i++){const c=i%2?'é':'😊'; expected+=c; e.append(c);}
   assert.equal(e.host(),'host:'+expected); assert.ok(e.field.value.length<=384);
   assert.ok(expected.endsWith(e.field.value));
-  const host=e.host(); e.emit('blur'); assert.equal(e.field.value,''); assert.equal(e.host(),host);
+  const host=e.host(); e.input.setEnabled(false); assert.equal(e.field.value,''); assert.equal(e.host(),host);
+});
+
+test('suggestion commit after transient IME focus loss replaces the existing word once', () => {
+  const e=editor(); e.append('hel');
+  e.emit('blur'); // Native suggestion UI can temporarily take field focus.
+  e.field.focus();
+  e.emit('compositionstart');
+  e.change('hello',5,5,{isComposing:true});
+  e.emit('compositionend',{data:'hello'});
+  e.change('hello',5,5,{inputType:'insertReplacementText'});
+  assert.equal(e.field.value,'hello'); assert.equal(e.host(),'host:hello');
+  assert.equal(e.host().includes('helhello'),false);
+});
+
+
+test('leaving the typing context clears its preview and a transient blur releases held keys', () => {
+  const e=editor(); e.append('local');
+  e.emit('keydown',{code:'ShiftLeft',key:'Shift',shiftKey:true});
+  e.emit('blur'); assert.deepEqual([...e.packets.at(-1)],[8,2,0,0,0]);
+  assert.equal(e.field.value,'local');
+  e.input.setEnabled(false); assert.equal(e.field.value,''); assert.equal(e.host(),'host:local');
 });

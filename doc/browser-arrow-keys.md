@@ -38,5 +38,14 @@ readback of the Mac field: clicking elsewhere, navigating to another context or
 closing/pausing the panel clears it locally without deleting host text. Long
 continuous typing keeps a bounded recent tail so the field's length limit does
 not stop input. Nothing is stored in browser storage or read from the clipboard.
+Transient IME focus loss releases held keys while preserving the current word
+for suggestion replacement. Clicking or focusing elsewhere still clears it.
 Cursor edits assume an ordinary text editor; application-specific editing and
 real phone IME behavior still require physical qualification.
+
+The default recovery window is now five minutes on both host and receiver.
+Activating a changed host timeout requires restarting the controller; a browser
+refresh alone cannot change the timeout already held by an active host process.
+Do not restart an active remote user's host without their agreement. Invitation
+expiry, the twelve-hour session lifetime and immediate Stop/Disconnect revocation
+remain unchanged.

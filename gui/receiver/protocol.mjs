@@ -1,3 +1,6 @@
+// Shared browser/host recovery bound; it does not extend invitation or session lifetime.
+export const BROWSER_RESUME_MS = 5 * 60 * 1000;
+
 export function browserJoinUrl(address, key) {
   if (!/^[A-Za-z0-9_-]{32}$/.test(key)) throw new Error('Invalid browser invitation.');
   const url = new URL(address);

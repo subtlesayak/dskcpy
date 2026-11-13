@@ -6,6 +6,7 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { createBrowserSession } from './browser-session.mjs';
+import { BROWSER_RESUME_MS } from '../receiver/protocol.mjs';
 
 const assets = new Map([
   ['/', ['index.html', 'text/html; charset=utf-8']],
@@ -32,7 +33,7 @@ export function receiverOrigin(value) {
 // Remote access is opt-in via a user-managed Tailscale Serve HTTPS proxy.
 export function createBrowserReceiver({ configuredPort = 27180, origin,
   tls, rtcBind = '127.0.0.1', onConnect, onChange = () => {}, invitationMs = 300000, authMs = 5000,
-  resumeMs = 120000, lifetimeMs = 12 * 60 * 60 * 1000 } = {}) {
+  resumeMs = BROWSER_RESUME_MS, lifetimeMs = 12 * 60 * 60 * 1000 } = {}) {
   const remoteOrigin = receiverOrigin(origin);
   let port;
   let listening;

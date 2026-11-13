@@ -12,7 +12,7 @@ const parameters = new Uint8Array([0, 0, 1, 0x67, 0x64, 0, 0x28, 0, 0, 1, 0x68, 
 
 // Deterministic lifecycle tests against the actual receiver script. These model
 // delayed browser callbacks; rendered/device QA is separate from this harness.
-function receiver(t, { portrait = false, lockFails = false, webRtc = false, webCodecs = true, qrKey = '', keyboard = false, viewOnly = false, visualHeight = 0, webAudio = false } = {}) {
+function receiver(t, { portrait = false, lockFails = false, webRtc = false, webCodecs = true, qrKey = '', keyboard = false, viewOnly = false, visualHeight = 0, webAudio = false, now = () => Date.now(), resumable = false } = {}) {
   const timers = new Set(), sockets = [], decoders = [], orientation = [];
   let resize;
   const locationState = { protocol: 'https:', host: 'receiver.test', pathname: qrKey ? '/join' : '/', search: '', hash: qrKey ? `#connect=${qrKey}` : '' };
@@ -104,10 +104,11 @@ function receiver(t, { portrait = false, lockFails = false, webRtc = false, webC
     EncodedAudioChunk: class { constructor(value) { Object.assign(this, value); } },
     EncodedVideoChunk: class { constructor(value) { Object.assign(this, value); } },
     ResizeObserver: class { constructor(callback) { resize = callback; } observe() {} }, getComputedStyle: () => ({ paddingTop: '0', paddingRight: '0', paddingBottom: '0', paddingLeft: '0' }),
+    Date: class extends Date { static now() { return now(); } },
     location: locationState, performance: { now: () => 2000 }, AbortSignal,
     innerWidth: portrait ? 390 : 844, innerHeight: portrait ? 844 : 390,
     screen: { orientation: { async lock(value) { orientation.push(value); if (lockFails) throw new Error('Unsupported'); }, unlock() { orientation.push('unlock'); } } },
-    fetch: async () => ({ ok: true, json: async () => ({ resumable: false }) }),
+    fetch: async () => ({ ok: true, json: async () => ({ resumable }) }),
     setTimeout: (fn, ms) => { const timer = setTimeout(fn, ms); timers.add(timer); return timer; }, clearTimeout,
     setInterval: (fn, ms) => { const timer = setInterval(fn, ms); timers.add(timer); return timer; }, clearInterval,
   });
@@ -642,3 +643,18 @@ test('arrow pad and typing panel are exclusive and Escape restores the arrow tri
   h.$('arrows').emit('click'); h.$('keyboard').emit('click'); assert.equal(h.$('arrow-controls').hidden, true);
   h.$('disconnect').emit('click');
 });
+
+
+for (const [elapsed, expectedSockets] of [[180000,2],[300001,1]]) {
+  test(`browser recovery ${elapsed}ms away uses the shared five-minute limit`, async (t) => {
+    let clock=1000;
+    const h=receiver(t,{now:()=>clock,resumable:true});
+    await new Promise(setImmediate); // Let the initial unauthenticated probe finish.
+    h.document.hidden=true;h.document.emit('visibilitychange');
+    h.socket.readyState=3;h.socket.emit('close',{code:1006});
+    clock+=elapsed;h.document.hidden=false;h.document.emit('visibilitychange');
+    await new Promise(setImmediate);
+    assert.equal(h.sockets.length,expectedSockets);
+    if(expectedSockets===1)assert.match(h.$('error').textContent,/expired while you were away/);
+  });
+}

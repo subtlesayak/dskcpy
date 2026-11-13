@@ -1,4 +1,4 @@
-import { avcCodec, avcParameters, touchPacket, scrollPacket, takeDecodedTimestamps, fitDisplay, createMediaAcknowledger, needsControlsRow, parseJoinFragment } from './protocol.mjs';
+import { BROWSER_RESUME_MS, avcCodec, avcParameters, touchPacket, scrollPacket, takeDecodedTimestamps, fitDisplay, createMediaAcknowledger, needsControlsRow, parseJoinFragment } from './protocol.mjs';
 import { createRtcReceiver } from './rtc.mjs';
 import { createVideoReceiver } from './video.mjs';
 import { createBrowserKeyboard, keyboardUsage, keyPacket } from './keyboard.mjs';
@@ -177,7 +177,7 @@ async function resumeSession() {
     const available = sessionInfo.resumable;
     if (mine !== generation || ws || document.hidden) return;
     if (available) {
-      sessionExpected = true; resumeDeadline ||= Date.now() + 120000;
+      sessionExpected = true; resumeDeadline ||= Date.now() + BROWSER_RESUME_MS;
       $('error').textContent = ''; connect(null, sessionInfo.mediaMode || preferredMode);
     } else if (sessionExpected) {
       // Do not POST on an expired session: it has already been revoked.
@@ -228,7 +228,7 @@ function connect(key = null, requestedMode = preferredMode) {
     if (mine !== generation) return;
     releaseTouches(); clearMedia(); ws = null; authenticated = false; updateArrowAvailability();
     if (sessionExpected && ![1000, 1008, 4000, 4002].includes(event.code)) {
-      resumeDeadline ||= Date.now() + 120000;
+      resumeDeadline ||= Date.now() + BROWSER_RESUME_MS;
       $('status').textContent = document.hidden ? 'Paused while away' : 'Reconnecting…';
       retryTimer = setTimeout(resumeSession, 250);
     } else {
@@ -437,7 +437,7 @@ function updatePause() {
   if (!document.hidden && !paused) video?.resume();
   ws.send(document.hidden ? 'suspend' : 'resume');
   action(paused || document.hidden ? 7 : 8);
-  if (document.hidden) resumeDeadline ||= Date.now() + 120000;
+  if (document.hidden) resumeDeadline ||= Date.now() + BROWSER_RESUME_MS;
   else resumeDeadline = 0;
   if (mediaMode === 'webrtc') {
     const mine = generation, attempt = ++playbackAttempt;
