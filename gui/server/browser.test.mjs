@@ -11,7 +11,7 @@ import path from 'node:path';
 import { WebSocket } from 'ws';
 import { createBrowserReceiver, receiverOrigin, isPrivateBind } from './browser.mjs';
 import { SrdParser, validBrowserInput, MAX_PACKET } from './browser-protocol.mjs';
-import { ack, avcCodec, avcParameters, touchPacket, scrollPacket, takeDecodedTimestamps, fitDisplay, browserJoinUrl } from '../receiver/protocol.mjs';
+import { ack, avcCodec, avcParameters, touchPacket, scrollPacket, takeDecodedTimestamps, fitDisplay, browserJoinUrl, MEDIA_FALLBACK_PROTOCOL } from '../receiver/protocol.mjs';
 
 const header = Buffer.from('535244310000000100000280000001e0', 'hex');
 function packet(pts, flags, payload = Buffer.from([1, 2, 3])) {
@@ -30,8 +30,8 @@ async function fixture(t, options = {}) {
   }, ...options });
   t.after(async () => { native?.destroy(); await receiver.shutdown(); });
   const invitation = await receiver.invite('local', options.inputPolicy);
-  const open = async (origin = invitation.url.slice(0, -1), cookie, route = 'stream') => {
-    const ws = new WebSocket(invitation.url.replace('http:', 'ws:') + route, { origin, headers: cookie ? { Cookie: cookie } : {} });
+  const open = async (origin = invitation.url.slice(0, -1), cookie, route = 'stream', protocol) => {
+    const ws = new WebSocket(invitation.url.replace('http:', 'ws:') + route, protocol ? [protocol] : [], { origin, headers: cookie ? { Cookie: cookie } : {} });
     ws.received = [];
     ws.on('upgrade', (response) => { ws.cookie = response.headers['set-cookie']?.[0]; });
     ws.on('message', (data, binary) => ws.received.push({ data, binary }));
@@ -645,4 +645,116 @@ test('owned receiver health preparation grants no session and exposes only a fre
   assert.equal(await new Promise((resolve, reject) => { const req = http.get(local + '/health', { headers: { Host: 'unrelated.invalid' } }, res => { res.resume(); resolve(res.statusCode); }); req.on('error', reject); }), 403);
   assert.deepEqual(await (await fetch(local + '/stream/session')).json(), { resumable: false });
   await receiver.invite('local'); await assert.rejects(receiver.prepare(), /already open/); assert.equal(starts, 0);
+});
+
+const fallbackParameters = Buffer.from('000000016742c01e0102030000000168ce3c80', 'hex');
+const fakeRtc = () => ({ offer: async () => ({ type: 'offer', sdp: 'owned-fake-offer' }), answer: async () => {},
+  frame: async () => {}, sound: async () => {}, close: async () => {} });
+async function rtcLogin(f, protocol = MEDIA_FALLBACK_PROTOCOL) {
+  const ws = await f.open(undefined, undefined, 'stream/webrtc', protocol); ws.send(f.invitation.key);
+  await until(() => ws.received.some(m => m.binary));
+  return ws;
+}
+const authentication = ws => ws.received.filter(m => !m.binary).map(m => JSON.parse(m.data.toString())).find(m => m.type === 'authenticated');
+
+test('negotiated media recovery retains authorization and capture, drains RTC and isolates stale work', async t => {
+  let rejectFrame, rejectAnswer, rejectSound;
+  const f = await fixture(t, { inputPolicy: { keyboard: true }, rtcMediaFactory: () => ({ ...fakeRtc(),
+    frame: () => new Promise((resolve, reject) => { rejectFrame = reject; }),
+    answer: () => new Promise((resolve, reject) => { rejectAnswer = reject; }),
+    sound: () => new Promise((resolve, reject) => { rejectSound = reject; }),
+  }) });
+  const first = await rtcLogin(f), cookie = first.cookie.split(';')[0], native = f.native(), chunks = [];
+  native.on('data', c => chunks.push(c));
+  assert.equal(authentication(first).mediaFallback, true);
+  native.write(packet(0, 1, fallbackParameters));
+  await until(() => first.received.some(m => !m.binary && JSON.parse(m.data.toString()).type === 'rtc-offer'));
+  first.send('resume'); first.send(Buffer.from([5, 8]));
+  const down = Buffer.from(touchPacket(0, 0, 20, 30, 640, 480));
+  first.send(down); first.send(Buffer.from([8, 0, 0, 224, 1]));
+  first.send(JSON.stringify({ type: 'rtc-answer', description: { type: 'answer', sdp: 'owned' } }));
+  native.write(packet(100, 2)); native.write(packet(101, 8));
+  await until(() => rejectFrame && rejectAnswer && rejectSound && Buffer.concat(chunks).includes(down));
+  const ended = once(first, 'close'); first.send('media-fallback');
+  const [code, reason] = await ended; assert.equal(code, 1012); assert.equal(reason.toString(), 'media-fallback');
+  assert.ok(first.received.some(m => !m.binary && JSON.parse(m.data.toString()).type === 'media-fallback' && JSON.parse(m.data.toString()).mediaMode === 'webcodecs'));
+  await until(() => Buffer.concat(chunks).includes(Buffer.from([8, 2, 0, 0, 0])));
+  assert.ok(Buffer.concat(chunks).includes(Buffer.from(touchPacket(3, 0, 20, 30, 640, 480))));
+  assert.ok(Buffer.concat(chunks).includes(ack(4, 100))); assert.ok(Buffer.concat(chunks).includes(ack(6, 101)));
+  assert.equal(f.receiver.status().mediaMode, 'webcodecs'); assert.equal(f.calls(), 1); assert.equal(f.native(), native);
+  assert.equal(await resumable(f, cookie), true); assert.equal(await resumable(f, 'invalid'), false);
+  await assert.rejects(f.open('https://other.test', cookie));
+  await assert.rejects(f.open(undefined, cookie, 'stream/webrtc', MEDIA_FALLBACK_PROTOCOL));
+  const second = await f.open(undefined, cookie);
+  await until(() => second.received.filter(m => m.binary).length >= 2);
+  assert.equal(authentication(second).keyboard, true); assert.equal(authentication(second).viewOnly, false);
+  assert.equal(authentication(second).mediaFallback, false);
+  assert.deepEqual(second.received.filter(m => m.binary)[0].data, header);
+  second.send('resume'); second.send(Buffer.from([5, 8])); second.send(Buffer.from([5, 11]));
+  rejectFrame(Error('old frame')); rejectAnswer(Error('old answer')); rejectSound(Error('old audio'));
+  await new Promise(r => setTimeout(r, 20)); assert.equal(second.readyState, WebSocket.OPEN);
+  native.write(packet(200, 2));
+  await until(() => second.received.some(m => m.binary && m.data.length > 16 && m.data.readBigUInt64BE(4) === 200n));
+  second.send(ack(4, 200)); await until(() => Buffer.concat(chunks).includes(ack(4, 200)));
+  assert.equal(f.calls(), 1); second.close(4000);
+});
+
+test('RTC startup or transport failure can recover only for the negotiated viewer', async t => {
+  for (const stage of ['constructor', 'offer', 'transport']) for (const negotiated of [false, true]) {
+    let failure;
+    const f = await fixture(t, { rtcMediaFactory: options => {
+      failure = options.onFailure;
+      if (stage === 'constructor') throw Error('owned constructor failure');
+      return { ...fakeRtc(), offer: async () => { if (stage === 'offer') throw Error('owned fixture failure'); return { type: 'offer', sdp: 'owned' }; } };
+    } });
+    const ws = await rtcLogin(f, negotiated ? MEDIA_FALLBACK_PROTOCOL : '');
+    // rtcLogin's default negotiates: an explicit legacy token selects no capability.
+    if (!negotiated) assert.notEqual(ws.protocol, MEDIA_FALLBACK_PROTOCOL);
+    const cookie = ws.cookie.split(';')[0], ended = once(ws, 'close');
+    f.native().write(packet(0, 1, fallbackParameters)); await until(() => failure);
+    if (stage === 'transport') failure();
+    const [code] = await ended; assert.equal(code, negotiated ? 1012 : 1008);
+    assert.equal(await resumable(f, cookie), negotiated); assert.equal(f.calls(), 1);
+  }
+});
+
+test('a view-only viewer may recover media without acquiring keyboard, pointer or clipboard rights', async t => {
+  const f = await fixture(t, { inputPolicy: { viewOnly: true, keyboard: true, clipboard: true }, rtcMediaFactory: fakeRtc });
+  const first = await rtcLogin(f), cookie = first.cookie.split(';')[0];
+  const ended = once(first, 'close'); first.send('media-fallback'); await ended;
+  const second = await f.open(undefined, cookie); await until(() => second.received.some(m => m.binary));
+  const policy = authentication(second); assert.equal(policy.viewOnly, true); assert.equal(policy.clipboard, false);
+  const chunks = []; f.native().on('data', c => chunks.push(c));
+  second.send('resume'); second.send(Buffer.from([5, 8]));
+  const input = Buffer.from(touchPacket(0, 0, 20, 30, 640, 480)), closed = once(second, 'close'); second.send(input);
+  assert.equal((await closed)[0], 1008); assert.equal(Buffer.concat(chunks).includes(input), false); assert.equal(f.calls(), 1);
+});
+
+test('media recovery cannot be requested without negotiation or repeated after downgrade', async t => {
+  for (const protocol of [undefined, 'unrelated.test.protocol']) {
+    const f = await fixture(t, { rtcMediaFactory: fakeRtc });
+    const ws = await f.open(undefined, undefined, 'stream/webrtc', protocol); ws.send(f.invitation.key);
+    await until(() => ws.received.some(m => m.binary)); assert.equal(authentication(ws).mediaFallback, false);
+    const cookie = ws.cookie.split(';')[0], ended = once(ws, 'close'); ws.send('media-fallback');
+    assert.equal((await ended)[0], 1008); assert.equal(await resumable(f, cookie), false);
+  }
+  const f = await fixture(t, { rtcMediaFactory: fakeRtc }); const first = await rtcLogin(f), cookie = first.cookie.split(';')[0];
+  const ended = once(first, 'close'); first.send('media-fallback'); await ended;
+  const second = await f.open(undefined, cookie, 'stream', MEDIA_FALLBACK_PROTOCOL); await until(() => second.received.some(m => m.binary));
+  const repeated = once(second, 'close'); second.send('media-fallback');
+  assert.equal((await repeated)[0], 1008); assert.equal(await resumable(f, cookie), false); assert.equal(f.calls(), 1);
+});
+
+
+test('media recovery cannot reset the original session lifetime', { timeout: 6000 }, async t => {
+  const f = await fixture(t, { lifetimeMs: 3000, rtcMediaFactory: fakeRtc });
+  const started = Date.now(), first = await rtcLogin(f), cookie = first.cookie.split(';')[0];
+  f.native().write(packet(0, 1, fallbackParameters));
+  await new Promise(r => setTimeout(r, 1800));
+  const retired = once(first, 'close'); first.send('media-fallback'); await retired;
+  const second = await f.open(undefined, cookie); await until(() => second.received.some(m => m.binary));
+  const expired = once(second, 'close'); assert.equal((await expired)[0], 1008);
+  const elapsed = Date.now() - started;
+  assert.ok(elapsed >= 2500 && elapsed < 4300, 'expiry stays on the original three-second grant, not a new grant after recovery');
+  assert.equal(await resumable(f, cookie), false); assert.equal(f.calls(), 1);
 });

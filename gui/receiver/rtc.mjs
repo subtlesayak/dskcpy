@@ -1,5 +1,5 @@
 // Browser-native decoding/playback: no WebCodecs or app installation needed.
-export function createRtcReceiver({ element, signal, onPlaying, onError }) {
+export function createRtcReceiver({ element, signal, onPlaying, onError, onFailure = onError }) {
   let pc, closed = false, generation = 0, gatheringTimer, cancelGather, playing;
   const stream = new MediaStream();
   async function offer(description) {
@@ -17,7 +17,7 @@ export function createRtcReceiver({ element, signal, onPlaying, onError }) {
     };
     pc.onconnectionstatechange = () => {
       if (!closed && ['failed', 'closed'].includes(pc.connectionState)) {
-        onError('The private media connection ended. Reconnect while both devices are on the VPN.');
+        onFailure('The private media connection ended. Reconnect while both devices are on the VPN.');
       }
     };
     playing = () => { if (!closed && mine === generation) onPlaying(); };
