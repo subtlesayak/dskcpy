@@ -67,7 +67,7 @@ checksum() {
     local sum="$2"
     echo "$file: verifying checksum..."
     if command -v sha256sum >/dev/null 2>&1; then
-        echo "$sum  $file" | sha256sum -c
+        echo "$sum  $file" | sha256sum -c -
     elif command -v shasum >/dev/null 2>&1; then
         echo "$sum  $file" | shasum -a256 -c
     else
