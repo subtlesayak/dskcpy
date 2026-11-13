@@ -1,0 +1,53 @@
+// Electron utilityProcess provides Node. No system Node or Terminal is used.
+const path = require('node:path');
+const { pathToFileURL } = require('node:url');
+const parent = process.parentPort;
+let service, origin;
+const startup = (async () => {
+  const { createControlService } = await import(pathToFileURL(path.join(__dirname, '../gui/server/service.mjs')).href);
+  service = createControlService({ configuredPort: 0, browserPort: 27180 });
+  origin = `http://127.0.0.1:${await service.listen()}`;
+})();
+async function api(endpoint, body) {
+  const response = await fetch(origin + endpoint, { method: body ? 'POST' : 'GET',
+    headers: body ? { Origin: origin, 'Content-Type': 'application/json' } : {},
+    ...(body ? { body: JSON.stringify(body) } : {}), signal: AbortSignal.timeout(15000) });
+  if (!response.ok) throw new Error('Service request failed');
+  return response.json();
+}
+// Register immediately so messages arriving during module loading are retained.
+parent.on('message', async ({ data }) => {
+  if (!data || !Number.isSafeInteger(data.id)) return;
+  try {
+    await startup;
+    let value;
+    switch (data.action) {
+      case 'ready': await api('/api/status'); value = true; break;
+      case 'status': {
+        const status = service.publicState();
+        value = { running: status.running, browser: { waiting: status.browser.waiting, connected: status.browser.connected } }; break;
+      }
+      case 'readiness': {
+        const readiness = (await api('/api/status')).readiness;
+        value = { ready: Boolean(readiness?.transports?.browser?.ready), keyboard: readiness?.features?.browserKeyboard === true }; break;
+      }
+      case 'invite': value = await api('/api/browser/invite', { browserTransport: 'internet', maxSize: 1600, maxFps: 30, bitRateMbps: 8 }); break;
+      case 'stop': value = await api('/api/stream/stop', {}); break;
+      case 'shutdown': {
+        await service.shutdown();
+        // Allow native stdin q / bounded force-stop to release held input before
+        // the parent retires this utility process.
+        const deadline = Date.now() + 4500;
+        while (service.publicState().running && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 50));
+        value = true; break;
+      }
+      default: throw new Error('Unknown host action');
+    }
+    // Never send native logs, paths, device IDs or arbitrary service state.
+    if (data.action === 'invite') value = { mode: value.mode, url: value.url, key: value.key,
+      expiresAt: value.expiresAt, status: { running: value.status.running,
+        browser: { waiting: value.status.browser.waiting, connected: value.status.browser.connected } } };
+    if (data.action === 'stop') value = true;
+    parent.postMessage({ id: data.id, ok: true, value });
+  } catch { parent.postMessage({ id: data.id, ok: false }); }
+});

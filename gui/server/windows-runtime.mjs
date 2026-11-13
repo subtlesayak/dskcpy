@@ -4,7 +4,7 @@ import path from 'node:path';
 // Read only the PE import names, never load/execute the image. Malformed or
 // unusually large images fall back to an explicit/default runtime choice.
 // Layout reference: https://learn.microsoft.com/en-us/windows/win32/debug/pe-format
-export function detectWindowsCrt(bytes) {
+export function readWindowsPeImports(bytes, { includeDelay = true } = {}) {
   const contains = (offset, size) => Number.isInteger(offset) && offset >= 0 && offset + size <= bytes.length;
   if (!contains(0, 64) || bytes.readUInt16LE(0) !== 0x5a4d) return null;
   const pe = bytes.readUInt32LE(60);
@@ -12,12 +12,10 @@ export function detectWindowsCrt(bytes) {
   const count = bytes.readUInt16LE(pe + 6), optionalSize = bytes.readUInt16LE(pe + 20);
   const optional = pe + 24, sections = optional + optionalSize;
   if (!count || count > 96 || !contains(optional, optionalSize) || !contains(sections, count * 40)) return null;
-  const magic = bytes.readUInt16LE(optional);
-  const directory = magic === 0x20b ? 112 : magic === 0x10b ? 96 : 0;
-  if (!directory || optionalSize < directory + 16 || bytes.readUInt32LE(optional + directory - 4) < 2) return null;
-  const imports = bytes.readUInt32LE(optional + directory + 8);
-  const importSize = bytes.readUInt32LE(optional + directory + 12);
-  if (!imports || importSize < 20) return null;
+  const magic = bytes.readUInt16LE(optional), directory = magic === 0x20b ? 112 : magic === 0x10b ? 96 : 0;
+  if (!directory || optionalSize < directory + 16) return null;
+  const directories = bytes.readUInt32LE(optional + directory - 4);
+  if (directories < 2) return null;
   const rvaOffset = (rva, size) => {
     for (let i = 0; i < count; ++i) {
       const section = sections + i * 40;
@@ -27,28 +25,58 @@ export function detectWindowsCrt(bytes) {
     }
     return null;
   };
-  let ucrt = false, msvcrt = false;
-  for (let i = 0; i < Math.min(256, Math.floor(importSize / 20)); ++i) {
-    const descriptor = rvaOffset(imports + i * 20, 20);
-    if (descriptor === null) return null;
-    if (bytes.subarray(descriptor, descriptor + 20).every((byte) => byte === 0)) {
-      return ucrt === msvcrt ? null : ucrt ? 'ucrt64' : 'mingw64';
-    }
-    const nameRva = bytes.readUInt32LE(descriptor + 12);
-    let name = '', terminated = false;
+  const readName = rva => {
+    let name = '';
     for (let j = 0; j < 256; ++j) {
-      const offset = rvaOffset(nameRva + j, 1);
+      const offset = rvaOffset(rva + j, 1);
       if (offset === null) return null;
       const byte = bytes[offset];
-      if (!byte) { terminated = true; break; }
+      if (!byte) return name;
       if (byte < 32 || byte > 126) return null;
       name += String.fromCharCode(byte).toLowerCase();
     }
-    if (!terminated) return null;
-    if (name === 'ucrtbase.dll' || name.startsWith('api-ms-win-crt-')) ucrt = true;
-    if (name === 'msvcrt.dll') msvcrt = true;
+    return null;
+  };
+  function table(index, width, nameOffset, delayed = false) {
+    if (directories <= index) return [];
+    if (optionalSize < directory + (index + 1) * 8) return null;
+    const rva = bytes.readUInt32LE(optional + directory + index * 8);
+    const size = bytes.readUInt32LE(optional + directory + index * 8 + 4);
+    if (!rva && !size) return [];
+    if (!rva || size < width) return null;
+    const names = [];
+    for (let i = 0; i < Math.min(256, Math.floor(size / width)); ++i) {
+      const descriptor = rvaOffset(rva + i * width, width);
+      if (descriptor === null) return null;
+      if (bytes.subarray(descriptor, descriptor + width).every(byte => byte === 0)) return names;
+      let nameRva = bytes.readUInt32LE(descriptor + nameOffset);
+      if (delayed) {
+        const attributes = bytes.readUInt32LE(descriptor);
+        if (attributes & ~1) return null;
+        if (!(attributes & 1)) {
+          const imageBase = magic === 0x20b ? bytes.readBigUInt64LE(optional + 24) : BigInt(bytes.readUInt32LE(optional + 28));
+          const converted = BigInt(nameRva) - imageBase;
+          if (converted < 0n || converted > 0xffffffffn) return null;
+          nameRva = Number(converted);
+        }
+      }
+      const name = readName(nameRva);
+      if (name === null) return null;
+      names.push(name);
+    }
+    return null;
   }
-  return null;
+  const imports = table(1, 20, 12), delayImports = includeDelay ? table(13, 32, 4, true) : [];
+  if (!imports || !delayImports) return null;
+  return { machine: bytes.readUInt16LE(pe + 4), kind: magic === 0x20b ? 'pe32+' : 'pe32', imports, delayImports };
+}
+
+export function detectWindowsCrt(bytes) {
+  const image = readWindowsPeImports(bytes, { includeDelay: false });
+  if (!image) return null;
+  const ucrt = image.imports.some(name => name === 'ucrtbase.dll' || name.startsWith('api-ms-win-crt-'));
+  const msvcrt = image.imports.includes('msvcrt.dll');
+  return ucrt === msvcrt ? null : ucrt ? 'ucrt64' : 'mingw64';
 }
 
 function binaryFamily(binary) {

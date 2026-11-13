@@ -1,0 +1,18 @@
+{
+  "name": "dskcpy-host",
+  "productName": "dskcpy Host",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A guided desktop host for private browser screen sharing",
+  "main": "main.cjs",
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "package:mac": "electron-builder --config electron-builder.cjs --mac dir --arm64 --publish never",
+    "package:windows": "electron-builder --config electron-builder.cjs --win dir --x64 --publish never"
+  },
+  "devDependencies": {
+    "electron": "45.3.1",
+    "electron-builder": "26.18.0",
+    "playwright": "1.65.0"
+  }
+}

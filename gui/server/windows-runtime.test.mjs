@@ -30,6 +30,8 @@ test('PE import classification distinguishes UCRT and legacy without executing t
   }
   assert.equal(detectWindowsCrt(image(['msvcrt.dll', 'ucrtbase.dll'])), null);
   assert.equal(detectWindowsCrt(image(['KERNEL32.dll'])), null);
+  const badDelay = image(['ucrtbase.dll']); badDelay.writeUInt32LE(0xffffffff, 368); badDelay.writeUInt32LE(64, 372);
+  assert.equal(detectWindowsCrt(badDelay), 'ucrt64'); // CRT discovery retains its ordinary-import-only behavior.
   const spoof = image(['KERNEL32.dll']); spoof.write('ucrtbase.dll', 3500);
   assert.equal(detectWindowsCrt(spoof), null);
 });

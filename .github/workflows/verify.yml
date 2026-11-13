@@ -28,6 +28,25 @@ jobs:
       - run: npm ci --prefix gui
       - run: npm test --prefix gui
       - run: npm run build --prefix gui
+      - name: Check isolated beginner desktop app source
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+        run: |
+          npm ci --prefix desktop --ignore-scripts
+          node --test --test-timeout=15000 desktop/test/*.test.mjs
+          node --check desktop/main.cjs
+          node --check desktop/preload.cjs
+          node --check desktop/service-entry.cjs
+      - name: Build the beginner desktop view
+        working-directory: gui
+        run: node node_modules/vite/bin/vite.js build --config vite.desktop.config.ts
+      - name: Check synthetic beginner flow and narrow layouts
+        if: runner.os == 'Linux'
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: desktop/.browsers
+        run: |
+          node desktop/node_modules/playwright/cli.js install --with-deps chromium
+          node desktop/test/beginner-ui.mjs
       - name: Artifact identity and upgrade preflight regressions
         run: node --test tools/*.test.mjs
 
@@ -68,6 +87,21 @@ jobs:
         run: |
           npm ci --prefix gui --ignore-scripts
           node --test gui/server/telemetry.test.mjs gui/server/windows-runtime-native.test.mjs
+      - name: Assemble and inspect the unsigned Windows desktop prototype without capture
+        env:
+          MSYS2_PATH_TYPE: inherit
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+        run: |
+          dskcpy_runtime_dir="$(cygpath -w /ucrt64/bin)"
+          node desktop/collect-windows-runtime.mjs .tmp/ci-native/app/scrcpy.exe "$dskcpy_runtime_dir" .tmp/ci-desktop-runtime
+          npm ci --prefix desktop --ignore-scripts
+          npm run build --prefix gui
+          (cd gui && node node_modules/vite/bin/vite.js build --config vite.desktop.config.ts)
+          node desktop/stage.mjs .tmp/ci-desktop-runtime/scrcpy.exe
+          npm run package:windows --prefix desktop
+          node desktop/verify-bundle.mjs desktop/out/win-unpacked/resources
+          gcc -O2 desktop/test/fake-host.c -o .tmp/desktop-smoke-fixture.exe
+          node desktop/test/run-electron-smoke.mjs desktop/out/win-unpacked/resources .tmp/desktop-smoke-fixture.exe
 
   native-macos:
     runs-on: macos-15
@@ -108,6 +142,14 @@ jobs:
         run: bash release/build_macos_host.sh release/work/host-arm64
       - name: Check packaged browser/dashboard runtime without starting capture
         run: release/work/host-arm64/Start-dskcpy-host.command --check
+      - name: Build and smoke-test the unsigned Mac desktop shell without capture
+        run: |
+          npm ci --prefix desktop
+          (cd gui && node node_modules/vite/bin/vite.js build --config vite.desktop.config.ts)
+          node desktop/stage.mjs release/work/host-arm64/bin/scrcpy release/work/host-arm64/licenses
+          npm run package:mac --prefix desktop
+          node desktop/verify-bundle.mjs "desktop/out/mac-arm64/dskcpy Host.app/Contents/Resources"
+          node desktop/test/run-electron-smoke.mjs
       - name: Preserve executable permissions in CI artifact
         run: tar -C release/work -czf release/work/host-arm64.tar.gz host-arm64
       - uses: actions/upload-artifact@v7
