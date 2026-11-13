@@ -57,6 +57,7 @@ jobs:
           node desktop/test/clipboard-ui.mjs
           node desktop/test/trackpad-ui.mjs
           node desktop/test/view-ui.mjs
+          node desktop/test/shortcuts-ui.mjs
           node desktop/test/link-check-ui.mjs
           node desktop/test/startup-history-ui.mjs
       - name: Artifact identity and upgrade preflight regressions

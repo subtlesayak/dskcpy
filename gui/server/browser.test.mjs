@@ -336,6 +336,9 @@ test('receiver serves only fixed assets, rejects Host rebinding, no control rout
   assert.equal(videoModule.status, 200);
   assert.match(videoModule.headers.get('content-type'), /javascript/);
   assert.match(await videoModule.text(), /export function createVideoReceiver/);
+  const shortcutModule = await fetch(f.invitation.url + 'shortcuts.mjs');
+  assert.equal(shortcutModule.status, 200);
+  assert.match(await shortcutModule.text(), /export function createKeyboardShortcuts/);
   const viewModule = await fetch(f.invitation.url + 'view.mjs');
   assert.equal(viewModule.status, 200);
   assert.match(viewModule.headers.get('content-type'), /javascript/);

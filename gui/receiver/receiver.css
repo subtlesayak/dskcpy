@@ -151,3 +151,19 @@ summary { min-height: 44px; padding: 10px 12px; border: 1px solid #405461; borde
 #view-controls .panel-heading { position: sticky; top: 0; background: #101b22; z-index: 2; }
 .view-navigation #control-panels { scroll-padding-block: 56px; }
 @media (forced-colors: active) { .view-navigation #stage:focus-visible { outline-color: Highlight; } }
+
+#shortcut-controls { margin-block-start: 8px; padding: 12px; background: #101b22; border: 1px solid #405461; border-radius: 12px; }
+#shortcut-controls select { width: 100%; min-width: 0; min-height: 48px; font: inherit; font-size: 1rem; color: inherit; background: #080f13; border: 1px solid #627d8c; border-radius: 8px; padding: 8px; }
+#shortcut-controls select:focus-visible { outline: 3px solid #64d9fa; outline-offset: 2px; }
+#shortcut-modifiers { min-width: 0; padding: 8px; border: 1px solid #405461; border-radius: 8px; }
+#shortcut-modifiers label { display: flex; align-items: center; gap: 8px; min-height: 44px; }
+#shortcut-modifiers input { width: 20px; height: 20px; min-height: 20px; flex: none; }
+#shortcut-customize { margin-block-start: 12px; }
+#shortcut-reset { width: 100%; }
+@media (min-width: 40rem) { #shortcut-controls { margin-block-start: 0; } }
+@media (forced-colors: active) { #shortcut-controls select:focus-visible { outline-color: Highlight; } }
+
+#shortcut-buttons { grid-template-columns: repeat(auto-fit, minmax(min(100%, 6rem), 1fr)); }
+#shortcut-heading { position: sticky; top: 0; z-index: 2; background: #101b22; }
+#shortcut-scroll-hint { flex-basis: 100%; margin: 0; }
+.shortcuts-open #control-panels { scroll-padding-block-start: var(--shortcut-heading-clearance, 56px); }
