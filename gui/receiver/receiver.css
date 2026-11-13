@@ -137,3 +137,17 @@ summary { min-height: 44px; padding: 10px 12px; border: 1px solid #405461; borde
 .trackpad-help-only #workspace { flex-direction: column; }
 .trackpad-help-only #control-panels { width: auto; max-width: none; max-height: 40%; margin-inline-start: 0; }
 #trackpad-help { margin: 6px 0 0; }
+
+#view-controls { margin-block-start: 8px; padding: 12px; background: #101b22; border: 1px solid #405461; border-radius: 12px; }
+#view-scale { font-variant-numeric: tabular-nums; margin-block: 8px; }
+.view-pan { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; direction: ltr; margin-block: 12px; }
+.view-pan button { padding: 6px; min-height: 44px; }
+.view-navigation #stage { touch-action: none; cursor: grab; }
+.view-navigation #stage:focus-visible { outline: 3px solid #64d9fa; outline-offset: -3px; }
+@media (min-width: 40rem) { #view-controls { margin-block-start: 0; } }
+
+.view-zoom { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+#view-scroll-hint { margin: 6px 0; }
+#view-controls .panel-heading { position: sticky; top: 0; background: #101b22; z-index: 2; }
+.view-navigation #control-panels { scroll-padding-block: 56px; }
+@media (forced-colors: active) { .view-navigation #stage:focus-visible { outline-color: Highlight; } }

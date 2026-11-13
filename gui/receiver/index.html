@@ -49,6 +49,23 @@
             </div>
             <p id="arrow-help" class="subtle">Tap a direction to send one key press. Physical arrow keys also work while this pad has focus. Escape closes it.</p>
           </section>
+          <section id="view-controls" hidden aria-labelledby="view-title">
+            <div class="panel-heading"><h2 id="view-title">Move view</h2><button id="close-view" type="button">Done</button></div>
+            <p id="view-help" class="subtle">Pinch to zoom; drag to move.<span class="sr-only"> These gestures move only this view. Select Done to control the computer again.</span></p>
+            <p id="view-scroll-hint" class="subtle" hidden>Scroll for more controls ↓</p>
+            <p id="view-scale">Zoom: 100%</p><span id="view-announcement" class="sr-only" role="status"></span>
+            <div class="quick-controls view-zoom">
+              <button id="view-out" type="button" aria-label="Zoom out">−</button><button id="view-in" type="button" aria-label="Zoom in">+</button>
+              <button id="view-fit" type="button" aria-label="Fit desktop">Fit</button>
+            </div>
+            <div class="view-pan" role="group" aria-label="Move the view">
+              <button id="view-up" type="button" aria-label="View up">↑</button>
+              <button id="view-left" type="button" aria-label="View left">←</button>
+              <button id="view-down" type="button" aria-label="View down">↓</button>
+              <button id="view-right" type="button" aria-label="View right">→</button>
+            </div>
+            <p class="sr-only">Use the buttons or focus the picture: + and − zoom, arrows move the view, and 0 fits the desktop.</p>
+          </section>
           <section id="more-controls" hidden aria-label="Stream options">
             <div class="panel-heading"><h2>Options</h2><button id="close-options" type="button" aria-label="Close options" title="Close options" ><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 6 12 12M6 18 18 6"/></svg><span class="sr-only" id="close-options-label">Close options</span></button></div>
             <div id="auto-keyboard-setting" hidden>
@@ -92,6 +109,7 @@
             <button id="fullscreen" type="button" title="Open full screen in landscape" aria-label="Full screen"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path class="enter-screen" d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/><path class="exit-screen" d="M3 8h5V3m8 0v5h5M8 21v-5H3m13 5v-5h5"/></svg><span class="sr-only" id="fullscreen-label">Full screen</span></button>
             <button id="pause" type="button" aria-label="Pause video" title="Pause video" aria-pressed="false"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path class="pause-mark" d="M8 5v14M16 5v14"/><path class="resume-mark" d="m8 5 11 7-11 7Z"/></svg><span class="sr-only" id="pause-label">Pause video</span></button>
             <button id="drag-mode" type="button" aria-label="Scroll gestures" title="Scroll gestures" aria-pressed="false"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path class="scroll-mark" d="m8 5 4-3 4 3m-4-3v20m-4-3 4 3 4-3"/><g class="select-mark"><path d="M3 8V3h5m8 0h5v5M3 16v5h5m13-5v5h-5"/><path d="m10 9 3 8 2-3 3-2Z"/></g></svg><span class="sr-only" id="drag-mode-label">Scroll gestures</span></button>
+            <button id="view" type="button" aria-expanded="false" aria-controls="view-controls" aria-label="Move view" title="Move view"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="10" cy="10" r="6"/><path d="m15 15 6 6M7 10h6m-3-3v6"/></svg><span class="sr-only">Move view</span></button>
             <button id="more" type="button" aria-expanded="false" aria-controls="more-controls" aria-label="Options" title="Options"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg><span class="sr-only" id="more-label">Options</span></button>
             <button id="hide-controls" type="button" aria-label="Hide controls" title="Hide controls"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 5 7 7-7 7m11-14v14"/></svg><span class="sr-only" id="hide-controls-label">Hide controls</span></button>
           </div>

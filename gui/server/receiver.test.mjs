@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 import { createBrowserClipboard } from '../receiver/clipboard.mjs';
+import { createDesktopView } from '../receiver/view.mjs';
 import { createRelativeTrackpad } from '../receiver/trackpad.mjs';
 import { rememberedBrowser } from '../receiver/remembered.mjs';
 import { receiverIsAway } from '../receiver/lifecycle.mjs';
@@ -30,7 +31,7 @@ function receiver(t, { portrait = false, lockFails = false, webRtc = false, webC
         remove: (...names) => names.forEach((name) => classes.delete(name)), toggle: (name, on) => on ? classes.add(name) : classes.delete(name) };
     }
     addEventListener(name, fn) { const list = this.listeners.get(name) || []; list.push(fn); this.listeners.set(name, list); }
-    emit(name, event = {}) { let result; for (const fn of this.listeners.get(name) || []) result = fn({ preventDefault() {}, ...event }); return result; }
+    emit(name, event = {}) { let result; for (const fn of this.listeners.get(name) || []) result = fn({ preventDefault() {}, stopPropagation() {}, ...event }); return result; }
     requestSubmit() { return this.emit('submit'); }
     setAttribute(name, value) { this.attrs.set(name, value); }
     removeAttribute(name) { this.attrs.delete(name); }
@@ -102,7 +103,7 @@ function receiver(t, { portrait = false, lockFails = false, webRtc = false, webC
   if (webRtc) window.RTCPeerConnection = true;
   window.history = { replaceState(_state, _title, url) { locationState.hash = ''; historyChanges.push(url); } };
   const context = vm.createContext({ ...protocol,
-    createRelativeTrackpad, createBrowserKeyboard, keyboardUsage, keyPacket, receiverIsAway,
+    createDesktopView, createRelativeTrackpad, createBrowserKeyboard, keyboardUsage, keyPacket, receiverIsAway,
     createBrowserClipboard: options => createBrowserClipboard({ ...options, setTimer: (fn, ms) => { const timer = setTimeout(fn, ms); timers.add(timer); return timer; }, clearTimer: clearTimeout }),
     rememberedBrowser: options => rememberedBrowser({ ...options, document, location: locationState,
       fetch: (...args) => context.fetch(...args),
@@ -895,4 +896,32 @@ test('trackpad clears queued motion and intentional hold across connection loss'
   await new Promise(r => setTimeout(r, 30));
   assert.equal(inputs(h).length, count); assert.equal(h.$('drag-mode').attrs.get('aria-pressed'), 'false');
   assert.equal(h.$('trackpad-mode').disabled, true); assert.equal(h.$('trackpad-cursor').hidden, true);
+});
+
+
+test('local view navigation never emits remote gestures and cancels stale contacts on blur and resize', async t => {
+  const h = receiver(t, { keyboard: true });
+  h.$('view').emit('click');
+  assert.equal(h.$('view').attrs.get('aria-expanded'), 'true');
+  const start = h.socket.sent.length;
+  const stage = h.$('stage');
+  stage.emit('pointerdown', { pointerId: 1, clientX: 200, clientY: 250, button: 0 });
+  stage.emit('pointerdown', { pointerId: 2, clientX: 600, clientY: 250, button: 0 });
+  stage.emit('pointermove', { pointerId: 2, clientX: 700, clientY: 250 });
+  assert.match(h.$('display').style.transform, /scale\(1.25\)/);
+  h.window.emit('blur');
+  const after = h.$('display').style.transform;
+  stage.emit('pointermove', { pointerId: 2, clientX: 750, clientY: 250 });
+  assert.equal(h.$('display').style.transform, after);
+  stage.emit('pointerdown', { pointerId: 4, clientX: 200, clientY: 200, button: 0 });
+  h.reflow();
+  const resized = h.$('display').style.transform;
+  stage.emit('pointermove', { pointerId: 4, clientX: 400, clientY: 200 });
+  assert.equal(h.$('display').style.transform, resized);
+  h.$('view-in').emit('click'); h.$('view-right').emit('click'); h.$('view-fit').emit('click');
+  assert.match(h.$('display').style.transform, /scale\(1\)/);
+  assert.equal(h.socket.sent.length, start);
+  h.$('close-view').emit('click');
+  assert.equal(h.$('view').attrs.get('aria-expanded'), 'false');
+  h.$('disconnect').emit('click');
 });
