@@ -102,3 +102,17 @@ summary { min-height: 44px; padding: 10px 12px; border: 1px solid #405461; borde
   #control-panels { width: 13rem; max-width: 40%; max-height: 100%; margin-inline-start: 8px; }
   #keyboard-controls, #more-controls { margin-block-start: 0; }
 }
+
+/* Direction icons keep their physical meaning in both LTR and RTL layouts. */
+#arrow-controls { margin-block-start: 8px; padding: 10px; background: #101b22; border: 1px solid #405461; border-radius: 12px; }
+#arrow-controls .panel-heading button { display: grid; place-items: center; padding: 6px; }
+.arrow-pad { display: grid; grid-template: repeat(2, 44px) / repeat(3, minmax(44px, 1fr)); gap: 6px; max-width: 15rem; margin-inline: auto; direction: ltr; }
+.arrow-pad button { min-width: 44px; min-height: 44px; padding: 6px; display: grid; place-items: center; }
+.arrow-pad svg { pointer-events: none; }
+#arrow-up { grid-area: 1 / 2; }
+#arrow-left { grid-area: 2 / 1; }
+#arrow-down { grid-area: 2 / 2; }
+#arrow-right { grid-area: 2 / 3; }
+#arrow-help { margin: 8px 0 0; }
+@media (min-width: 40rem) { #arrow-controls { margin-block-start: 0; } }
+#close-arrows { min-width: 44px; }

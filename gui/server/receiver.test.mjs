@@ -6,7 +6,7 @@ import { rememberedBrowser } from '../receiver/remembered.mjs';
 import { receiverIsAway } from '../receiver/lifecycle.mjs';
 import * as protocol from '../receiver/protocol.mjs';
 import { createVideoReceiver } from '../receiver/video.mjs';
-import { createBrowserKeyboard } from '../receiver/keyboard.mjs';
+import { createBrowserKeyboard, keyboardUsage, keyPacket } from '../receiver/keyboard.mjs';
 import { validBrowserInput } from './browser-protocol.mjs';
 
 const source = (await readFile(new URL('../receiver/receiver.mjs', import.meta.url), 'utf8')).replace(/^import .*;\r?\n/gm, '');
@@ -100,7 +100,7 @@ function receiver(t, { portrait = false, lockFails = false, webRtc = false, webC
   if (webRtc) window.RTCPeerConnection = true;
   window.history = { replaceState(_state, _title, url) { locationState.hash = ''; historyChanges.push(url); } };
   const context = vm.createContext({ ...protocol,
-    createBrowserKeyboard, receiverIsAway,
+    createBrowserKeyboard, keyboardUsage, keyPacket, receiverIsAway,
     rememberedBrowser: options => rememberedBrowser({ ...options, document, location: locationState,
       fetch: (...args) => context.fetch(...args),
       setTimeout: (fn, ms) => { const timer = setTimeout(fn, ms); timers.add(timer); return timer; }, clearTimeout }),
@@ -634,4 +634,51 @@ test('an expired session uses a saved credential and explicit Disconnect suppres
   h.$('disconnect').emit('click'); const before = h.sockets.length;
   h.document.emit('visibilitychange'); h.window.emit('pageshow'); await new Promise(setImmediate);
   assert.equal(h.sockets.length, before);
+});
+
+
+test('arrow pad sends complete direction pairs without opening the soft keyboard', t => {
+  const h = receiver(t, { keyboard: true });
+  assert.equal(h.$('arrows').hidden, false); assert.equal(h.$('arrows').disabled, false);
+  h.$('arrows').emit('click'); assert.equal(h.$('arrow-controls').hidden, false);
+  assert.equal(h.document.activeElement, h.$('arrow-up'));
+  assert.equal(h.$('keyboard-controls').hidden, true);
+  for (const id of ['arrow-up','arrow-left','arrow-down','arrow-right']) h.$(id).emit('click');
+  const keys = h.socket.sent.filter(b => Buffer.isBuffer(b) && b[0] === 8);
+  assert.deepEqual(keys.map(b => [b[1], b.readUInt16BE(2), b[4]]), [[0,82,0],[1,82,0],[0,80,0],[1,80,0],[0,81,0],[1,81,0],[0,79,0],[1,79,0]]);
+  h.$('arrow-controls').emit('keydown', { code: 'ArrowLeft', shiftKey: true });
+  assert.deepEqual(h.socket.sent.slice(-2).map(b => [b[1], b.readUInt16BE(2), b[4]]), [[0,80,2],[1,80,0]]);
+  h.$('close-arrows').emit('click'); assert.equal(h.$('arrow-controls').hidden, true);
+  assert.equal(h.document.activeElement, h.$('arrows'));
+  h.$('arrow-up').emit('click'); assert.equal(h.socket.sent.filter(b => Buffer.isBuffer(b) && b[0] === 8).length, 10);
+  h.$('disconnect').emit('click');
+});
+
+test('arrow actions are blocked while paused, hidden, touch-disabled or disconnected', t => {
+  const h = receiver(t, { keyboard: true }); h.$('arrows').emit('click');
+  const count = () => h.socket.sent.filter(b => Buffer.isBuffer(b) && b[0] === 8).length;
+  h.$('pause').emit('click'); let before = count(); h.$('arrow-up').emit('click');
+  assert.equal(count(), before); assert.equal(h.$('arrow-up').disabled, true);
+  h.$('pause').emit('click'); h.$('touch').emit('click'); before = count(); h.$('arrow-up').emit('click'); assert.equal(count(), before);
+  h.$('touch').emit('click'); h.document.hidden = true; h.document.emit('visibilitychange'); before = count();
+  h.$('arrow-controls').emit('keydown', { code: 'ArrowDown' }); assert.equal(count(), before);
+  h.document.hidden = false; h.document.emit('visibilitychange'); h.$('disconnect').emit('click'); before = count();
+  h.$('arrow-up').emit('click'); assert.equal(count(), before); assert.equal(h.$('arrows').hidden, true);
+});
+
+for (const mode of [{ keyboard: false }, { keyboard: true, viewOnly: true }]) test('arrow pad respects authenticated keyboard capability and view-only policy '+JSON.stringify(mode), t => {
+  const h = receiver(t, mode); const before = h.socket.sent.length;
+  assert.equal(h.$('arrows').hidden, true); h.$('arrows').emit('click'); h.$('arrow-up').emit('click');
+  assert.equal(h.socket.sent.length, before); h.$('disconnect').emit('click');
+});
+
+test('arrow pad and typing panel are exclusive and Escape restores the arrow trigger', t => {
+  const h = receiver(t, { keyboard: true }); h.$('keyboard').emit('click');
+  h.$('keyboard-input').emit('keydown', { code: 'ShiftLeft', key: 'Shift', shiftKey: true });
+  h.$('arrows').emit('click'); assert.equal(h.$('keyboard-controls').hidden, true);
+  assert.ok(h.socket.sent.some(b => Buffer.isBuffer(b) && b[0] === 8 && b[1] === 2));
+  h.document.emit('keydown', { key: 'Escape' }); assert.equal(h.$('arrow-controls').hidden, true);
+  assert.equal(h.document.activeElement, h.$('arrows'));
+  h.$('arrows').emit('click'); h.$('keyboard').emit('click'); assert.equal(h.$('arrow-controls').hidden, true);
+  h.$('disconnect').emit('click');
 });
