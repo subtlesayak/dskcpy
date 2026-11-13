@@ -82,6 +82,7 @@ export function createControlService({
   let internetBridge = null;
   let lastNativeError = null;
   let captureGeneration = 0;
+  let nativeTrustPause = Promise.resolve();
   let logRemainders = { stdout: '', stderr: '' };
   const state = {
     readiness: null,
@@ -566,7 +567,8 @@ export function createControlService({
         if (permissionDenied || captureEndReason === 'user-stop') {
           // block() in this action is synchronous: no remembered ticket may
           // race the later durable pause after an OS Stop or permission loss.
-          void browserReceiver.trustAction('pause').catch(() => {});
+          const pausing = browserReceiver.trustAction('pause');
+          nativeTrustPause = Promise.all([nativeTrustPause, pausing]).then(() => {}).catch(() => {});
         }
         if (!recoverCapture) internetBridge?.close(!streamStopRequested && permissionDenied ? 'capture-permission' : undefined);
         internetBridge = null;
@@ -814,9 +816,11 @@ export function createControlService({
         return;
       }
       if (request.method === 'GET' && url.pathname === '/api/browser/trusted') {
-        await trustedDevices.ready; writeJson(response, 200, browserReceiver.trustedStatus()); return;
+        await trustedDevices.ready; await nativeTrustPause;
+        writeJson(response, 200, browserReceiver.trustedStatus()); return;
       }
       if (request.method === 'POST' && url.pathname === '/api/browser/trusted') {
+        await nativeTrustPause;
         const body = await readJson(request);
         if (!['approve', 'reject', 'revoke', 'pause', 'resume'].includes(body.action)
             || (['approve', 'reject', 'revoke'].includes(body.action) && !/^[a-f0-9]{32}$/.test(body.id))) throw new Error('Invalid device action.');
@@ -866,6 +870,7 @@ export function createControlService({
     clearInterval(heartbeat);
     stopStream();
     await browserReceiver.shutdown();
+    await nativeTrustPause;
     await browserUsbCleanupPending;
     for (const response of clients) response.end();
     clients.clear();

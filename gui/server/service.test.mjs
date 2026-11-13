@@ -791,9 +791,10 @@ for(const reason of ['user-stop','permission-lost'])test('native '+reason+' dura
  const {body}=await f.request('/api/browser/invite',{}),ws=new WebSocket(body.url.replace('http:','ws:')+'stream',{origin:body.url.slice(0,-1)});
  ws.on('error',()=>{});t.after(()=>ws.terminate());await once(ws,'open');ws.send(body.key);await waitFor(()=>f.children.length===1);
  const ended=once(ws,'close');f.children[0].child.stdout.write('DSKCPY_CAPTURE_END '+reason+'\n');f.children[0].child.exit(reason==='user-stop'?0:2);await ended;
- assert.equal((await f.request('/api/browser/trusted')).body.paused,true);
- let saved=false;for(let i=0;i<100;i++){if(JSON.parse(await readFile(filename,'utf8')).paused){saved=true;break;}await new Promise(resolve=>setTimeout(resolve,5));}
- assert.equal(saved,true);const reloaded=createTrustedDevices({filename});await reloaded.ready;assert.equal(reloaded.snapshot().paused,true);
+ const status=(await f.request('/api/browser/trusted')).body;
+ assert.equal(status.paused,true);assert.equal(status.storageError,false);
+ assert.equal(JSON.parse(await readFile(filename,'utf8')).paused,true);
+ const reloaded=createTrustedDevices({filename});await reloaded.ready;assert.equal(reloaded.snapshot().paused,true);
  assert.equal(f.children.length,1);
 });
 
