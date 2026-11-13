@@ -14,13 +14,14 @@ Mac-only window capture and editable-focus reporting remain unavailable on Windo
 
 The Windows adapter converts physical usages to PC set-1 scan events, retaining
 extended navigation, keypad and left/right modifier distinctions. Special
-function/Pause/Print Screen events use their Windows virtual-key forms. Text is
+function/Pause/Print Screen/Num Lock events use their Windows virtual-key forms. Text is
 validated bounded canonical UTF-8 (512 bytes), converted to UTF-16, and sent as
 balanced Unicode down/up pairs, including surrogate pairs. Power/eject actions
 are not inferred from arbitrary keyboard usages. Unusual OEM/keypad layouts and
 applications that do not accept Unicode packet input need physical qualification.
 Receiver IME preedit stays local; this is committed text, not remote IME-state sync.
-Num Lock and Pause retain separate injection forms, following
+Num Lock explicitly uses VK_NUMLOCK plus scan45 and the extended flag; Pause
+uses VK_PAUSE. This avoids conflating their scan-only representations, following
 [Microsoft's keyboard input table and Num Lock example](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-keybd_event).
 
 Only accepted remote DOWN events enter the cleanup ledger. Release runs on

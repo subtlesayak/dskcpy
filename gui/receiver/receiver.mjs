@@ -25,11 +25,11 @@ const away = () => receiverIsAway({ hidden: document.hidden, pictureInPictureEle
 const remembered = rememberedBrowser({ reconnect: () => { resumeAllowed = true; void resumeSession(); } });
 let rtcReceiver, mediaMode = 'webcodecs';
 let keyboardSupported = false, keyboardOpen = false, viewOnly = false;
-let focusSupported = false, autoKeyboard = false, keyboardStatusSupported = false;
+let focusSupported = false, autoKeyboard = false, keyboardStatusSupported = false, keyboardBlocked = false;
 const keyboardStatusMessage = $('keyboard-status');
 const autoSetting = $('auto-keyboard-setting'), autoToggle = $('auto-keyboard'), autoFeedback = $('auto-keyboard-feedback');
 function clearFocusCapability(clearPreference = true) {
-  focusSupported = false; keyboardStatusSupported = false;
+  focusSupported = false; keyboardStatusSupported = false; keyboardBlocked = false;
   if (keyboardStatusMessage) keyboardStatusMessage.hidden = true;
   if (clearPreference) autoKeyboard = false;
   if (autoSetting) autoSetting.hidden = true;
@@ -84,10 +84,10 @@ if (arrowPadPresent) controlTrays.push({ trigger: 'arrows', panel: 'arrow-contro
 let openControlTray = null;
 let selectDrag = false, touchGesture = null;
 const keyboardInput = createBrowserKeyboard({ field: $('keyboard-input'), send,
-  canSend: () => keyboardSupported && authenticated && header && !paused && !document.hidden && touchEnabled && !viewOnly,
+  canSend: () => !keyboardBlocked && keyboardSupported && authenticated && header && !paused && !document.hidden && touchEnabled && !viewOnly,
   onError: (message) => { $('error').textContent = message; } });
 function canSendKeys() {
-  return keyboardSupported && authenticated && header && !paused && !document.hidden && touchEnabled && !viewOnly && ws?.readyState === WebSocket.OPEN;
+  return !keyboardBlocked && keyboardSupported && authenticated && header && !paused && !document.hidden && touchEnabled && !viewOnly && ws?.readyState === WebSocket.OPEN;
 }
 function updateArrowAvailability() {
   if (!arrowPadPresent) return;
@@ -119,8 +119,9 @@ function hideKeyboard() {
   document.body.classList.remove('keyboard-open');
   $('keyboard-controls').hidden = true; $('keyboard').setAttribute('aria-expanded', 'false');
 }
-function showKeyboard() {
-  if (!keyboardSupported || viewOnly || paused || away() || !touchEnabled || keyboardOpen) return;
+function showKeyboard(retry = false) {
+  if (!keyboardSupported || viewOnly || paused || away() || !touchEnabled || keyboardOpen || (keyboardBlocked && !retry)) return;
+  keyboardBlocked = false; updateArrowAvailability();
   setControlTray(); keyboardOpen = true; $('keyboard-controls').hidden = false;
   document.body.classList.add('keyboard-open'); $('keyboard').setAttribute('aria-expanded', 'true');
   fitCanvas(); send(keyPacket(2)); keyboardInput.setEnabled(true);
@@ -128,7 +129,7 @@ function showKeyboard() {
 $('keyboard').addEventListener('click', () => {
   if (keyboardOpen) { hideKeyboard(); fitCanvas(); return; }
   if (autoFeedback) autoFeedback.hidden = true;
-  showKeyboard();
+  showKeyboard(true);
 });
 $('close-keyboard').addEventListener('click', () => { hideKeyboard(); fitCanvas(); $('keyboard').focus(); });
 $('close-options').addEventListener('click', () => setControlTray(null, true));
@@ -299,7 +300,9 @@ function connect(key = null, requestedMode = preferredMode) {
         if (message.type === 'keyboard-status') {
           if (!authenticated || !keyboardStatusSupported || !['ready','blocked','unsupported'].includes(message.status)) throw new Error('Unexpected keyboard status.');
           if (message.status === 'blocked') {
-            hideKeyboard(); fitCanvas();
+            // Cleanup may send release-all for a held key. That is not the
+            // user's retry: gate both arrows and typing until Keyboard is tapped.
+            keyboardBlocked = true; hideKeyboard(); updateArrowAvailability(); fitCanvas();
             $('error').textContent = 'The computer could not accept all keyboard input. Check its text, then tap Keyboard to try again.';
           }
           if (keyboardStatusMessage) {

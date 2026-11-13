@@ -15,7 +15,7 @@ bool sc_windows_keyboard_mapping(uint16_t usage, struct sc_windows_key_event *ev
         [51]=0x27,[52]=0x28,[53]=0x29,[54]=0x33,[55]=0x34,[56]=0x35,[57]=0x3a,
         [58]=0x3b,[59]=0x3c,[60]=0x3d,[61]=0x3e,[62]=0x3f,[63]=0x40,[64]=0x41,[65]=0x42,[66]=0x43,[67]=0x44,[68]=0x57,[69]=0x58,
         [71]=0x46,[73]=EXT(0x52),[74]=EXT(0x47),[75]=EXT(0x49),[76]=EXT(0x53),[77]=EXT(0x4f),[78]=EXT(0x51),
-        [79]=EXT(0x4d),[80]=EXT(0x4b),[81]=EXT(0x50),[82]=EXT(0x48),[83]=EXT(0x45),[84]=EXT(0x35),[85]=0x37,[86]=0x4a,[87]=0x4e,
+        [79]=EXT(0x4d),[80]=EXT(0x4b),[81]=EXT(0x50),[82]=EXT(0x48),[84]=EXT(0x35),[85]=0x37,[86]=0x4a,[87]=0x4e,
         [88]=EXT(0x1c),[89]=0x4f,[90]=0x50,[91]=0x51,[92]=0x4b,[93]=0x4c,[94]=0x4d,[95]=0x47,[96]=0x48,[97]=0x49,[98]=0x52,[99]=0x53,[100]=0x56,[101]=EXT(0x5d),
         [224]=0x1d,[225]=0x2a,[226]=0x38,[227]=EXT(0x5b),[228]=EXT(0x1d),[229]=0x36,[230]=EXT(0x38),[231]=EXT(0x5c),
     };
@@ -27,6 +27,7 @@ bool sc_windows_keyboard_mapping(uint16_t usage, struct sc_windows_key_event *ev
     event->kind=SC_WINDOWS_VIRTUAL;
     if (usage==70) event->code=0x2c; // VK_SNAPSHOT
     else if (usage==72) event->code=0x13; // VK_PAUSE
+    else if (usage==83) event->code=0x90; // VK_NUMLOCK: adapter uses its documented special form.
     else if (usage==103) event->code=0x92; // VK_OEM_NEC_EQUAL
     else if (usage>=104 && usage<=115) event->code=(uint16_t)(0x7c+usage-104); // VK_F13..VK_F24
     else return false; // No power/eject or unnegotiated application actions.

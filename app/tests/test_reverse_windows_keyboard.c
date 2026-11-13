@@ -24,8 +24,8 @@ int main(void) {
     sc_windows_keyboard_mapping(79,&event);assert(event.code==0x4d&&event.extended);
     sc_windows_keyboard_mapping(228,&event);assert(event.code==0x1d&&event.extended);
     sc_windows_keyboard_mapping(224,&event);assert(event.code==0x1d&&!event.extended);
-    // Keep Num Lock distinct from Pause's 45 representation at injection.
-    sc_windows_keyboard_mapping(83,&event);assert(event.code==0x45&&event.extended);
+    // Keep Num Lock distinct from Pause with its explicit virtual-key form.
+    sc_windows_keyboard_mapping(83,&event);assert(event.kind==SC_WINDOWS_VIRTUAL&&event.code==0x90);
     assert(sc_windows_keyboard_key(&state,0,224,1)==SC_WINDOWS_KEY_OK);
     assert(sc_windows_keyboard_key(&state,0,4,1)==SC_WINDOWS_KEY_OK);
     assert(sc_windows_keyboard_key(&state,0,4,1)==SC_WINDOWS_KEY_OK); // Repeat.
@@ -83,10 +83,15 @@ int main(void) {
     assert(input.ki.dwFlags==(KEYEVENTF_SCANCODE|KEYEVENTF_EXTENDEDKEY));
     event=(struct sc_windows_key_event){.kind=SC_WINDOWS_UNICODE,.code=0xd83d,.up=true};input=sc_windows_make_input(&event);
     assert(input.ki.wVk==0&&input.ki.wScan==0xd83d&&input.ki.dwFlags==(KEYEVENTF_UNICODE|KEYEVENTF_KEYUP));
+    sc_windows_keyboard_mapping(83,&event);input=sc_windows_make_input(&event);
+    assert(input.ki.wVk==VK_NUMLOCK&&input.ki.wScan==0x45&&input.ki.dwFlags==KEYEVENTF_EXTENDEDKEY);
+    event.up=true;input=sc_windows_make_input(&event);
+    assert(input.ki.dwFlags==(KEYEVENTF_EXTENDEDKEY|KEYEVENTF_KEYUP));
     HKL layouts[16];int layout_count=GetKeyboardLayoutList(16,layouts);bool checked=false;
     for(int i=0;i<layout_count;i++)if(((uintptr_t)layouts[i]&0xffff)==0x0409){
         const struct {UINT vk;uint16_t usage;} pairs[]={
-            {'A',4},{VK_RIGHT,79},{VK_LEFT,80},{VK_DELETE,76},{VK_RCONTROL,228},{VK_RMENU,230},{VK_LWIN,227},{VK_F11,68},{VK_NUMLOCK,83}};
+            {'A',4},{VK_RIGHT,79},{VK_LEFT,80},{VK_DELETE,76},{VK_RCONTROL,228},{VK_RMENU,230},{VK_LWIN,227},{VK_F11,68}};
+        assert((MapVirtualKeyExW(VK_NUMLOCK,MAPVK_VK_TO_VSC_EX,layouts[i])&0xff)==0x45);
         bool mappings_match=true;
         for(size_t j=0;j<sizeof(pairs)/sizeof(pairs[0]);j++){
             UINT scan=MapVirtualKeyExW(pairs[j].vk,MAPVK_VK_TO_VSC_EX,layouts[i]);

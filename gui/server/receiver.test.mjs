@@ -739,12 +739,20 @@ test('auto keyboard keeps manual fallback without VirtualKeyboard API and cannot
 
 
 test('negotiated keyboard failure clears the local context; a deliberate reopen sends a fresh release barrier',t=>{
- const h=receiver(t,{keyboard:true,keyboardStatus:true});
+ const h=receiver(t,{keyboard:true,keyboardStatus:true,textFocus:true});
  assert.ok(h.socket.sent.includes('keyboard-status-subscribe'));
  h.$('keyboard').emit('click');h.$('keyboard-input').value='pending';
  h.socket.emit('message',{data:JSON.stringify({type:'keyboard-status',status:'blocked'})});
  assert.equal(h.$('keyboard-controls').hidden,true);assert.equal(h.$('keyboard-input').value,'');
  assert.match(h.$('error').textContent,/could not accept all keyboard input/);
+ const blockedCount=h.socket.sent.length;
+ assert.equal(h.$('arrows').disabled,true);
+ h.$('arrows').emit('click');h.$('arrow-right').emit('click');
+ h.$('auto-keyboard').checked=true;h.$('auto-keyboard').emit('change');
+ h.socket.emit('message',{data:JSON.stringify({type:'text-focus',focused:true})});
+ h.$('keyboard-input').value='stale';h.$('keyboard-input').emit('input');
+ assert.equal(h.$('keyboard-controls').hidden,true);
+ assert.equal(h.socket.sent.length,blockedCount);
  const before=h.socket.sent.length;h.$('keyboard').emit('click');
  assert.equal(h.$('keyboard-controls').hidden,false);
  assert.ok(h.socket.sent.slice(before).some(p=>Buffer.isBuffer(p)&&p.equals(Buffer.from([8,2,0,0,0]))));
