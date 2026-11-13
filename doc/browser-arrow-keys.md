@@ -1,0 +1,32 @@
+# Browser arrow keys
+
+On a host that advertises browser keyboard support, open the four-way arrow
+icon next to Keyboard in the right-hand rail. The pad sends Up, Left, Down and
+Right without opening the phone's soft keyboard. Each tap sends a complete key
+press/release pair; holding a touch button does not repeat. Physical arrows
+also work while the pad has focus. Escape or Close returns focus to its rail
+button. Physical arrows in the existing typing field remain supported.
+
+Arrow controls are unavailable without authenticated keyboard capability, in
+view-only mode, while paused/hidden, when touch control is off, or after a
+connection loss. Direction labels retain their physical meaning in RTL layouts.
+
+This change needs only the existing receiver's HTML, CSS and JavaScript. Its
+keyboard command format and native host are unchanged. Publishing those assets
+does not restart the service or change the already-loaded phone page. The new
+script tolerates an older document during a rolling asset update.
+
+Refresh is not a zero-interruption live patch: it replaces the browser's
+WebSocket and renegotiates media. The current receiver can reuse its HttpOnly
+resume cookie and existing capture session if the same browser returns within
+the allowed resume window and total session lifetime. No new invitation is
+needed in that case. Do not press Disconnect or Stop to perform this refresh.
+A stopped/expired host session or lost browser credentials still needs pairing.
+
+Automated validation covers exact direction bytes and balanced releases,
+modifier cleanup, keyboard policy, pause/background/touch-off/disconnect gates,
+focus restoration and typing-panel exclusivity. Hidden Chromium checks use a
+fake native host, exercise narrow/landscape/RTL/200% layouts, serve real mixed
+old/new files, and reload without a new invitation or native restart. Those
+checks do not establish uninterrupted real-device audio/video or physical Mac
+key handling. The actual phone refresh remains under the user's control.

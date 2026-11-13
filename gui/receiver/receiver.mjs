@@ -1,7 +1,7 @@
 import { avcCodec, avcParameters, touchPacket, scrollPacket, takeDecodedTimestamps, fitDisplay, createMediaAcknowledger, needsControlsRow, parseJoinFragment } from './protocol.mjs';
 import { createRtcReceiver } from './rtc.mjs';
 import { createVideoReceiver } from './video.mjs';
-import { createBrowserKeyboard } from './keyboard.mjs';
+import { createBrowserKeyboard, keyboardUsage, keyPacket } from './keyboard.mjs';
 
 const $ = (id) => document.getElementById(id);
 function takeJoinFragment() {
@@ -40,11 +40,41 @@ const mediaAcks = createMediaAcknowledger(send);
 const controlTrays = [
   { trigger: 'more', panel: 'more-controls', first: 'close-options' },
 ];
+// Tolerate an older document during a static-assets-only rolling update.
+const arrowPadPresent = ['arrows', 'arrow-controls', 'close-arrows', 'arrow-up', 'arrow-left', 'arrow-down', 'arrow-right'].every(id => $(id));
+if (arrowPadPresent) controlTrays.push({ trigger: 'arrows', panel: 'arrow-controls', first: 'arrow-up' });
 let openControlTray = null;
 let selectDrag = false, touchGesture = null;
 const keyboardInput = createBrowserKeyboard({ field: $('keyboard-input'), send,
   canSend: () => keyboardSupported && authenticated && header && !paused && !document.hidden && touchEnabled && !viewOnly,
   onError: (message) => { $('error').textContent = message; } });
+function canSendKeys() {
+  return keyboardSupported && authenticated && header && !paused && !document.hidden && touchEnabled && !viewOnly && ws?.readyState === WebSocket.OPEN;
+}
+function updateArrowAvailability() {
+  if (!arrowPadPresent) return;
+  $('arrows').hidden = !keyboardSupported || viewOnly;
+  const available = canSendKeys();
+  for (const id of ['arrows', 'arrow-up', 'arrow-left', 'arrow-down', 'arrow-right']) $(id).disabled = !available;
+}
+function tapArrow(code, modifiers = 0) {
+  if (!canSendKeys() || openControlTray !== 'arrows' || !/^Arrow(?:Up|Left|Down|Right)$/.test(code)) return;
+  const usage = keyboardUsage(code);
+  // A tap is always a complete pair; there is no held key to strand on blur.
+  if (send(keyPacket(0, usage, modifiers))) send(keyPacket(1, usage, 0));
+}
+if (arrowPadPresent) {
+  for (const [id, code] of [['arrow-up', 'ArrowUp'], ['arrow-left', 'ArrowLeft'], ['arrow-down', 'ArrowDown'], ['arrow-right', 'ArrowRight']]) {
+    $(id).addEventListener('click', () => tapArrow(code));
+  }
+  $('close-arrows').addEventListener('click', () => setControlTray(null, true));
+  $('arrow-controls').addEventListener('keydown', event => {
+    const code = event.code || event.key;
+    if (!/^Arrow(?:Up|Left|Down|Right)$/.test(code) || !canSendKeys() || openControlTray !== 'arrows') return;
+    event.preventDefault();
+    tapArrow(code, (event.ctrlKey ? 1 : 0) | (event.shiftKey ? 2 : 0) | (event.altKey ? 4 : 0) | (event.metaKey ? 8 : 0));
+  });
+}
 function hideKeyboard() {
   keyboardOpen = false; keyboardInput.setEnabled(false);
   document.body.classList.remove('keyboard-open');
@@ -117,7 +147,7 @@ function disconnect() {
   clearMedia();
   hideKeyboard(); keyboardSupported = false; viewOnly = false; $('keyboard').hidden = true;
   if (audioContext) void audioContext.close().catch(() => {}); audioContext = null;
-  authenticated = false; header = false; muted = true; paused = false;
+  authenticated = false; header = false; muted = true; paused = false; updateArrowAvailability();
   videoConfig = null; configBytes = null; audioConfig = null; frames = 0;
   context.clearRect(0, 0, canvas.width, canvas.height);
   $('join-panel').hidden = false; $('stream-panel').hidden = true;
@@ -196,7 +226,7 @@ function connect(key = null, requestedMode = preferredMode) {
   socket.addEventListener('close', (event) => {
     clearTimeout(timeout);
     if (mine !== generation) return;
-    releaseTouches(); clearMedia(); ws = null; authenticated = false;
+    releaseTouches(); clearMedia(); ws = null; authenticated = false; updateArrowAvailability();
     if (sessionExpected && ![1000, 1008, 4000, 4002].includes(event.code)) {
       resumeDeadline ||= Date.now() + 120000;
       $('status').textContent = document.hidden ? 'Paused while away' : 'Reconnecting…';
@@ -233,6 +263,7 @@ function connect(key = null, requestedMode = preferredMode) {
         authenticated = true; sessionExpected = true;
         viewOnly = message.viewOnly === true;
         keyboardSupported = message.keyboard === true && !viewOnly;
+        updateArrowAvailability();
         $('keyboard').hidden = !keyboardSupported;
         touchEnabled = !viewOnly; $('touch').disabled = viewOnly; $('drag-mode').disabled = viewOnly;
         setRailLabel('touch', viewOnly ? 'Window · view only' : 'Touch on');
@@ -398,6 +429,7 @@ $('audio').addEventListener('click', async () => {
 
 });
 function updatePause() {
+  updateArrowAvailability();
   if (!authenticated || !header || ws?.readyState !== WebSocket.OPEN) return;
   releaseTouches(); stopAudio();
   if (paused || document.hidden) hideKeyboard();
@@ -446,7 +478,7 @@ window.addEventListener('pageshow', () => { updatePause(); void resumeSession();
 void resumeSession();
 $('touch').addEventListener('click', () => {
   if (viewOnly) return;
-  releaseTouches(); touchEnabled = !touchEnabled;
+  releaseTouches(); touchEnabled = !touchEnabled; updateArrowAvailability();
   if (!touchEnabled) hideKeyboard();
   setRailLabel('touch', touchEnabled ? 'Touch on' : 'Touch off'); $('touch').setAttribute('aria-pressed', String(touchEnabled));
 });
@@ -574,7 +606,10 @@ function setControlTray(name = null, focus = false) {
   }
 }
 for (const { trigger } of controlTrays) {
-  $(trigger).addEventListener('click', () => setControlTray(openControlTray === trigger ? null : trigger, true));
+  $(trigger).addEventListener('click', () => {
+    if (trigger === 'arrows' && !canSendKeys()) return;
+    setControlTray(openControlTray === trigger ? null : trigger, true);
+  });
 }
 function setControlsVisible(visible) {
   if (!visible) hideKeyboard();
