@@ -55,6 +55,7 @@ jobs:
           node desktop/test/capture-recovery-ui.mjs
           node desktop/test/usb-ui.mjs
           node desktop/test/clipboard-ui.mjs
+          node desktop/test/trackpad-ui.mjs
           node desktop/test/startup-history-ui.mjs
       - name: Artifact identity and upgrade preflight regressions
         run: node --test tools/*.test.mjs

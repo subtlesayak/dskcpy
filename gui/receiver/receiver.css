@@ -126,3 +126,14 @@ summary { min-height: 44px; padding: 10px 12px; border: 1px solid #405461; borde
 #clipboard-tools > label { display: flex; align-items: center; gap: .5rem; min-height: 44px; }
 #clipboard-enable { width: 20px; height: 20px; min-height: 20px; flex: none; }
 #clipboard-text { display: block; width: 100%; min-width: 0; min-height: 5rem; font: inherit; font-size: 1rem; line-height: 1.5; padding: 8px 10px; border: 1px solid #627d8c; border-radius: 8px; color: inherit; background: #080f13; resize: vertical; }
+
+/* The local pointer marks the trackpad's next click position, not measured
+   feedback from the host. No animation or hit target covers desktop pixels. */
+#stage { position: relative; }
+#trackpad-cursor { position: absolute; z-index: 2; width: 18px; height: 18px; border: 2px solid white; border-radius: 50%; box-shadow: 0 0 0 2px black; transform: translate(-50%, -50%); pointer-events: none; }
+#display:focus-visible { outline: 3px solid #64d9fa; outline-offset: -3px; }
+@media (forced-colors: active) { #trackpad-cursor { border-color: Highlight; background: Canvas; } }
+
+.trackpad-help-only #workspace { flex-direction: column; }
+.trackpad-help-only #control-panels { width: auto; max-width: none; max-height: 40%; margin-inline-start: 0; }
+#trackpad-help { margin: 6px 0 0; }

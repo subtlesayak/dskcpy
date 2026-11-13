@@ -1,5 +1,6 @@
 import { rememberedBrowser } from './remembered.mjs';
 import { createBrowserClipboard } from './clipboard.mjs';
+import { createRelativeTrackpad } from './trackpad.mjs';
 import { receiverIsAway } from './lifecycle.mjs';
 import { BROWSER_RESUME_MS, avcCodec, avcParameters, touchPacket, scrollPacket, takeDecodedTimestamps, fitDisplay, createMediaAcknowledger, needsControlsRow, parseJoinFragment } from './protocol.mjs';
 import { createRtcReceiver } from './rtc.mjs';
@@ -84,7 +85,56 @@ const controlTrays = [
 const arrowPadPresent = ['arrows', 'arrow-controls', 'close-arrows', 'arrow-up', 'arrow-left', 'arrow-down', 'arrow-right'].every(id => $(id));
 if (arrowPadPresent) controlTrays.push({ trigger: 'arrows', panel: 'arrow-controls', first: 'arrow-up' });
 let openControlTray = null;
-let selectDrag = false, touchGesture = null;
+let selectDrag = false, touchGesture = null, trackpadMode = false;
+const trackpadPresent = ['trackpad-mode', 'trackpad-cursor', 'trackpad-help'].every(id => $(id));
+let trackMoveTimer, pendingTrackMove;
+function canSendPointer() {
+  return authenticated && header && !paused && !document.hidden && !away() && touchEnabled && !viewOnly && ws?.readyState === WebSocket.OPEN;
+}
+function flushTrackMove() {
+  clearTimeout(trackMoveTimer); trackMoveTimer = null;
+  const p = pendingTrackMove; pendingTrackMove = null;
+  if (p && canSendPointer()) send(p);
+}
+function trackpadPacket(p) {
+  if (p.type !== 'cancel' && !canSendPointer()) return false;
+  const packet = p.type === 'hover' || p.type === 'scroll'
+    ? scrollPacket(p.x, p.y, p.width, p.height, p.dx || 0, p.dy || 0)
+    : touchPacket(({ down: 0, up: 1, move: 2, cancel: 3 })[p.type], 0, p.x, p.y, p.width, p.height);
+  if (p.type === 'hover' || p.type === 'move') {
+    pendingTrackMove = packet;
+    trackMoveTimer ||= setTimeout(flushTrackMove, 16);
+    return true;
+  }
+  if (p.type === 'cancel') { clearTimeout(trackMoveTimer); trackMoveTimer = null; pendingTrackMove = null; }
+  else flushTrackMove();
+  return send(packet);
+}
+const trackpad = createRelativeTrackpad({ geometry: () => {
+  const rect = canvas.getBoundingClientRect();
+  return { width: canvas.width, height: canvas.height, cssWidth: rect.width, cssHeight: rect.height };
+}, emit: trackpadPacket, changed: paintTrackpad });
+function paintTrackpad() {
+  if (!trackpadPresent) return;
+  $('trackpad-mode').disabled = !canSendPointer(); $('trackpad-mode').hidden = viewOnly;
+  $('trackpad-mode').setAttribute('aria-pressed', String(trackpadMode));
+  $('trackpad-help').hidden = !trackpadMode || keyboardOpen || !!openControlTray;
+  document.body.classList.toggle('trackpad-help-only', trackpadMode && !keyboardOpen && !openControlTray);
+  canvas.tabIndex = trackpadMode ? 0 : -1;
+  canvas.setAttribute('aria-label', trackpadMode ? 'Remote trackpad. Arrow keys move the pointer. Enter or Space clicks. Page Up and Page Down scroll.' : 'Streamed desktop. Touch to control when input is enabled.');
+  if (trackpadMode) canvas.setAttribute('aria-describedby', 'trackpad-help'); else canvas.removeAttribute('aria-describedby');
+  const label = trackpadMode ? trackpad.dragging ? 'Release drag' : 'Start drag' : selectDrag ? 'Select and drag' : 'Scroll gestures';
+  setRailLabel('drag-mode', label); $('drag-mode').setAttribute('aria-pressed', String(trackpadMode ? trackpad.dragging : selectDrag));
+  const cursor = $('trackpad-cursor'), p = trackpad.position();
+  cursor.hidden = !trackpadMode || !canSendPointer() || !p;
+  if (!cursor.hidden) {
+    const video = canvas.getBoundingClientRect(), surface = $('stage'), stage = surface.getBoundingClientRect();
+    const sx = stage.width > 0 ? surface.clientWidth / stage.width : 1;
+    const sy = stage.height > 0 ? surface.clientHeight / stage.height : 1;
+    cursor.style.left = `${(video.left - stage.left + p.x / p.width * video.width) * sx}px`;
+    cursor.style.top = `${(video.top - stage.top + p.y / p.height * video.height) * sy}px`;
+  }
+}
 const keyboardInput = createBrowserKeyboard({ field: $('keyboard-input'), send,
   canSend: () => !keyboardBlocked && keyboardSupported && authenticated && header && !paused && !document.hidden && touchEnabled && !viewOnly,
   onError: (message) => { $('error').textContent = message; } });
@@ -96,6 +146,7 @@ const clipboardTools = $('clipboard-tools') ? createBrowserClipboard({ section: 
   canUse: canSendKeys, send, control: value => { if (!authenticated || ws?.readyState !== WebSocket.OPEN) return false; ws.send(value); return true; }, localClipboard: navigator.clipboard,
 }) : null;
 function updateArrowAvailability() {
+  paintTrackpad();
   clipboardTools?.refresh();
   if (!arrowPadPresent) return;
   $('arrows').hidden = !keyboardSupported || viewOnly;
@@ -163,6 +214,8 @@ function audioUnavailable() {
   $('error').textContent = 'Opus audio is unavailable in this browser. Video can continue.';
 }
 function releaseTouches(includeKeyboard = true) {
+  trackpad.release();
+  clearTimeout(trackMoveTimer); trackMoveTimer = null; pendingTrackMove = null;
   if (includeKeyboard) clipboardTools?.reset();
   if (includeKeyboard) keyboardInput.release();
   cancelSentTouches();
@@ -181,6 +234,7 @@ function clearMedia() {
   if (audio && audio.state !== 'closed') audio.close(); audio = null;
   clipboardTools?.setSupported(false);
   header = false; videoConfig = null; configBytes = null; audioConfig = null;
+  paintTrackpad();
 }
 function disconnect() {
   if (closing) return;
@@ -194,6 +248,7 @@ function disconnect() {
   releaseTouches(); stopAudio(); drainAudioAcks(true);
   ws?.close(4000, 'Disconnected by viewer'); ws = null;
   clearMedia();
+  trackpadMode = false; trackpad.reset();
   hideKeyboard(); keyboardSupported = false; viewOnly = false; $('keyboard').hidden = true;
   if (audioContext) void audioContext.close().catch(() => {}); audioContext = null;
   authenticated = false; header = false; muted = true; paused = false; updateArrowAvailability();
@@ -574,6 +629,10 @@ function point(event) {
   return { x: (event.clientX - rect.left) * canvas.width / rect.width, y: (event.clientY - rect.top) * canvas.height / rect.height };
 }
 canvas.addEventListener('pointerdown', (event) => {
+  if (trackpadMode) {
+    if (!canSendPointer() || event.button !== 0) return;
+    event.preventDefault(); canvas.setPointerCapture(event.pointerId); trackpad.down(event); return;
+  }
   if (!touchEnabled || paused || !header || pointers.size >= 10 || event.button !== 0) return;
   event.preventDefault();
   const used = new Set([...pointers.values()].map((p) => p.id));
@@ -592,6 +651,7 @@ canvas.addEventListener('pointerdown', (event) => {
   } else sendContact(p, [...pointers.values()].some((item) => item.sent) ? 5 : 0);
 });
 canvas.addEventListener('pointermove', (event) => {
+  if (trackpadMode) { if (canSendPointer()) { event.preventDefault(); trackpad.pointerMove(event); } return; }
   const previous = pointers.get(event.pointerId); if (!previous) return;
   event.preventDefault();
   const p = { ...previous, ...point(event), clientX: event.clientX, clientY: event.clientY }; pointers.set(event.pointerId, p);
@@ -609,6 +669,7 @@ canvas.addEventListener('pointermove', (event) => {
 });
 for (const [name, actionCode] of [['pointerup', 1], ['pointercancel', 3], ['lostpointercapture', 3]]) {
   canvas.addEventListener(name, (event) => {
+    if (trackpadMode) { event.preventDefault(); if (actionCode === 3) { if (trackpad.hasPointer(event.pointerId)) releaseTouches(); } else if (canSendPointer()) trackpad.up(event); return; }
     const p = pointers.get(event.pointerId); if (!p) return;
     if (actionCode === 3) { releaseTouches(); return; }
     event.preventDefault();
@@ -636,6 +697,11 @@ function touchCenter() {
   return center;
 }
 canvas.addEventListener('wheel', (event) => {
+  if (trackpadMode) {
+    if (!canSendPointer()) return;
+    event.preventDefault(); const scale = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? canvas.clientHeight : 1;
+    trackpad.scroll(event.deltaX * scale, event.deltaY * scale); return;
+  }
   if (!touchEnabled || paused || !header) return;
   event.preventDefault();
   const p = point(event), scale = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? canvas.clientHeight : 1;
@@ -644,9 +710,23 @@ canvas.addEventListener('wheel', (event) => {
 canvas.addEventListener('contextmenu', (event) => { if (touchEnabled && !paused) event.preventDefault(); });
 $('drag-mode').addEventListener('click', () => {
   if (viewOnly) return;
+  if (trackpadMode) { if (canSendPointer()) trackpad.toggleDrag(); return; }
   releaseTouches(); selectDrag = !selectDrag;
   setRailLabel('drag-mode', selectDrag ? 'Select and drag' : 'Scroll gestures');
   $('drag-mode').setAttribute('aria-pressed', String(selectDrag));
+});
+if (trackpadPresent) $('trackpad-mode').addEventListener('click', () => {
+  if (!canSendPointer()) return;
+  releaseTouches(); hideKeyboard(); setControlTray(); trackpadMode = !trackpadMode; fitCanvas();
+  if (trackpadMode) canvas.focus();
+});
+canvas.addEventListener('keydown', event => {
+  if (!trackpadMode || !canSendPointer() || event.altKey || event.ctrlKey || event.metaKey || event.isComposing) return;
+  const step = event.shiftKey ? 48 : 16;
+  const directions = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] };
+  if (directions[event.key]) { event.preventDefault(); trackpad.move(...directions[event.key]); }
+  else if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); if (!event.repeat) trackpad.click(); }
+  else if (event.key === 'PageUp' || event.key === 'PageDown') { event.preventDefault(); trackpad.scroll(0, event.key === 'PageUp' ? -80 : 80); }
 });
 $('disconnect').addEventListener('click', disconnect);
 $('fullscreen').addEventListener('click', async () => {
@@ -711,29 +791,31 @@ $('hide-controls').addEventListener('click', () => setControlsVisible(false));
 $('show-controls').addEventListener('click', () => setControlsVisible(true));
 function fitCanvas() {
   releaseTouches(false); // Soft-keyboard viewport changes must not cancel typing or composition.
-  $('control-panels').hidden = !(keyboardOpen || openControlTray || !$('orientation-help').hidden);
+  $('control-panels').hidden = !(keyboardOpen || openControlTray || trackpadMode || !$('orientation-help').hidden);
   const panel = $('stream-panel'), viewport = $('receiver-viewport'), padding = getComputedStyle(viewport);
   const fullHeight = viewport.clientHeight - parseFloat(padding.paddingTop) - parseFloat(padding.paddingBottom);
   const fullWidth = viewport.clientWidth - parseFloat(padding.paddingLeft) - parseFloat(padding.paddingRight);
   panel.classList.toggle('controls-reserved', document.body.classList.contains('controls-hidden')
     && needsControlsRow(canvas.width, canvas.height, fullWidth, fullHeight));
-  const bounds = $('stage').getBoundingClientRect();
-  const size = fitDisplay(canvas.width, canvas.height, bounds.width, bounds.height);
+  const stage = $('stage');
+  const size = fitDisplay(canvas.width, canvas.height, stage.clientWidth, stage.clientHeight);
   canvas.style.width = `${size.width}px`; canvas.style.height = `${size.height}px`;
   rtcDisplay.style.width = `${size.width}px`; rtcDisplay.style.height = `${size.height}px`;
+  paintTrackpad();
   const controls = $('primary-controls'), hint = $('rail-scroll-hint');
   hint.hidden = true;
   hint.hidden = !(controls.scrollHeight > controls.clientHeight + 1);
 }
-new ResizeObserver(fitCanvas).observe($('stage'));
+new ResizeObserver(fitVisualViewport).observe($('stage'));
 // Mobile browsers can resize only the visual viewport when the soft keyboard
 // opens. Fit the receiver to the visible area without releasing paired keys.
 const visualViewport = window.visualViewport;
 function fitVisualViewport() {
   // Do not counteract browser pinch zoom by fitting back to its smaller view.
   if (visualViewport?.height > 0 && (!visualViewport.scale || Math.abs(visualViewport.scale - 1) < .01)) {
-    document.documentElement?.style?.setProperty?.('--receiver-height', `${visualViewport.height}px`);
-    document.documentElement?.style?.setProperty?.('--receiver-top', `${Math.max(0, visualViewport.offsetTop || 0)}px`);
+    const zoom = parseFloat(getComputedStyle(document.documentElement).zoom) || 1;
+    document.documentElement?.style?.setProperty?.('--receiver-height', `${visualViewport.height / zoom}px`);
+    document.documentElement?.style?.setProperty?.('--receiver-top', `${Math.max(0, visualViewport.offsetTop || 0) / zoom}px`);
   }
   fitCanvas();
   // The compact field is already inside the fitted viewport. scrollIntoView

@@ -27,8 +27,9 @@
     </section>
     <p id="error" role="alert"></p>
     <section id="stream-panel" hidden aria-label="Remote desktop">
-      <div id="receiver-viewport"><div id="workspace"><div id="stage"><video id="rtc-display" autoplay playsinline muted hidden aria-label="Streamed desktop video"></video><canvas id="display" aria-label="Streamed desktop. Touch to control when input is enabled."></canvas></div>
+      <div id="receiver-viewport"><div id="workspace"><div id="stage"><video id="rtc-display" autoplay playsinline muted hidden aria-label="Streamed desktop video"></video><canvas id="display" aria-label="Streamed desktop. Touch to control when input is enabled."></canvas><span id="trackpad-cursor" hidden aria-hidden="true"></span></div>
         <div id="control-panels" hidden>
+          <p id="trackpad-help" class="subtle" hidden>Trackpad: slide one finger to move; tap to click. Use two fingers to scroll. Start drag holds the item until Release drag. Arrow keys move the pointer; Enter clicks.</p>
           <p id="orientation-help" class="subtle" role="status" hidden></p>
           <section id="keyboard-controls" hidden aria-label="Remote keyboard">
             <label class="sr-only" for="keyboard-input">Type here on the computer</label>
@@ -84,6 +85,7 @@
         <nav id="toolbar" aria-label="Stream controls">
           <div id="primary-controls">
             <button id="touch" type="button" aria-pressed="true" aria-label="Touch on" title="Touch on"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 3 6 16 3-6 6-3Z"/><path class="state-off" d="m3 21 18-18"/></svg><span class="sr-only" id="touch-label">Touch on</span></button>
+            <button id="trackpad-mode" type="button" aria-label="Trackpad mode" title="Trackpad mode" aria-pressed="false" disabled><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M3 16h18M12 16v5m-4-10 4-4 4 4m-4-4v6"/></svg><span class="sr-only">Trackpad mode</span></button>
             <button id="keyboard" type="button" aria-expanded="false" aria-controls="keyboard-controls" hidden aria-label="Keyboard" title="Keyboard"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M6 9h.01M10 9h.01M14 9h.01M18 9h.01M6 12h.01M10 12h.01M14 12h.01M18 12h.01M7 16h10"/></svg><span class="sr-only" id="keyboard-label">Keyboard</span></button>
             <button id="arrows" type="button" hidden disabled aria-expanded="false" aria-controls="arrow-controls" aria-label="Arrow keys" title="Arrow keys"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v18M3 12h18m-12-6 3-3 3 3m-6 12 3 3 3-3M6 9l-3 3 3 3m12-6 3 3-3 3"/></svg><span class="sr-only">Arrow keys</span></button>
             <button id="audio" type="button" aria-label="Audio off" aria-pressed="false" title="Audio off"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4Z"/><path class="sound-on" d="M15 8a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14"/><path class="sound-off" d="m16 9 6 6m0-6-6 6"/></svg><span class="sr-only" id="audio-label">Audio off</span></button>
