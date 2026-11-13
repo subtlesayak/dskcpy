@@ -305,6 +305,7 @@ function connect(key = null, requestedMode = preferredMode) {
         remembered.authenticated(viewOnly);
         keyboardSupported = message.keyboard === true && !viewOnly;
         focusSupported = keyboardSupported && message.textFocus === true;
+        if (focusSupported) ws.send('text-focus-subscribe');
         if (!focusSupported) autoKeyboard = false;
         if (autoToggle) autoToggle.checked = autoKeyboard;
         if (autoSetting) autoSetting.hidden = !focusSupported;

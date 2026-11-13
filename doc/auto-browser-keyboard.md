@@ -24,7 +24,11 @@ all pixels or all applications.
 The opt-in host reports a fixed `DSKCPY_TEXT_FOCUS` 0/1/unknown marker through its
 existing stdout pipe on changes or remote clicks. The controller consumes that
 marker separately from logs, bounds the hint rate, and sends only a boolean/null
-advisory message to the matching authenticated browser. Old native hosts omit the
+advisory message to the matching authenticated browser after that viewer sends
+`text-focus-subscribe` in response to the advertised capability. Each new or
+resumed socket must subscribe separately. Older cached viewers never receive
+the optional message, so a host upgrade cannot disconnect them for an unknown
+message type. Old native hosts omit the
 flag and capability; Android and the native SRD1/input wire are unchanged. The
 hint grants no input access and is ignored while paused, hidden, view-only,
 touch-disabled, disconnected or already typing. Repeated hints do not refocus or

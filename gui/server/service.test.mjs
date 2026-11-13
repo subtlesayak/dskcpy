@@ -737,6 +737,9 @@ test('current native child focus metadata reaches only its capable browser and i
   const port=Number(child.args.find(x=>x.startsWith('--reverse-socket=')).split('=')[1]);
   const native=net.connect(port,'127.0.0.1');native.on('error',()=>{});t.after(()=>native.destroy());await once(native,'connect');
   native.write(Buffer.from('535244310000000100000280000001e0','hex'));
+  await waitFor(() => messages.some(m => m.type === 'authenticated'));
+  const subscribed = once(native, 'data');
+  ws.send('text-focus-subscribe'); ws.send(Buffer.from([8,2,0,0,0])); await subscribed;
   child.child.stdout.write('DSKCPY_TEXT_');child.child.stdout.write('FOCUS 1\n');
   await waitFor(()=>messages.some(m=>m.type==='text-focus'));
   assert.deepEqual(messages.find(m=>m.type==='text-focus'),{type:'text-focus',focused:true});

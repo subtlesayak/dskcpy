@@ -706,6 +706,7 @@ for (const [elapsed, expectedSockets] of [[180000,2],[300001,1]]) {
 
 test('editable-focus hints open typing only after opt-in and never refocus an open IME', (t) => {
   let shown=0; const h=receiver(t,{keyboard:true,textFocus:true,virtualKeyboard:{show(){shown++;},boundingRect:{height:0}}});
+  assert.equal(h.socket.sent.filter(m => m === 'text-focus-subscribe').length, 1);
   const hint=focused=>h.socket.emit('message',{data:JSON.stringify({type:'text-focus',focused})});
   hint(true);assert.notEqual(h.$('keyboard').attrs.get('aria-expanded'),'true');
   h.$('auto-keyboard').checked=true;h.$('auto-keyboard').emit('change');
@@ -728,6 +729,7 @@ test('auto keyboard keeps manual fallback without VirtualKeyboard API and cannot
   assert.equal(h.$('keyboard').attrs.get('aria-expanded'),'true');assert.equal(h.$('auto-keyboard-feedback').hidden,false);
   for(const policy of [{keyboard:true},{keyboard:true,textFocus:true,viewOnly:true}]){
     const denied=receiver(t,policy);denied.$('auto-keyboard').checked=true;denied.$('auto-keyboard').emit('change');
+    assert.equal(denied.socket.sent.includes('text-focus-subscribe'), false);
     denied.socket.emit('message',{data:JSON.stringify({type:'text-focus',focused:true})});
     assert.notEqual(denied.$('keyboard').attrs.get('aria-expanded'),'true');
     assert.equal(denied.$('auto-keyboard-setting').hidden,true);
