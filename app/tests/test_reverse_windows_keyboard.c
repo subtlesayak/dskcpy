@@ -24,9 +24,8 @@ int main(void) {
     sc_windows_keyboard_mapping(79,&event);assert(event.code==0x4d&&event.extended);
     sc_windows_keyboard_mapping(228,&event);assert(event.code==0x1d&&event.extended);
     sc_windows_keyboard_mapping(224,&event);assert(event.code==0x1d&&!event.extended);
-    // Num Lock's physical set-1 code is 0045. E045 in the Windows table
-    // denotes its legacy-message representation, not the mapping API's code.
-    sc_windows_keyboard_mapping(83,&event);assert(event.code==0x45&&!event.extended);
+    // Keep Num Lock distinct from Pause's 45 representation at injection.
+    sc_windows_keyboard_mapping(83,&event);assert(event.code==0x45&&event.extended);
     assert(sc_windows_keyboard_key(&state,0,224,1)==SC_WINDOWS_KEY_OK);
     assert(sc_windows_keyboard_key(&state,0,4,1)==SC_WINDOWS_KEY_OK);
     assert(sc_windows_keyboard_key(&state,0,4,1)==SC_WINDOWS_KEY_OK); // Repeat.
@@ -88,13 +87,21 @@ int main(void) {
     for(int i=0;i<layout_count;i++)if(((uintptr_t)layouts[i]&0xffff)==0x0409){
         const struct {UINT vk;uint16_t usage;} pairs[]={
             {'A',4},{VK_RIGHT,79},{VK_LEFT,80},{VK_DELETE,76},{VK_RCONTROL,228},{VK_RMENU,230},{VK_LWIN,227},{VK_F11,68},{VK_NUMLOCK,83}};
+        bool mappings_match=true;
         for(size_t j=0;j<sizeof(pairs)/sizeof(pairs[0]);j++){
             UINT scan=MapVirtualKeyExW(pairs[j].vk,MAPVK_VK_TO_VSC_EX,layouts[i]);
             assert(sc_windows_keyboard_mapping(pairs[j].usage,&event));
-            if(event.code!=(scan&0xff)||event.extended!=((scan&0xff00)==0xe000))
-                fprintf(stderr,"Mapping mismatch: usage=%u vk=%u native=%04x planned=%04x\n",(unsigned)pairs[j].usage,pairs[j].vk,scan,(unsigned)(event.code|(event.extended?0xe000:0)));
-            assert(event.code==(scan&0xff));assert(event.extended==((scan&0xff00)==0xe000));
+            UINT planned=event.code|(event.extended?0xe000:0);
+            UINT translated=MapVirtualKeyExW(planned,MAPVK_VSC_TO_VK_EX,layouts[i]);
+            // The CI desktop returns base-only VK_TO_VSC_EX codes for arrows.
+            // Check the base code AND reverse translation of our full input
+            // instead: dropping E0 must not turn an arrow into a keypad key.
+            if(event.code!=(scan&0xff)||translated!=pairs[j].vk){
+                fprintf(stderr,"Mapping mismatch: usage=%u vk=%u native=%04x planned=%04x reverse=%u\n",(unsigned)pairs[j].usage,pairs[j].vk,scan,planned,translated);
+                mappings_match=false;
+            }
         }
+        assert(mappings_match);
         checked=true;break;
     }
     puts(checked?"Windows scan mappings checked without posting input":"US-layout comparison skipped; no layouts installed by test");
