@@ -59,9 +59,14 @@ try { for (const variant of [{ width: 390, height: 844 }, { width: 844, height: 
     assert.equal(inputs.length, before, 'editing a shortcut sends no keys');
     await page.locator('#shortcut-status').getByText(variant.storageDenied ? /storage is unavailable/ : /Saved in this browser/).waitFor();
     if (!variant.storageDenied) {
-      await page.reload(); await until(() => page.locator('#display').evaluate(c => c.width === 640)); await open();
+      await page.reload(); await until(() => page.locator('#display').evaluate(c => c.width === 640));
+      if (variant.rtl) await page.locator('html').evaluate(el => el.dir = 'rtl');
+      if (variant.zoom) await page.locator('html').evaluate((el, z) => el.style.zoom = z, variant.zoom);
+      await open();
       assert.equal(await page.locator('#shortcut-0').textContent(), 'Ctrl + Shift + S');
     } else await page.locator('#shortcut-customize summary').click();
+    if (variant.rtl) assert.equal(await page.locator('html').getAttribute('dir'), 'rtl');
+    if (variant.zoom) assert.equal(await page.locator('html').evaluate(el => parseFloat(el.style.zoom)), variant.zoom);
     const start = inputs.length;
     await page.getByRole('button', { name: 'Send Ctrl + Shift + S', exact: true }).click();
     await until(() => inputs.length >= start + 2);
