@@ -841,6 +841,12 @@ export function createControlService({
             || (['approve', 'reject', 'revoke'].includes(body.action) && !/^[a-f0-9]{32}$/.test(body.id))) throw new Error('Invalid device action.');
         writeJson(response, 200, await browserReceiver.trustAction(body.action, body.id)); return;
       }
+      if (request.method === 'POST' && url.pathname === '/api/browser/prepare') {
+        const body = await readJson(request);
+        if (body.mode !== 'internet' || shuttingDown || state.running || startAttempt || browserPreparation
+            || browserReceiver.status().waiting || browserReceiver.status().connected) throw Error('Receiver preparation is unavailable.');
+        writeJson(response, 200, await browserReceiver.prepare()); return;
+      }
       if (request.method === 'POST' && url.pathname === '/api/browser/invite') {
         writeJson(response, 201, await prepareBrowser(await readJson(request)));
         return;

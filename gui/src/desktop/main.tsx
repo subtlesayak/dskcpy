@@ -5,9 +5,9 @@ import QRCode from 'qrcode';
 import { ArrowRight, Check, Copy, Monitor, ShieldCheck, Square, Wifi, Usb } from 'lucide-react';
 import './style.css';
 
-type Phase = 'usb-tool' | 'usb-device' | 'usb-authorize' | 'usb-select' | 'checking' | 'installation' | 'screen-permission' | 'control-permission' | 'network' | 'route-conflict' | 'private-link' | 'ready' | 'preparing' | 'inviting' | 'sharing' | 'error';
+type Phase = 'checking-link' | 'usb-tool' | 'usb-device' | 'usb-authorize' | 'usb-select' | 'checking' | 'installation' | 'screen-permission' | 'control-permission' | 'network' | 'route-conflict' | 'private-link' | 'ready' | 'preparing' | 'inviting' | 'sharing' | 'error';
 type Snapshot = { phase: Phase; connection?: 'internet' | 'usb';
-  usb?: { available: boolean; error: boolean; selected: string | null; devices: { id: string; name: string; state: 'ready' | 'unauthorized' | 'offline' }[] }; permissions: { screen: boolean; control: boolean }; route: { connected: boolean; ready: boolean; conflict: boolean };
+  usb?: { available: boolean; error: boolean; selected: string | null; devices: { id: string; name: string; state: 'ready' | 'unauthorized' | 'offline' }[] }; permissions: { screen: boolean; control: boolean }; route: { connected: boolean; ready: boolean; conflict: boolean; verified?: boolean | null };
   startup?: { available: boolean; requested: boolean; enabled: boolean; requiresApproval: boolean; error: string | null };
   features: { keyboard: boolean; clipboard?: boolean }; clipboardAllowed?: boolean; error: string | null; invitation: { joinUrl: string; expiresAt: number; openedOnPhone?: boolean } | null; canStop: boolean };
 type HostAPI = { setClipboardAllowed?(allowed: boolean): Promise<Snapshot>; setConnection?(connection: 'internet' | 'usb'): Promise<Snapshot>; selectUsbDevice?(id: string): Promise<Snapshot>; trustedList?(): Promise<TrustedDevices>; trustedAction?(action: DeviceAction, id?: string): Promise<TrustedDevices>; snapshot(): Promise<Snapshot>; start(): Promise<Snapshot>; stop(): Promise<Snapshot>; refresh(): Promise<Snapshot>;
@@ -27,7 +27,8 @@ const copy: Record<Phase, { title: string; description: string; action?: string 
   'route-conflict': { title: 'This private address is already in use', description: 'Another app uses the connection address dskcpy needs. Its settings have been kept. Ask the person who set up Tailscale to choose a dedicated address for dskcpy.' },
   'private-link': { title: 'Set up your private connection', description: 'Do this once to let your connected Tailscale devices reach dskcpy. You choose when screen sharing starts.', action: 'Set up connection' },
   ready: { title: 'Your computer, wherever you are', description: 'Start sharing, then send the link or scan the QR on your other device. Keep this computer awake and connected.', action: 'Start sharing' },
-  preparing: { title: 'Preparing your connection…', description: 'Waiting for your other device to connect. Use Cancel invitation below to stop.' },
+  'checking-link': { title: 'Checking your private link', description: 'Making sure the secure receiver page answers before preparing your QR. Keep Tailscale connected on this computer.' },
+  preparing: { title: 'Preparing your connection…', description: 'Checking this computer and preparing the receiver. Use Cancel invitation to stop.' },
   inviting: { title: 'Open this on your other device', description: 'Keep Tailscale connected there. Scan this QR with its camera, or send the private link.' },
   sharing: { title: 'Your screen is being shared', description: 'The connected device can see your whole screen, hear desktop audio and use mouse and keyboard. Stop sharing to end its access.' },
   error: { title: 'Let’s get you connected', description: 'Sharing could not start. Check your setup and try again.', action: 'Try again' },
@@ -73,12 +74,13 @@ function App() {
     };
     await run(actions[phase]);
   }
-  const content = usb && phase === 'ready' ? { title: 'Share with your USB phone', description: 'Start sharing opens the phone browser with access to view your whole screen, hear desktop audio and control this computer. Keep the phone unlocked and connected. No QR or account is needed.', action: 'Start sharing' }
+  const content = phase === 'inviting' && !state?.invitation ? { title: 'Waiting for the receiver', description: 'A connection is already being prepared. Wait for your receiving browser, or cancel the invitation to try again.' }
+    : usb && phase === 'ready' ? { title: 'Share with your USB phone', description: 'Start sharing opens the phone browser with access to view your whole screen, hear desktop audio and control this computer. Keep the phone unlocked and connected. No QR or account is needed.', action: 'Start sharing' }
     : usb && phase === 'inviting' ? { title: 'Continue on your phone', description: state?.invitation?.openedOnPhone ? 'The receiver opened on your phone. Choose a browser if Android asks. Keep the cable connected.' : 'The USB connection is ready, but the phone browser did not open. Copy the USB link and paste it into the browser on that connected phone.' }
-    : copy[phase]; const setup = !['ready', 'preparing', 'inviting', 'sharing'].includes(phase);
+    : copy[phase]; const setup = !['ready', 'preparing', 'checking-link', 'inviting', 'sharing'].includes(phase);
   return <div className="host-app">
     <header><span className="brand"><Monitor aria-hidden="true" size={22} /> dskcpy</span>
-      {(phase === 'inviting' || phase === 'preparing') && state?.canStop
+      {(phase === 'inviting' || phase === 'preparing' || phase === 'checking-link') && state?.canStop
         ? <button className="secondary" disabled={stopping} onClick={stopSharing}>Cancel invitation</button>
         : <span className="private-badge"><ShieldCheck aria-hidden="true" size={16} /> Private sharing</span>}</header>
     <main>
@@ -93,7 +95,7 @@ function App() {
       <p className="description">{state?.error || (phase === 'sharing' && !state?.features.keyboard
         ? 'The connected device can see your whole screen, hear desktop audio and use the mouse. Stop sharing to end its access.' : content.description)}</p>
       {setup && state && <ol className="setup-list" aria-label="Setup progress">
-        {[['Screen access', state.permissions.screen], ['Mouse and keyboard', state.permissions.control], [usb ? 'USB phone' : 'Private connection', usb ? Boolean(state.usb?.selected) : state.route.ready]].map(([label, done], i) =>
+        {[['Screen access', state.permissions.screen], ['Mouse and keyboard', state.permissions.control], [usb ? 'USB phone' : 'Private connection', usb ? Boolean(state.usb?.selected) : state.route.ready && state.route.verified !== false]].map(([label, done], i) =>
           <li key={String(label)}><span className={done ? 'step done' : 'step'}>{done ? <Check aria-hidden="true" size={15} /> : i + 1}</span><span>{label}{done && <span className="sr-only">: ready</span>}</span></li>)}
       </ol>}
       {usb && !state?.canStop && !!state?.usb?.devices.length && <fieldset className="usb-phones" disabled={pending || stopping}>
@@ -101,7 +103,7 @@ function App() {
         {state.usb.devices.map((device, index) => <label key={device.id}><input type="radio" name="usb-phone" checked={state.usb?.selected === device.id} disabled={device.state !== 'ready'} onChange={() => run(() => api!.selectUsbDevice!(device.id))} />
           <span><bdi>{device.name}</bdi> · {index + 1}<small>{device.state === 'ready' ? 'USB debugging allowed' : device.state === 'unauthorized' ? 'Allow USB debugging on this phone' : 'Unlock and reconnect this phone'}</small></span></label>)}
       </fieldset>}
-      {phase === 'inviting' && <section className="invitation" aria-label="Connection invitation">
+      {phase === 'inviting' && state?.invitation && <section className="invitation" aria-label="Connection invitation">
         {!usb && (qr ? <img className="qr" src={qr} width="256" height="256" alt="Scan with your other device’s camera to connect. You can also copy the private link below." /> : <p>Preparing QR…</p>)}
         <button className="primary" disabled={pending || stopping} onClick={() => run(async generation => {
           const copied = await api?.copyInvitation(); if (generation !== operation.current) return; setNotice(copied ? (usb ? 'USB link copied. Paste it only into the browser on the connected phone.' : 'Private link copied. Send it only to the person you want to connect.') : 'This invitation expired. Stop and start sharing for a new link.');
@@ -117,7 +119,7 @@ function App() {
       {['inviting', 'sharing'].includes(phase) && state?.clipboardAllowed && <p className="hint">Text clipboard tools are allowed for this invitation. Stop sharing to end clipboard access.</p>}
       <div className="actions">
         {content.action && <button className="primary" disabled={!api || pending || stopping} onClick={primary}>{content.action}<ArrowRight aria-hidden="true" size={19} /></button>}
-        {state?.canStop && !['inviting', 'preparing'].includes(phase) && <button className="stop" disabled={stopping} onClick={stopSharing}><Square size={16} aria-hidden="true" />Stop sharing</button>}
+        {state?.canStop && !['inviting', 'preparing', 'checking-link'].includes(phase) && <button className="stop" disabled={stopping} onClick={stopSharing}><Square size={16} aria-hidden="true" />Stop sharing</button>}
         {setup && <button className="secondary" disabled={!api || pending || stopping} onClick={() => run(api?.refresh)}>Check again</button>}
       </div>
       {!usb && deviceAPI.current && <TrustedDevicesPanel api={deviceAPI.current} />}

@@ -20,7 +20,7 @@ export async function verifyBundle(resources) {
   const packageJson = JSON.parse(await readFile(path.join(app, 'package.json'), 'utf8'));
   if (packageJson.main !== 'desktop/main.cjs') throw Error('Wrong desktop entry');
   const required = ['desktop/main.cjs', 'desktop/preload.cjs', 'desktop/service-entry.cjs',
-    'desktop/host-controller.mjs', 'desktop/owned-backend.mjs', 'desktop/private-route.mjs', 'desktop/startup-preference.mjs', 'desktop/usb-devices.mjs',
+    'desktop/host-controller.mjs', 'desktop/owned-backend.mjs', 'desktop/receiver-probe.mjs', 'desktop/private-route.mjs', 'desktop/startup-preference.mjs', 'desktop/usb-devices.mjs',
     'gui/server/service.mjs', 'gui/server/native-startup.mjs', 'gui/server/trusted-devices.mjs', 'gui/server/browser-clipboard.mjs', 'gui/receiver/trackpad.mjs', 'gui/receiver/clipboard.mjs', 'gui/receiver/remembered.mjs', 'gui/receiver/lifecycle.mjs', 'gui/receiver/receiver.mjs', 'gui/dist-desktop/desktop/index.html', 'gui/dist/index.html'];
   for (const relative of required) {
     const file = path.join(app, relative);

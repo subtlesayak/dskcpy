@@ -1,8 +1,10 @@
+import { probePrivateReceiver, receiverProbeMessage } from './receiver-probe.mjs';
 import { browserJoinUrl } from '../gui/receiver/protocol.mjs';
 
-export function hostPhase({ status, permissions, route, runtimeReady, busy, error, checked, connection = 'internet', usb }) {
+export function hostPhase({ status, permissions, route, runtimeReady, busy, error, checked, connection = 'internet', usb, linkChecking }) {
   // A newly failed check never hides the stop action for an owned session.
   if (status?.browser?.connected || status?.running) return 'sharing';
+  if (busy && linkChecking) return 'checking-link';
   if (status?.browser?.waiting) return 'inviting';
   if (busy) return 'preparing';
   if (error) return 'error';
@@ -40,8 +42,8 @@ export function validateInvitation(invitation, expectedOrigin, now = Date.now(),
 }
 
 export class HostController {
-  constructor({ backend, checkSetup, now = Date.now, onChange = () => {} }) {
-    this.backend = backend; this.checkSetup = checkSetup; this.now = now; this.onChange = onChange;
+  constructor({ backend, checkSetup, probeReceiver = probePrivateReceiver, now = Date.now, onChange = () => {} }) {
+    this.backend = backend; this.checkSetup = checkSetup; this.probeReceiver = probeReceiver; this.probeAbort = null; this.linkChecking = false; this.linkVerified = null; this.now = now; this.onChange = onChange;
     this.status = null; this.permissions = { screen: false, control: false };
     this.route = { connected: false, ready: false }; this.runtimeReady = false;
     this.features = { keyboard: false, clipboard: false }; this.clipboardAllowed = false;
@@ -56,7 +58,7 @@ export class HostController {
       connection: this.connection, usb: { ...this.usb, devices: this.usb.devices.map(device => ({ ...device })) },
       clipboardAllowed: this.clipboardAllowed,
       features: { ...this.features },
-      route: { connected: this.route.connected, ready: this.route.ready, conflict: Boolean(this.route.conflict) },
+      route: { connected: this.route.connected, ready: this.route.ready, conflict: Boolean(this.route.conflict), verified: this.linkVerified },
       error: this.error, invitation: phase === 'inviting' ? this.invitation : null,
       canStop: Boolean(this.busy || this.status?.running || this.status?.browser?.waiting || this.status?.browser?.connected) };
   }
@@ -98,7 +100,7 @@ export class HostController {
   async setConnection(connection) {
     if (!['internet', 'usb'].includes(connection)) throw Error('Choose a supported connection.');
     if (this.closed || this.snapshot().canStop) return this.snapshot();
-    ++this.generation; this.connection = connection; this.clipboardAllowed = false; this.checked = false; this.error = null; this.invitation = null;
+    ++this.generation; this.linkVerified = null; this.connection = connection; this.clipboardAllowed = false; this.checked = false; this.error = null; this.invitation = null;
     this.emit(); return this.refresh({ setup: true });
   }
   selectUsbDevice(id) {
@@ -120,27 +122,54 @@ export class HostController {
     const mine = ++this.generation; this.busy = true; this.error = null; this.emit();
     const record = { generation: mine };
     record.promise = (async () => {
-      let requested = false;
+      let requested = false, probeFailure = null, probeAbort;
       try {
         await this.refresh({ setup: true });
         if (mine !== this.generation || this.closed) return this.snapshot();
         if (hostPhase({ ...this, busy: false }) !== 'ready') return this.snapshot();
+        if (this.connection === 'internet') {
+          probeAbort = new AbortController(); this.probeAbort = probeAbort;
+          this.linkChecking = true; this.linkVerified = false; this.emit();
+          const descriptor = await this.backend.prepareReceiver();
+          if (mine !== this.generation || this.closed) return this.snapshot();
+          const checked = await this.probeReceiver(descriptor, this.route.origin, { signal: probeAbort.signal });
+          if (mine !== this.generation || this.closed) return this.snapshot();
+          // A remembered receiver may have connected during this check. It is
+          // stronger evidence than a local probe and must never be replaced.
+          this.status = await this.backend.status();
+          if (mine !== this.generation || this.closed) return this.snapshot();
+          if (this.status?.running || this.status?.browser?.waiting || this.status?.browser?.connected) { this.linkVerified = true; return this.snapshot(); }
+          if (checked?.ready !== true) { probeFailure = receiverProbeMessage(checked?.reason); throw Error('Private receiver check failed'); }
+          this.linkChecking = false; this.linkVerified = true;
+        }
         requested = true;
         const result = await this.backend.invite({ mode: this.connection, ...(this.clipboardAllowed ? { clipboard: true } : {}), ...(this.connection === 'usb' ? { device: this.usb.selected } : {}) });
         if (mine !== this.generation || this.closed) return this.snapshot();
         this.invitation = validateInvitation(result, this.connection === 'usb' ? 'http://127.0.0.1:27180' : this.route.origin, this.now(), this.connection);
         this.status = result.status || await this.backend.status();
       } catch {
+        // A remembered receiver may win the race between the last status check
+        // and invitation creation. A failed new Start must not stop that stream.
+        if (mine === this.generation && !this.closed) {
+          try {
+            const latest = await this.backend.status();
+            if (mine !== this.generation || this.closed) return this.snapshot();
+            if (latest?.running || latest?.browser?.connected || (!requested && latest?.browser?.waiting)) {
+              this.status = latest; this.invitation = null; this.error = null; this.linkVerified = true; return this.snapshot();
+            }
+          } catch { /* Keep the original fixed guidance, never raw diagnostics. */ }
+        }
         // A timed-out preparation must not leave an invitation behind. This
         // backend is the app's owned child, never a discovered running service.
         if (requested && mine === this.generation) await this.backend.stop().catch(() => {});
         if (mine === this.generation && !this.closed) {
           this.invitation = null; this.clipboardAllowed = false;
-          this.error = this.connection === 'usb' ? 'Sharing could not start. Unlock and authorize the USB phone, then check again. Another sharing app may already be using the connection.'
-            : 'Sharing could not start. Check the connection setup, then try again.';
+          this.error = probeFailure || (this.connection === 'usb' ? 'Sharing could not start. Unlock and authorize the USB phone, then check again. Another sharing app may already be using the connection.'
+            : 'Sharing could not start. Check the connection setup, then try again.');
         }
       } finally {
-        if (mine === this.generation) this.busy = false;
+        if (this.probeAbort === probeAbort) this.probeAbort = null;
+        if (mine === this.generation) { this.busy = false; this.linkChecking = false; }
         this.emit();
       }
       return this.snapshot();
@@ -149,13 +178,13 @@ export class HostController {
     return record.promise;
   }
   async stop() {
-    ++this.generation; this.busy = false; this.invitation = null; this.clipboardAllowed = false; this.error = null;
+    ++this.generation; this.probeAbort?.abort(); this.probeAbort = null; this.linkChecking = false; this.linkVerified = null; this.busy = false; this.invitation = null; this.clipboardAllowed = false; this.error = null;
     await this.backend.stop();
     return this.refresh();
   }
   async close() {
     if (this.closed) return;
-    this.closed = true; ++this.generation; this.invitation = null;
+    this.closed = true; ++this.generation; this.probeAbort?.abort(); this.probeAbort = null; this.linkChecking = false; this.invitation = null;
     await this.backend.shutdown();
   }
 }

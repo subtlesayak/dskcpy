@@ -17,6 +17,7 @@ tray; Stop remains available there. Quit confirms ending an owned session.
 - Separate React setup entry, permission guidance, component readiness, private
   route detection, one Start sharing action, QR and Copy private link, cancel
   and Stop actions. Keyboard capability is reported by the native backend.
+- Private Start checks the owned receiver’s HTTPS response before creating a QR; Cancel stays available, failures give fixed guidance, and USB skips this network check. See [private link check](../doc/private-link-check.md).
 - Temporary invitations use the existing authenticated browser receiver. Keys
   remain in memory and disappear from the UI on connection/expiry. Copying a
   link is an explicit action; links are not written to settings or diagnostics.
