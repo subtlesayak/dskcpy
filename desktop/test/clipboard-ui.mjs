@@ -48,6 +48,8 @@ try { for(const variant of [{width:390,height:844,rtl:false},{width:844,height:3
     await page.screenshot({path:path.join(output,`clipboard-${variant.width}-${variant.rtl}.png`),fullPage:true});
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
     assert.ok(!JSON.stringify(receiver.status()).includes('paste fixture'));
+    await page.setViewportSize({width:844,height:220});await field.scrollIntoViewIfNeeded();await field.focus();const bounds=await field.boundingBox();assert.ok(bounds && bounds.y>=0 && bounds.y+bounds.height<=220,'clipboard input must remain reachable in a keyboard-sized viewport');
+    await page.setViewportSize({width:variant.width,height:variant.height});
     holdRead=true;await page.getByRole('button',{name:'Read computer clipboard',exact:true}).click();await until(()=>Boolean(held));
     await page.getByRole('button',{name:'Pause video',exact:true}).click();assert.equal(await field.inputValue(),'');assert.equal(await toggle.isChecked(),false);
     respond(held,'stale private fixture');await page.getByRole('button',{name:'Resume video',exact:true}).click();assert.equal(await field.inputValue(),'');

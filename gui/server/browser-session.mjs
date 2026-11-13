@@ -29,6 +29,7 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
   function keyboardStatus(status) {
     if (!keyboard || viewOnly || !['ready','blocked','unsupported'].includes(status) || closed) return;
     lastKeyboardStatus = status;
+    if (status === 'blocked') clipboardBroker.disable();
     if (ready && keyboardStatusSubscribed && !suspended && peer?.readyState === WebSocket.OPEN && peer.bufferedAmount <= MAX_PACKET)
       peer.send(JSON.stringify({type:'keyboard-status',status}));
   }

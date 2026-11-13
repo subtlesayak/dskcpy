@@ -163,7 +163,7 @@ function audioUnavailable() {
   $('error').textContent = 'Opus audio is unavailable in this browser. Video can continue.';
 }
 function releaseTouches(includeKeyboard = true) {
-  clipboardTools?.reset();
+  if (includeKeyboard) clipboardTools?.reset();
   if (includeKeyboard) keyboardInput.release();
   cancelSentTouches();
   pointers.clear();

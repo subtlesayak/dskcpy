@@ -611,3 +611,13 @@ test('a remembered grant cannot carry clipboard permission even if an internal c
   const ws=new WebSocket(invitation.url.replace('http:','ws:')+'stream',{origin:grant.origin});ws.on('error',()=>{});t.after(()=>ws.terminate());await once(ws,'open');
   const first=once(ws,'message');ws.send(invitation.key);const [bytes,binary]=await first;assert.equal(binary,false);assert.equal(JSON.parse(bytes).clipboard,false);
 });
+
+test('native keyboard denial cancels clipboard and suppresses its queued private result',async t=>{
+  const {clipboardRequest}=await import('../receiver/clipboard.mjs');
+  const f=await fixture(t,{inputPolicy:{keyboard:true,clipboard:true}}),ws=await login(f),input=[];f.native().on('data',b=>input.push(b));
+  ws.send('keyboard-status-subscribe');ws.send('clipboard-enable');ws.send(clipboardRequest(0,1));
+  await until(()=>Buffer.concat(input).includes(Buffer.from(clipboardRequest(0,1))));f.bridge().keyboardStatus('blocked');
+  await until(()=>Buffer.concat(input).includes(Buffer.from([10,3,0,0,0,0,0,0])));
+  const bytes=Buffer.from('not delivered'),p=Buffer.alloc(8+bytes.length);p.writeUInt32BE(1,2);p.writeUInt16BE(bytes.length,6);bytes.copy(p,8);f.native().write(packet(0,32,p));
+  await new Promise(r=>setTimeout(r,15));assert.ok(!ws.received.some(m=>!m.binary&&m.data.includes('clipboard-result')));assert.equal(ws.readyState,WebSocket.OPEN);
+});

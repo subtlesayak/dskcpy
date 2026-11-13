@@ -628,7 +628,8 @@ static void mac_clipboard_tick(struct mac_state *s) {
     sc_mutex_lock(&s->keyboard_mutex);
     if (s->clipboard_pending) {
         bool allowed = s->clipboard_enabled && s->keyboard_enabled && !s->window_id && !mac_session_ended(s)
-            && !atomic_load(&s->paused) && AXIsProcessTrusted() && mac_display_matches(s);
+            && !atomic_load(&s->paused) && !atomic_load(&s->keyboard_release_pending)
+            && AXIsProcessTrusted() && mac_display_matches(s);
         size = sc_reverse_clipboard_process(&s->clipboard_request, allowed, &callbacks, s, output);
         s->clipboard_pending = false; memset(&s->clipboard_request, 0, sizeof(s->clipboard_request));
     }

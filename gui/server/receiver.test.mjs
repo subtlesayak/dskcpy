@@ -838,3 +838,10 @@ test('browser clipboard denial has a manual fallback and late local reads cannot
   f.window.emit('blur');release('stale local fixture');await pending;
   assert.equal(f.$('clipboard-text').value,'');assert.equal(f.$('clipboard-enable').checked,false);assert.equal(f.socket.sent.filter(x=>Buffer.isBuffer(x)&&x[0]===10).length,0);
 });
+
+test('soft-keyboard viewport changes preserve clipboard preparation without weakening blur cleanup',t=>{
+  const f=receiver(t,{keyboard:true,clipboard:true,visualHeight:600});f.$('clipboard-enable').checked=true;f.$('clipboard-enable').emit('change');f.$('clipboard-text').value='prepared fixture';
+  f.reflow();f.window.visualViewport.height=220;f.window.visualViewport.emit('resize');
+  assert.equal(f.$('clipboard-text').value,'prepared fixture');assert.equal(f.$('clipboard-enable').checked,true);
+  f.window.emit('blur');assert.equal(f.$('clipboard-text').value,'');assert.equal(f.$('clipboard-enable').checked,false);
+});

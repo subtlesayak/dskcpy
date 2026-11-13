@@ -1685,7 +1685,8 @@ static void reverse_receiver_on_clipboard(struct sc_receiver *receiver, const st
     sc_mutex_lock(&s->touch_mutex);
     bool allowed = s->options->reverse_clipboard && s->options->reverse_keyboard && s->options->reverse_socket
         && s->clipboard_window && !atomic_load(&s->stopped) && !atomic_load(&s->fatal_error)
-        && !atomic_load(&s->video_paused) && atomic_load(&s->stream_ready);
+        && !atomic_load(&s->video_paused) && atomic_load(&s->stream_ready)
+        && !s->keyboard.blocked && !s->keyboard.release_pending;
     size_t size = sc_reverse_clipboard_process(&msg->reverse_clipboard, allowed, &callbacks, s, output);
     sc_mutex_unlock(&s->touch_mutex);
     if (size && !atomic_load(&s->stopped)) {
