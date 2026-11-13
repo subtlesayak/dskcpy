@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { verifyRuntimePayload } from './payload-integrity.mjs';
 import { isolatedWindowsEnvironment } from './collect-windows-runtime.mjs';
 import { readFile, stat } from 'node:fs/promises';
 import { createRequire } from 'node:module';
@@ -11,6 +12,9 @@ const execute = promisify(execFile);
 export async function verifyBundle(resources) {
   const app = path.resolve(resources, 'app'), host = path.resolve(resources, 'host');
   const manifest = JSON.parse(await readFile(path.join(host, 'build-manifest.json'), 'utf8'));
+  // Validate all first-party code/assets and native runtime before importing
+  // bundled modules or executing even --help from the candidate.
+  const payload = await verifyRuntimePayload(path.resolve(resources), manifest);
   const packageJson = JSON.parse(await readFile(path.join(app, 'package.json'), 'utf8'));
   if (packageJson.main !== 'desktop/main.cjs') throw Error('Wrong desktop entry');
   const required = ['desktop/main.cjs', 'desktop/preload.cjs', 'desktop/service-entry.cjs',
@@ -38,7 +42,7 @@ export async function verifyBundle(resources) {
   const { stdout } = await execute(native, ['--help'], { timeout: 10000, killSignal: 'SIGKILL', maxBuffer: 1024 * 1024,
     cwd: host, env: process.platform === 'win32' ? isolatedWindowsEnvironment(process.env, path.join(host, 'bin')) : { ...process.env, PATH: '/usr/bin:/bin' } });
   if (!stdout.includes('--reverse-socket')) throw Error('Packaged native cannot load');
-  return { requiredSourceFiles: required.length, backendDependenciesBundled: true, backendModuleLoad: true,
+  return { ...payload, requiredSourceFiles: required.length, backendDependenciesBundled: true, backendModuleLoad: true,
     nativeHashMatches: true, nativeHelp: true, desktopLaunched: false, captureStarted: false, hardwareQualified: false };
 }
 if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) {

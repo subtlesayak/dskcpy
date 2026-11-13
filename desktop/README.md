@@ -61,6 +61,15 @@ installs production dependencies from the GUI lockfile, checks native `--help`
 from the staged location and writes a hashed inventory. The Mac check requires
 arm64, deployment targets no newer than 13.0 and system-only dynamic linkage.
 Windows checks staged DLL loading without relying on an external MSYS PATH.
+Before any bundled backend import or native `--help`, verification now compares
+all shipped first-party files under `app/desktop` and `app/gui`, root application
+metadata, and the entire native `host/bin` payload with the staged hashes. It
+rejects missing, changed or unexpected files, directory links and malformed
+manifest paths. The GUI lockfile is intentionally omitted from this comparison
+because electron-builder prunes it. Third-party package metadata/pruning is a
+separate packaging transform; this is not a signature or a complete third-party
+supply-chain audit.
+
 These checks do not establish minimum-OS or physical media compatibility.
 
 The optional native-license input is for development staging; a missing input
