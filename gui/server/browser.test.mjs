@@ -77,6 +77,7 @@ test('native capture recovery preserves authorization, clears old media and adop
   assert.deepEqual(binary[0].data,nextHeader);
   assert.equal(binary.length,1); // No old codec, frame or audio replay.
   second.send('resume');
+  second.send(Buffer.from([5,8]));
   const nextInput=[];f.native().on('data',chunk=>nextInput.push(chunk));
   second.send(touchPacket(0,0,1200,700,1280,720));
   await until(()=>Buffer.concat(nextInput).includes(Buffer.from(touchPacket(0,0,1200,700,1280,720))));
@@ -102,6 +103,25 @@ test('capture recovery budget and cancellation never create an unbounded or unau
   const other=await fixture(t,{inputPolicy:{captureRecovery:true}});await login(other);
   const stale=other.bridge();other.receiver.cancel();
   assert.equal(await stale.restartNative(),false);assert.equal(other.calls(),1);
+});
+
+test('WebRTC keyframe feedback cannot undo an explicit video pause',async t=>{
+ let feedback;
+ const f=await fixture(t,{rtcMediaFactory:options=>{
+  feedback=options.onKeyframe;
+  return {offer:async()=>({type:'offer',sdp:'synthetic'}),answer:async()=>{},close:async()=>{},frame:async()=>{},sound:async()=>{}};
+ }});
+ const ws=await f.open(undefined,undefined,'stream/webrtc');ws.send(f.invitation.key);
+ await until(()=>f.calls()===1);
+ f.native().write(packet(0,1,Buffer.from('000000016742c01e0102030000000168ce3c80','hex')));
+ await until(()=>feedback);
+ const chunks=[];f.native().on('data',chunk=>chunks.push(chunk));
+ ws.send(Buffer.from([5,7]));await until(()=>Buffer.concat(chunks).includes(Buffer.from([5,7])));
+ let before=Buffer.concat(chunks).length;feedback();ws.ping();await once(ws,'pong');
+ assert.equal(Buffer.concat(chunks).length,before);
+ ws.send(Buffer.from([5,8]));await until(()=>Buffer.concat(chunks).length>before);
+ before=Buffer.concat(chunks).length;feedback();await until(()=>Buffer.concat(chunks).length>before);
+ ws.close(4000);
 });
 
 test('receiver origin accepts explicit HTTPS origins, no paths or credentials; direct listeners stay private', () => {

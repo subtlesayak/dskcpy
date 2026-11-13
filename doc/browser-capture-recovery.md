@@ -26,6 +26,9 @@ browser resume reconnects without a new invitation. A new header updates all
 dimensions; WebRTC gets a new peer/offer/answer, and old asynchronous callbacks
 cannot acknowledge or close the new capture. Pending typing is cleared, Touch
 off remains off, and the existing audio choice is reapplied through normal gates.
+Fresh WebRTC capture explicitly restores the prior audio choice, including after
+Pause/Resume; a new native process otherwise starts muted. Keyframe feedback is
+gated by explicit video pause so an RTCP request cannot silently resume capture.
 
 Native shutdown classification is bounded to 15 seconds; a new native connection
 has its existing limit of 10 seconds. A resumed browser attempt allows up to 30 seconds

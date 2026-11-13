@@ -8,13 +8,13 @@ import { createRtcMedia } from './browser-rtc.mjs';
 // retain video frames: only the wire header and codec parameter sets are replayed.
 export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lifetimeMs,
   mediaMode = 'webcodecs', rtcBind, keyboard = false, viewOnly = false, textFocus = false,
-  captureRecovery = false, nativeEndGraceMs = 15000, onChange = () => {} }) {
+  captureRecovery = false, nativeEndGraceMs = 15000, rtcMediaFactory = createRtcMedia, onChange = () => {} }) {
   let native, peer, closed = false, ready = false, nativeTimer, awayTimer;
   let listener, nativeEndTimer, recovering = false, restarting = false;
   let restartTimes = [];
   const canRecover = captureRecovery && !viewOnly;
   let wireHeader, videoConfig, audioConfig, width = 0, height = 0;
-  let suspended = false, alive = true, rateAt = Date.now(), events = 0;
+  let suspended = false, capturePaused = false, alive = true, rateAt = Date.now(), events = 0;
   const video = new Set(), audio = new Set(), touches = new Map();
   const focusSupported = textFocus && keyboard && !viewOnly;
   let focusAt = -Infinity, focusSubscribed = false;
@@ -48,8 +48,8 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
     negotiating = true;
     const target = peer, mine = ++rtcGeneration;
     try {
-      const active = createRtcMedia({ bind: rtcBind, configuration: videoConfig.subarray(16),
-        onKeyframe: () => { if (!closed && rtcGeneration === mine && !suspended) command(8); },
+      const active = rtcMediaFactory({ bind: rtcBind, configuration: videoConfig.subarray(16),
+        onKeyframe: () => { if (!closed && rtcGeneration === mine && !suspended && !capturePaused) command(8); },
         onFailure: () => { if (!closed && rtcGeneration === mine) close(); },
         onConnected: () => { if (!closed && rtcGeneration === mine) onChange(); } });
       rtc = active;
@@ -162,6 +162,8 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
         // A hidden page may acknowledge in-flight media, but cannot inject input.
         return;
       }
+      if (capturePaused && ![4,6,5].includes(message[0])) return;
+      if (message[0] === 5 && [7,8].includes(message[1])) capturePaused = message[1] === 7;
       if (message[0] === 3) {
         const id = message.readBigUInt64BE(2).toString();
         if (message[1] === 3) touches.clear();
@@ -179,7 +181,7 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
     clearTimeout(nativeTimer); clearTimeout(awayTimer);
     listener?.close();
     releaseTouches(); stopRtc(); video.clear(); audio.clear(); nativeAcks.clear();
-    suspended = true; awayTimer = setTimeout(close, resumeMs);
+    suspended = capturePaused = true; awayTimer = setTimeout(close, resumeMs);
     wireHeader = videoConfig = audioConfig = null; width = height = 0;
     lastKeyboardStatus = null; focusSubscribed = keyboardStatusSubscribed = false;
     const previous = native; native = null;
@@ -236,11 +238,11 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
           void negotiateRtc();
           const pts = packet.readBigUInt64BE(4);
           if ([0, 2].includes(flags)) {
-            if (!rtc || suspended || !peer) acknowledgeNative(4, pts);
+            if (!rtc || suspended || capturePaused || !peer) acknowledgeNative(4, pts);
             else void rtc.frame(packet.subarray(16), pts, flags === 2)
               .then(() => { if (native === socket) acknowledgeNative(4, pts); }).catch(() => { if (native === socket) close(); });
           } else if (flags === 8) {
-            if (!rtc || suspended || !peer) acknowledgeNative(6, pts);
+            if (!rtc || suspended || capturePaused || !peer) acknowledgeNative(6, pts);
             else void rtc.sound(packet.subarray(16), pts)
               .then(() => { if (native === socket) acknowledgeNative(6, pts); }).catch(() => { if (native === socket) close(); });
           } else if ([4, 16].includes(flags)) forward(packet);

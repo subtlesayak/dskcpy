@@ -611,7 +611,8 @@ test('PiP keeps browser-native video and audio running while the original page i
   h.document.hidden = true; h.document.emit('visibilitychange');
   assert.equal(h.$('rtc-display').paused, false);
   assert.equal(h.$('rtc-display').muted, false);
-  assert.equal(h.socket.sent.at(-2), 'resume');
+  assert.equal(h.socket.sent.at(-3), 'resume');
+  assert.deepEqual(h.socket.sent.slice(-2),[Buffer.from([5,8]),Buffer.from([5,10])]);
   assert.ok(!h.socket.sent.includes('suspend'));
   h.document.pictureInPictureElement = null; h.$('rtc-display').emit('leavepictureinpicture');
   assert.equal(h.$('rtc-display').paused, true);
@@ -788,4 +789,19 @@ for(const code of [1000,1008])test('server-ended capture is terminal even when a
  const h=receiver(t,{resumable:true});h.socket.readyState=3;h.socket.emit('close',{code,reason:'capture-ended'});
  assert.equal(h.$('join-panel').hidden,false);
  await new Promise(resolve=>setTimeout(resolve,300));assert.equal(h.sockets.length,1);
+});
+
+test('fresh WebRTC capture reapplies the explicit audio choice and respects video pause',async t=>{
+ const h=receiver(t,{webRtc:true,webCodecs:false,resumable:true});
+ await h.$('audio').emit('click');assert.equal(h.$('audio').attrs.get('aria-pressed'),'true');
+ h.socket.readyState=3;h.socket.emit('close',{code:1012,reason:'capture-restart'});
+ await new Promise(resolve=>setTimeout(resolve,300));const next=h.sockets[1];assert.ok(next);next.emit('open');
+ next.emit('message',{data:JSON.stringify({type:'authenticated',mediaMode:'webrtc'})});
+ const b=new ArrayBuffer(16),v=new DataView(b);v.setUint32(0,0x53524431);v.setUint32(4,1);v.setUint32(8,1280);v.setUint32(12,720);
+ next.emit('message',{data:b});
+ const commands=()=>next.sent.filter(p=>Buffer.isBuffer(p)&&p[0]===5).map(p=>p[1]);
+ assert.equal(commands().at(-1),10); // New native defaults to muted until this explicit restoration.
+ h.$('pause').emit('click');assert.equal(commands().at(-1),11);
+ h.$('pause').emit('click');assert.equal(commands().at(-1),10);
+ h.$('disconnect').emit('click');
 });

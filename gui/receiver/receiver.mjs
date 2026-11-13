@@ -514,6 +514,7 @@ function updatePause() {
   if (away()) resumeDeadline ||= Date.now() + BROWSER_RESUME_MS;
   else resumeDeadline = 0;
   if (mediaMode === 'webrtc') {
+    if (!away()) action(muted || paused ? 11 : 10);
     const mine = generation, attempt = ++playbackAttempt;
     if (away() || paused) { rtcDisplay.muted = true; rtcDisplay.pause?.(); }
     else { rtcDisplay.muted = muted; void rtcDisplay.play?.().catch(() => {

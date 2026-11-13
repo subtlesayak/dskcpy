@@ -16,9 +16,10 @@ function header(width,height){const b=Buffer.alloc(16);b.write('SRD1');b.writeUI
 function configuration(){const payload=Buffer.from('000000016742c01e0102030000000168ce3c80','hex'),p=Buffer.alloc(16+payload.length);p.writeUInt32BE(payload.length);p.writeUInt32BE(1,12);payload.copy(p,16);return p;}
 try{
  for(const mode of ['webcodecs','webrtc'])for(const viewport of [{width:390,height:844},{width:844,height:390}]){
-  const natives=[];let bridge,captures=0,typed='',pending=Buffer.alloc(0);
+  const natives=[],controls=[];let bridge,captures=0,typed='',pending=Buffer.alloc(0);
   const receiver=createBrowserReceiver({configuredPort:0,onConnect:async value=>{
    bridge=value;captures++;pending=Buffer.alloc(0);
+   const control={paused:false,audio:false};controls.push(control);
    const socket=net.connect(value.port,'127.0.0.1');natives.push(socket);socket.on('error',()=>{});await once(socket,'connect');
    socket.on('data',chunk=>{
     if(natives.at(-1)!==socket)return;pending=Buffer.concat([pending,chunk]);
@@ -28,6 +29,7 @@ try{
      assert.ok(size,'Unexpected synthetic input');if(pending.length<size)return;
      const packet=pending.subarray(0,size);pending=pending.subarray(size);
      if(type===9)typed+=packet.subarray(3).toString();
+     if(type===5){if(packet[1]===7)control.paused=true;if(packet[1]===8)control.paused=false;if(packet[1]===10)control.audio=true;if(packet[1]===11)control.audio=false;}
     }
    });
    socket.write(header(captures===1?640:1280,captures===1?480:720));
@@ -53,9 +55,12 @@ try{
    if(mode==='webrtc')await until(()=>page.evaluate(()=>window.captureFixture.offers===1&&window.captureFixture.answers===1));
    await page.getByRole('button',{name:'Keyboard',exact:true}).click();
    await page.locator('#keyboard-input').pressSequentially('before');await until(()=>typed==='before');
+   if(mode==='webrtc'){await page.getByRole('button',{name:'Audio off',exact:true}).click();await until(()=>controls[0].audio);}
    const firstBridge=bridge;assert.equal(await firstBridge.restartNative(),true);
    await until(()=>page.evaluate(()=>window.captureFixture.authenticated===2&&document.querySelector('#display').width===1280));
    if(mode==='webrtc')await until(()=>page.evaluate(()=>window.captureFixture.offers===2&&window.captureFixture.answers===2));
+   await until(()=>!controls[1].paused);
+   if(mode==='webrtc')await until(()=>controls[1].audio);
    assert.equal(captures,2);assert.equal(await page.locator('#join-panel').isVisible(),false);
    assert.equal(await page.locator('#keyboard-input').inputValue(),'');
    await page.getByRole('button',{name:'Keyboard',exact:true}).click();
@@ -65,9 +70,13 @@ try{
    assert.deepEqual(errors,[]);
    await page.screenshot({path:path.join(output,`${mode}-${viewport.width}.png`)});
    await page.getByRole('button',{name:'Options',exact:true}).click();
+   await page.locator('#pause').click();await until(()=>controls[1].paused);
+   if(mode==='webrtc')assert.equal(controls[1].audio,false);
+   await page.locator('#pause').click();await until(()=>!controls[1].paused);
+   if(mode==='webrtc')await until(()=>controls[1].audio);
    await page.getByRole('button',{name:'Disconnect',exact:true}).click();
    await until(()=>!receiver.status().connected);assert.equal(await firstBridge.restartNative(),false);assert.equal(captures,2);
-   results.push({mode,...viewport,freshAuthorizationWithoutCodeEntry:true,freshHeader:true,clearedTyping:true,noTextReplay:true,explicitDisconnectStopsRecovery:true,rtcOffers:mode==='webrtc'?2:0});
+   results.push({mode,...viewport,freshAuthorizationWithoutCodeEntry:true,freshHeader:true,clearedTyping:true,noTextReplay:true,nativeResumeConfirmed:true,pauseResumeConfirmed:true,audioChoiceRestored:mode==='webrtc',explicitDisconnectStopsRecovery:true,rtcOffers:mode==='webrtc'?2:0});
   }finally{await context.close();for(const native of natives)native.destroy();await receiver.shutdown();}
  }
  await writeFile(path.join(output,'result.json'),JSON.stringify({syntheticNative:true,realCapture:false,realAudio:false,realPhone:false,results},null,2)+'\n');
