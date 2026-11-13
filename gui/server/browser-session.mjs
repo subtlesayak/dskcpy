@@ -13,9 +13,9 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
   let suspended = false, alive = true, rateAt = Date.now(), events = 0;
   const video = new Set(), audio = new Set(), touches = new Map();
   const focusSupported = textFocus && keyboard && !viewOnly;
-  let focusAt = -Infinity;
+  let focusAt = -Infinity, focusSubscribed = false;
   function focusHint(focused) {
-    if (!focusSupported || !ready || closed || suspended || !peer || peer.readyState !== WebSocket.OPEN
+    if (!focusSupported || !focusSubscribed || !ready || closed || suspended || !peer || peer.readyState !== WebSocket.OPEN
         || peer.bufferedAmount > MAX_PACKET || ![true, false, null].includes(focused) || Date.now() - focusAt < 100) return;
     focusAt = Date.now(); peer.send(JSON.stringify({ type: 'text-focus', focused }));
   }
@@ -97,6 +97,9 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
     if (closed) { ws.close(1000); return; }
     if (peer && peer !== ws) detach(peer, true);
     peer = ws; alive = true; rateAt = Date.now(); events = 0;
+    // Optional messages require this viewer's explicit acknowledgement. A
+    // restored/older cached page must not inherit another socket's subscription.
+    focusSubscribed = false; focusAt = -Infinity;
     ws.on('pong', () => { if (peer === ws) alive = true; });
     ws.on('close', (code) => {
       if (peer !== ws || closed) return;
@@ -108,6 +111,10 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
       if (Date.now() - rateAt >= 1000) { rateAt = Date.now(); events = 0; }
       if (++events > 1000 || native?.writableLength > 65536) { close(); return; }
       if (!binary) {
+        if (message.toString() === 'text-focus-subscribe') {
+          if (!focusSupported || !ready) { close(); return; }
+          focusSubscribed = true; return;
+        }
         if (message.toString() === 'suspend') { suspend(); return; }
         if (message.toString() === 'resume') {
           suspended = false; clearTimeout(awayTimer); return;
