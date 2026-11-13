@@ -20,9 +20,9 @@ function packet(pts, flags, payload = Buffer.from([1, 2, 3])) {
   result.writeUInt32BE(flags, 12); payload.copy(result, 16); return result;
 }
 async function fixture(t, options = {}) {
-  let native, calls = 0;
+  let native, bridgeState, calls = 0;
   const receiver = createBrowserReceiver({ configuredPort: 0, onConnect: async (bridge) => {
-    calls++;
+    calls++; bridgeState=bridge;
     native = net.connect(bridge.port, '127.0.0.1');
     native.on('error', () => {});
     await once(native, 'connect');
@@ -39,7 +39,7 @@ async function fixture(t, options = {}) {
     await once(ws, 'open');
     return ws;
   };
-  return { receiver, invitation, open, native: () => native, calls: () => calls };
+  return { receiver, invitation, open, native: () => native, bridge:()=>bridgeState, calls: () => calls };
 }
 
 async function until(predicate) {
@@ -431,3 +431,23 @@ test('default host arms five-minute recovery; expiration revokes resumption', as
   assert.equal(f.receiver.status().connected, false);
   assert.equal(await resumable(f, cookie), false);
 });
+
+
+test('text focus is bounded advisory metadata on an authenticated capable session',async t=>{
+  const f=await fixture(t,{inputPolicy:{keyboard:true,textFocus:true}});const ws=await login(f);
+  assert.equal(f.bridge().textFocus,true);f.bridge().focusHint(true);
+  await until(()=>ws.received.some(m=>!m.binary&&m.data.toString().includes('text-focus')));
+  const hints=()=>ws.received.filter(m=>!m.binary&&m.data.toString().includes('text-focus'));
+  assert.deepEqual(JSON.parse(hints()[0].data.toString()),{type:'text-focus',focused:true});
+  f.bridge().focusHint('private text');await new Promise(setImmediate);assert.equal(hints().length,1);
+  const paused=once(f.native(),'data');ws.send('suspend');await paused;
+  f.bridge().focusHint(false);await new Promise(setImmediate);assert.equal(hints().length,1);
+});
+
+for(const policy of [{keyboard:false,textFocus:true},{keyboard:true,textFocus:true,viewOnly:true},{keyboard:true}]){
+ test(`focus hints require full-desktop negotiated capability ${JSON.stringify(policy)}`,async t=>{
+  const f=await fixture(t,{inputPolicy:policy});const ws=await login(f);
+  assert.equal(f.bridge().textFocus,false);f.bridge().focusHint(true);await new Promise(setImmediate);
+  assert.equal(ws.received.some(m=>!m.binary&&m.data.toString().includes('text-focus')),false);
+ });
+}

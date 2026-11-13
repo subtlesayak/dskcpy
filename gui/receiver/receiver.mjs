@@ -25,6 +25,37 @@ const away = () => receiverIsAway({ hidden: document.hidden, pictureInPictureEle
 const remembered = rememberedBrowser({ reconnect: () => { resumeAllowed = true; void resumeSession(); } });
 let rtcReceiver, mediaMode = 'webcodecs';
 let keyboardSupported = false, keyboardOpen = false, viewOnly = false;
+let focusSupported = false, autoKeyboard = false;
+const autoSetting = $('auto-keyboard-setting'), autoToggle = $('auto-keyboard'), autoFeedback = $('auto-keyboard-feedback');
+function clearFocusCapability(clearPreference = true) {
+  focusSupported = false; if (clearPreference) autoKeyboard = false;
+  if (autoSetting) autoSetting.hidden = true;
+  if (autoToggle) autoToggle.checked = autoKeyboard;
+  if (autoFeedback) autoFeedback.hidden = true;
+}
+function autoFocusKeyboard(focused) {
+  if (focused !== true || !focusSupported || !autoKeyboard || !canSendKeys() || away()) return;
+  const field = $('keyboard-input');
+  if (keyboardOpen && document.activeElement === field) return;
+  if (!keyboardOpen) showKeyboard(); else keyboardInput.setEnabled(true);
+  const vk = typeof navigator === 'undefined' ? null : navigator.virtualKeyboard;
+  // Do not change viewport/overlay policy. Chromium can use sticky activation
+  // from the opt-in gesture; other browsers keep a direct-tap fallback.
+  if (typeof vk?.show === 'function') {
+    const policy = field.virtualKeyboardPolicy;
+    try { field.virtualKeyboardPolicy = 'manual'; field.focus(); vk.show(); }
+    catch { /* Platform policy can still refuse the software keyboard. */ }
+    finally { field.virtualKeyboardPolicy = policy || 'auto'; }
+  }
+  if (autoFeedback) {
+    autoFeedback.textContent = 'If your phone keyboard stays closed, tap the typing field.';
+    autoFeedback.hidden = !!vk?.boundingRect?.height; fitCanvas();
+  }
+}
+if (autoToggle) autoToggle.addEventListener('change', () => { autoKeyboard = focusSupported && autoToggle.checked; });
+if (typeof navigator !== 'undefined') navigator.virtualKeyboard?.addEventListener?.('geometrychange', () => {
+  if (autoFeedback && navigator.virtualKeyboard.boundingRect.height > 0) autoFeedback.hidden = true;
+});
 const preferredMode = 'RTCPeerConnection' in window ? 'webrtc' : 'webcodecs';
 const context = canvas.getContext('2d', { alpha: false, desynchronized: true });
 let ws, video, audio, audioContext, videoConfig, configBytes, audioConfig;
@@ -81,19 +112,20 @@ if (arrowPadPresent) {
 }
 function hideKeyboard() {
   keyboardOpen = false; keyboardInput.setEnabled(false);
+  if (autoFeedback) autoFeedback.hidden = true;
   document.body.classList.remove('keyboard-open');
   $('keyboard-controls').hidden = true; $('keyboard').setAttribute('aria-expanded', 'false');
 }
+function showKeyboard() {
+  if (!keyboardSupported || viewOnly || paused || away() || !touchEnabled || keyboardOpen) return;
+  setControlTray(); keyboardOpen = true; $('keyboard-controls').hidden = false;
+  document.body.classList.add('keyboard-open'); $('keyboard').setAttribute('aria-expanded', 'true');
+  fitCanvas(); keyboardInput.setEnabled(true);
+}
 $('keyboard').addEventListener('click', () => {
-  if (!keyboardSupported || viewOnly || paused || document.hidden || !touchEnabled) return;
-  setControlTray();
-  keyboardOpen = !keyboardOpen; $('keyboard-controls').hidden = !keyboardOpen;
-  document.body.classList.toggle('keyboard-open', keyboardOpen);
-  $('keyboard').setAttribute('aria-expanded', String(keyboardOpen));
-  fitCanvas();
-  // Mobile browsers accept focus only after the typing panel is visible,
-  // and while this original button gesture is still on the call stack.
-  keyboardInput.setEnabled(keyboardOpen);
+  if (keyboardOpen) { hideKeyboard(); fitCanvas(); return; }
+  if (autoFeedback) autoFeedback.hidden = true;
+  showKeyboard();
 });
 $('close-keyboard').addEventListener('click', () => { hideKeyboard(); fitCanvas(); $('keyboard').focus(); });
 $('close-options').addEventListener('click', () => setControlTray(null, true));
@@ -143,7 +175,7 @@ function disconnect() {
   resumeAllowed = false;
   generation++;
   if (sessionExpected && ws?.readyState !== WebSocket.OPEN) void fetch('/stream/session', { method: 'POST', credentials: 'same-origin' }).catch(() => {});
-  sessionExpected = false; resumeDeadline = 0;
+  sessionExpected = false; resumeDeadline = 0; clearFocusCapability();
   if (document.fullscreenElement) void document.exitFullscreen().catch(() => {});
   clearTimeout(retryTimer); clearTimeout(connectionTimer);
   releaseTouches(); stopAudio(); drainAudioAcks(true);
@@ -230,7 +262,7 @@ function connect(key = null, requestedMode = preferredMode) {
   socket.addEventListener('close', (event) => {
     clearTimeout(timeout);
     if (mine !== generation) return;
-    releaseTouches(); clearMedia(); ws = null; authenticated = false; updateArrowAvailability();
+    releaseTouches(); clearMedia(); ws = null; authenticated = false; clearFocusCapability(false); updateArrowAvailability();
     if (sessionExpected && ![1008, 4000, 4002].includes(event.code)) {
       resumeDeadline ||= Date.now() + BROWSER_RESUME_MS;
       $('status').textContent = document.hidden ? 'Paused while away' : 'Reconnecting…';
@@ -261,6 +293,10 @@ function connect(key = null, requestedMode = preferredMode) {
           void rtcReceiver.offer(message.description).catch((error) => { if (mine === generation) fail(error.message); });
           return;
         }
+        if (message.type === 'text-focus') {
+          if (!authenticated || ![true, false, null].includes(message.focused)) throw new Error('Unexpected focus hint.');
+          autoFocusKeyboard(message.focused); return;
+        }
         if (message.type !== 'authenticated') throw new Error('Unexpected receiver response.');
         mediaMode = message.mediaMode || 'webcodecs';
         if (mediaMode === 'webcodecs' && !('VideoDecoder' in window)) throw new Error('This connection needs WebCodecs. Use the private VPN link for browser-native video.');
@@ -268,6 +304,10 @@ function connect(key = null, requestedMode = preferredMode) {
         viewOnly = message.viewOnly === true;
         remembered.authenticated(viewOnly);
         keyboardSupported = message.keyboard === true && !viewOnly;
+        focusSupported = keyboardSupported && message.textFocus === true;
+        if (!focusSupported) autoKeyboard = false;
+        if (autoToggle) autoToggle.checked = autoKeyboard;
+        if (autoSetting) autoSetting.hidden = !focusSupported;
         updateArrowAvailability();
         $('keyboard').hidden = !keyboardSupported;
         touchEnabled = !viewOnly; $('touch').disabled = viewOnly; $('drag-mode').disabled = viewOnly;

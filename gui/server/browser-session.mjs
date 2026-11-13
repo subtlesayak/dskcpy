@@ -7,11 +7,18 @@ import { createRtcMedia } from './browser-rtc.mjs';
 // Keep the native transport alive across a bounded browser suspension. Never
 // retain video frames: only the wire header and codec parameter sets are replayed.
 export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lifetimeMs,
-  mediaMode = 'webcodecs', rtcBind, keyboard = false, viewOnly = false, onChange = () => {} }) {
+  mediaMode = 'webcodecs', rtcBind, keyboard = false, viewOnly = false, textFocus = false, onChange = () => {} }) {
   let native, peer, closed = false, ready = false, nativeTimer, awayTimer;
   let wireHeader, videoConfig, audioConfig, width = 0, height = 0;
   let suspended = false, alive = true, rateAt = Date.now(), events = 0;
   const video = new Set(), audio = new Set(), touches = new Map();
+  const focusSupported = textFocus && keyboard && !viewOnly;
+  let focusAt = -Infinity;
+  function focusHint(focused) {
+    if (!focusSupported || !ready || closed || suspended || !peer || peer.readyState !== WebSocket.OPEN
+        || peer.bufferedAmount > MAX_PACKET || ![true, false, null].includes(focused) || Date.now() - focusAt < 100) return;
+    focusAt = Date.now(); peer.send(JSON.stringify({ type: 'text-focus', focused }));
+  }
   let rtc, rtcGeneration = 0, negotiating = false;
   let rtcCleanup = Promise.resolve();
   const nativeAcks = new Map();
@@ -78,7 +85,7 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
   }
   function announce() {
     if (!ready || !peer) return;
-    peer.send(JSON.stringify({ type: 'authenticated', mediaMode, keyboard, viewOnly }));
+    peer.send(JSON.stringify({ type: 'authenticated', mediaMode, keyboard, viewOnly, textFocus: focusSupported }));
     if (wireHeader) forward(wireHeader);
     if (videoConfig && mediaMode === 'webcodecs') forward(videoConfig);
     if (audioConfig) forward(audioConfig);
@@ -211,7 +218,7 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
       });
       if (closed) { listener.close(); return; }
       ready = true; nativeTimer = setTimeout(close, 10000); announce();
-      await onConnect({ port: listener.address().port, keyboard, viewOnly, close, get closed() { return closed; } });
+      await onConnect({ port: listener.address().port, keyboard, viewOnly, textFocus: focusSupported, focusHint, close, get closed() { return closed; } });
     } catch { close(); }
   }
   return { start, attach, close, mediaMode, get cleanup() { return rtcCleanup; } };

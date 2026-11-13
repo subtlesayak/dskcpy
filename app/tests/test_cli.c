@@ -234,6 +234,9 @@ static void test_reverse_socket(void) {
     assert(!ok);
 #endif
     struct scrcpy_cli_args invalid = {.opts = scrcpy_options_default};
+    char *focus_alone[] = {"scrcpy", "--reverse-display", "--reverse-socket=1234", "--reverse-text-focus"};
+    assert(!scrcpy_parse_args(&args, ARRAY_LEN(focus_alone), focus_alone));
+    args.opts = scrcpy_options_default;
     char *zero[] = {"scrcpy", "--reverse-display", "--reverse-socket=0"};
     assert(!scrcpy_parse_args(&invalid, ARRAY_LEN(zero), zero));
     invalid.opts = scrcpy_options_default;
@@ -252,6 +255,9 @@ static void test_mac_capture_options(void) {
     args.opts = scrcpy_options_default;
     char *keyboard[] = {"scrcpy", "--reverse-display", "--reverse-socket=1234", "--reverse-keyboard"};
     assert(scrcpy_parse_args(&args, ARRAY_LEN(keyboard), keyboard)); assert(args.opts.reverse_keyboard);
+    args.opts = scrcpy_options_default;
+    char *focus[] = {"scrcpy", "--reverse-display", "--reverse-socket=1234", "--reverse-keyboard", "--reverse-text-focus"};
+    assert(scrcpy_parse_args(&args, ARRAY_LEN(focus), focus)); assert(args.opts.reverse_text_focus);
 #else
     assert(!scrcpy_parse_args(&args, ARRAY_LEN(window), window));
 #endif

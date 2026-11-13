@@ -116,9 +116,11 @@ test('window and keyboard features require the real Mac backend and explicit nat
   const runtime = resolveRuntime(dir, { SCRCPY_GUI_BINARY: binary }, 'darwin');
   const probe = (extra) => async () => ({ stdout: `--reverse-display --reverse-socket ScreenCaptureKit/VideoToolbox ${extra}` });
   let status = await inspectReadiness(runtime, probe(''));
-  assert.deepEqual(status.features, { browserKeyboard: false, macWindowCapture: false });
+  assert.deepEqual(status.features, { browserTextFocus: false, browserKeyboard: false, macWindowCapture: false });
   status = await inspectReadiness(runtime, probe('--reverse-keyboard --reverse-window --reverse-window-owner --list-reverse-windows'));
-  assert.deepEqual(status.features, { browserKeyboard: true, macWindowCapture: true });
+  assert.deepEqual(status.features, { browserTextFocus: false, browserKeyboard: true, macWindowCapture: true });
+  status = await inspectReadiness(runtime, probe('--reverse-keyboard --reverse-text-focus'));
+  assert.equal(status.features.browserTextFocus,true);
   runtime.platform = 'win32'; status = await inspectReadiness(runtime, probe('--reverse-keyboard --reverse-window --reverse-window-owner --list-reverse-windows'));
-  assert.deepEqual(status.features, { browserKeyboard: false, macWindowCapture: false });
+  assert.deepEqual(status.features, { browserTextFocus: false, browserKeyboard: false, macWindowCapture: false });
 });
