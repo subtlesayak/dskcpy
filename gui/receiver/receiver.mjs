@@ -25,10 +25,13 @@ const away = () => receiverIsAway({ hidden: document.hidden, pictureInPictureEle
 const remembered = rememberedBrowser({ reconnect: () => { resumeAllowed = true; void resumeSession(); } });
 let rtcReceiver, mediaMode = 'webcodecs';
 let keyboardSupported = false, keyboardOpen = false, viewOnly = false;
-let focusSupported = false, autoKeyboard = false;
+let focusSupported = false, autoKeyboard = false, keyboardStatusSupported = false;
+const keyboardStatusMessage = $('keyboard-status');
 const autoSetting = $('auto-keyboard-setting'), autoToggle = $('auto-keyboard'), autoFeedback = $('auto-keyboard-feedback');
 function clearFocusCapability(clearPreference = true) {
-  focusSupported = false; if (clearPreference) autoKeyboard = false;
+  focusSupported = false; keyboardStatusSupported = false;
+  if (keyboardStatusMessage) keyboardStatusMessage.hidden = true;
+  if (clearPreference) autoKeyboard = false;
   if (autoSetting) autoSetting.hidden = true;
   if (autoToggle) autoToggle.checked = autoKeyboard;
   if (autoFeedback) autoFeedback.hidden = true;
@@ -120,7 +123,7 @@ function showKeyboard() {
   if (!keyboardSupported || viewOnly || paused || away() || !touchEnabled || keyboardOpen) return;
   setControlTray(); keyboardOpen = true; $('keyboard-controls').hidden = false;
   document.body.classList.add('keyboard-open'); $('keyboard').setAttribute('aria-expanded', 'true');
-  fitCanvas(); keyboardInput.setEnabled(true);
+  fitCanvas(); send(keyPacket(2)); keyboardInput.setEnabled(true);
 }
 $('keyboard').addEventListener('click', () => {
   if (keyboardOpen) { hideKeyboard(); fitCanvas(); return; }
@@ -293,6 +296,19 @@ function connect(key = null, requestedMode = preferredMode) {
           void rtcReceiver.offer(message.description).catch((error) => { if (mine === generation) fail(error.message); });
           return;
         }
+        if (message.type === 'keyboard-status') {
+          if (!authenticated || !keyboardStatusSupported || !['ready','blocked','unsupported'].includes(message.status)) throw new Error('Unexpected keyboard status.');
+          if (message.status === 'blocked') {
+            hideKeyboard(); fitCanvas();
+            $('error').textContent = 'The computer could not accept all keyboard input. Check its text, then tap Keyboard to try again.';
+          }
+          if (keyboardStatusMessage) {
+            keyboardStatusMessage.hidden = message.status === 'ready';
+            keyboardStatusMessage.textContent = message.status === 'unsupported' ? 'That key is unavailable on this host. Use the typing field for text.' : '';
+          }
+          if (message.status === 'ready' && $('error').textContent.startsWith('The computer could not accept all keyboard input.')) $('error').textContent = '';
+          return;
+        }
         if (message.type === 'text-focus') {
           if (!authenticated || ![true, false, null].includes(message.focused)) throw new Error('Unexpected focus hint.');
           autoFocusKeyboard(message.focused); return;
@@ -304,6 +320,8 @@ function connect(key = null, requestedMode = preferredMode) {
         viewOnly = message.viewOnly === true;
         remembered.authenticated(viewOnly);
         keyboardSupported = message.keyboard === true && !viewOnly;
+        keyboardStatusSupported = keyboardSupported && message.keyboardStatus === true;
+        if (keyboardStatusSupported) socket.send('keyboard-status-subscribe');
         focusSupported = keyboardSupported && message.textFocus === true;
         if (focusSupported) ws.send('text-focus-subscribe');
         if (!focusSupported) autoKeyboard = false;

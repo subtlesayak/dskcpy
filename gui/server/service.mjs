@@ -515,6 +515,11 @@ export function createControlService({
       state.pid = child.pid ?? null;
       child.stdin.on('error', () => {}); // Child may exit before reading q.
       child.stdout.on('data', (chunk) => consumeOutput('stdout', chunk, line => {
+        if (line.startsWith('DSKCPY_KEYBOARD_STATUS ')) {
+          const status = /^DSKCPY_KEYBOARD_STATUS (ready|blocked|unsupported)$/.exec(line);
+          if (status && streamProcess === child && browserBridge?.keyboard) browserBridge.keyboardStatus(status[1]);
+          return true;
+        }
         if (!line.startsWith('DSKCPY_TEXT_FOCUS ')) return false;
         // Consume metadata separately from user logs. Only the current child
         // and negotiated full-desktop keyboard session can publish a hint.

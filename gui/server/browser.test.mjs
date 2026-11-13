@@ -491,3 +491,24 @@ for(const policy of [{keyboard:false,textFocus:true},{keyboard:true,textFocus:tr
   assert.equal(ws.received.some(m=>!m.binary&&m.data.toString().includes('text-focus')),false);
  });
 }
+
+test('keyboard status requires this socket subscription and never disconnects an older viewer',async t=>{
+  const f=await fixture(t,{inputPolicy:{keyboard:true}});const ws=await login(f);const cookie=ws.cookie.split(';')[0];
+  const statuses=socket=>socket.received.filter(m=>!m.binary&&JSON.parse(m.data.toString()).type==='keyboard-status');
+  f.bridge().keyboardStatus('blocked');await new Promise(setImmediate);
+  assert.equal(statuses(ws).length,0);assert.equal(ws.readyState,WebSocket.OPEN);
+  ws.send('keyboard-status-subscribe');await until(()=>statuses(ws).length===1);
+  assert.deepEqual(JSON.parse(statuses(ws)[0].data.toString()),{type:'keyboard-status',status:'blocked'});
+  f.bridge().keyboardStatus('not-a-status');await new Promise(setImmediate);assert.equal(statuses(ws).length,1);
+  const next=await f.open(undefined,cookie);await until(()=>next.received.length>=2);next.send('resume');
+  await new Promise(setImmediate);f.bridge().keyboardStatus('ready');await new Promise(setImmediate);
+  assert.equal(statuses(next).length,0);assert.equal(f.calls(),1);
+  next.send('keyboard-status-subscribe');await until(()=>statuses(next).length===1);
+  assert.equal(JSON.parse(statuses(next)[0].data.toString()).status,'ready');
+});
+for(const policy of [{keyboard:false},{keyboard:true,viewOnly:true}]){
+ test(`unsupported keyboard-status subscription remains rejected ${JSON.stringify(policy)}`,async t=>{
+  const f=await fixture(t,{inputPolicy:policy});const ws=await login(f);const ended=once(ws,'close');
+  ws.send('keyboard-status-subscribe');await ended;assert.equal(f.receiver.status().connected,false);
+ });
+}

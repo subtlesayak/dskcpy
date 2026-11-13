@@ -5,6 +5,7 @@
 #include <inttypes.h>
 #include <stdatomic.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <SDL3/SDL.h>
@@ -25,6 +26,8 @@
 // winsock2.h must be included before windows.h. reverse_display.h already
 // includes util/net.h, which includes winsock2.h on Windows.
 # include <windows.h>
+# include "reverse_windows_keyboard.h"
+# include "reverse_windows_input.h"
 # include <d3d11.h>
 # include <dxgi1_2.h>
 
@@ -100,6 +103,9 @@ struct reverse_display_state {
     struct sc_receiver receiver;
     sc_mutex touch_mutex;
     struct sc_reverse_touch touch;
+    struct sc_windows_keyboard keyboard; // Protected by touch_mutex, including teardown.
+    enum sc_windows_key_result keyboard_status;
+    int64_t keyboard_cleanup_after;
     int touch_left, touch_top, touch_width, touch_height;
     bool touch_warning_logged;
     sc_thread capture_thread;
@@ -1616,6 +1622,67 @@ reverse_touch_mouse(void *userdata, const struct sc_reverse_touch_point *point,
     return reverse_send_mouse_event(point, flags);
 }
 
+static bool
+reverse_keyboard_modifier_down(uint16_t usage, void *userdata) {
+    (void) userdata;
+    static const WORD keys[] = {VK_LCONTROL,VK_LSHIFT,VK_LMENU,VK_LWIN,VK_RCONTROL,VK_RSHIFT,VK_RMENU,VK_RWIN};
+    return usage>=224 && usage<=231 && (GetAsyncKeyState(keys[usage-224]) & 0x8000) != 0;
+}
+
+static size_t
+reverse_keyboard_inject(const struct sc_windows_key_event *events, size_t count, void *userdata) {
+    (void) userdata;
+    if (!count || count > 2 * SC_REVERSE_TEXT_MAX) return 0;
+    INPUT inputs[2 * SC_REVERSE_TEXT_MAX];
+    for (size_t i = 0; i < count; ++i) inputs[i] = sc_windows_make_input(&events[i]);
+    return SendInput((UINT) count, inputs, sizeof(INPUT));
+}
+
+// Called with touch_mutex held. No keys/text or OS error details enter IPC.
+static void
+reverse_keyboard_status(struct reverse_display_state *state, enum sc_windows_key_result result) {
+    if (state->keyboard_status == result) return;
+    state->keyboard_status = result;
+    const char *status = result == SC_WINDOWS_KEY_OK ? "ready"
+        : result == SC_WINDOWS_KEY_BLOCKED ? "blocked" : "unsupported";
+    printf("DSKCPY_KEYBOARD_STATUS %s\n", status); fflush(stdout);
+    if (result == SC_WINDOWS_KEY_BLOCKED)
+        LOGW("Windows could not accept browser keyboard input; check the active app/desktop. No elevation is attempted");
+}
+
+static void
+reverse_cancel_keyboard(struct reverse_display_state *state) {
+    sc_mutex_lock(&state->touch_mutex);
+    if (!sc_windows_keyboard_release(&state->keyboard)) reverse_keyboard_status(state, SC_WINDOWS_KEY_BLOCKED);
+    sc_mutex_unlock(&state->touch_mutex);
+}
+
+static void
+reverse_receiver_on_keyboard(struct sc_receiver *receiver, const struct sc_device_msg *msg, void *userdata) {
+    (void) receiver;
+    struct reverse_display_state *state = userdata;
+    sc_mutex_lock(&state->touch_mutex);
+    // This recheck serializes injection against Stop and geometry cleanup.
+    bool release = msg->type == DEVICE_MSG_TYPE_REVERSE_KEY && msg->reverse_key.action == 2;
+    if (release || !state->options->reverse_keyboard || !state->options->reverse_socket
+            || atomic_load_explicit(&state->stopped, memory_order_acquire)
+            || atomic_load_explicit(&state->fatal_error, memory_order_acquire)
+            || atomic_load_explicit(&state->video_paused, memory_order_acquire)
+            || !atomic_load_explicit(&state->stream_ready, memory_order_acquire)) {
+        bool cleared = release
+            ? sc_windows_keyboard_key(&state->keyboard, 2, 0, 0) == SC_WINDOWS_KEY_OK
+            : sc_windows_keyboard_release(&state->keyboard);
+        if (!cleared) reverse_keyboard_status(state, SC_WINDOWS_KEY_BLOCKED);
+        else if (release) state->keyboard_status = SC_WINDOWS_KEY_INVALID; // Report the next actual attempt again.
+    } else {
+        enum sc_windows_key_result result = msg->type == DEVICE_MSG_TYPE_REVERSE_KEY
+            ? sc_windows_keyboard_key(&state->keyboard, msg->reverse_key.action, msg->reverse_key.usage, msg->reverse_key.modifiers)
+            : sc_windows_keyboard_text(&state->keyboard, (const uint8_t *) msg->reverse_text.text, msg->reverse_text.length);
+        reverse_keyboard_status(state, result);
+    }
+    sc_mutex_unlock(&state->touch_mutex);
+}
+
 static void
 reverse_cancel_touches(struct reverse_display_state *state) {
     sc_mutex_lock(&state->touch_mutex);
@@ -1637,6 +1704,7 @@ reverse_check_touch_geometry(struct reverse_display_state *state) {
     if (left != state->touch_left || top != state->touch_top
             || width != state->touch_width || height != state->touch_height) {
         sc_reverse_touch_cancel(&state->touch);
+        if (!sc_windows_keyboard_release(&state->keyboard)) reverse_keyboard_status(state, SC_WINDOWS_KEY_BLOCKED);
         state->touch_left = left;
         state->touch_top = top;
         state->touch_width = width;
@@ -1843,6 +1911,8 @@ reverse_receiver_on_system_action(struct sc_receiver *receiver,
     (void) receiver;
     struct reverse_display_state *state = userdata;
     if (!atomic_load_explicit(&state->stopped, memory_order_acquire)) {
+        if (msg->reverse_system_action.action != SC_REVERSE_SYSTEM_ACTION_AUDIO_ENABLE
+                && msg->reverse_system_action.action != SC_REVERSE_SYSTEM_ACTION_AUDIO_DISABLE) reverse_cancel_keyboard(state);
         reverse_apply_system_action(state, msg->reverse_system_action.action);
     }
 }
@@ -1897,6 +1967,7 @@ reverse_receiver_on_ended(struct sc_receiver *receiver, bool error,
     // This callback runs on the input thread, after its last input message.
     // Run even during intentional shutdown: the phone may never send UP.
     reverse_cancel_touches(state);
+    reverse_cancel_keyboard(state);
     if (atomic_load_explicit(&state->stopped, memory_order_acquire)) {
         return;
     }
@@ -1985,6 +2056,7 @@ sc_reverse_display_run(sc_socket video_socket, sc_socket control_socket,
         sc_mutex_destroy(&state.watchdog_mutex);
         return SCRCPY_EXIT_FAILURE;
     }
+    sc_windows_keyboard_init(&state.keyboard, reverse_keyboard_inject, reverse_keyboard_modifier_down, NULL);
     HANDLE gui_control = reverse_gui_control_pipe();
     bool native_touch = InitializeTouchInjection(SC_REVERSE_TOUCH_LIMIT,
                                                 TOUCH_FEEDBACK_NONE);
@@ -2010,6 +2082,7 @@ sc_reverse_display_run(sc_socket video_socket, sc_socket control_socket,
 
     static const struct sc_receiver_callbacks receiver_cbs = {
         .on_ended = reverse_receiver_on_ended,
+        .on_reverse_keyboard = reverse_receiver_on_keyboard,
         .on_reverse_touch = reverse_receiver_on_touch,
         .on_reverse_scroll = reverse_receiver_on_scroll,
         .on_reverse_frame_ack = reverse_receiver_on_frame_ack,
@@ -2059,6 +2132,10 @@ sc_reverse_display_run(sc_socket video_socket, sc_socket control_socket,
             }
             sc_mutex_lock(&state.touch_mutex);
             reverse_check_touch_geometry(&state);
+            if (state.keyboard.release_pending && av_gettime_relative() >= state.keyboard_cleanup_after) {
+                state.keyboard_cleanup_after = av_gettime_relative() + 250000;
+                if (!sc_windows_keyboard_release(&state.keyboard)) reverse_keyboard_status(&state, SC_WINDOWS_KEY_BLOCKED);
+            }
             if (!atomic_load_explicit(&state.stopped, memory_order_acquire)
                     && !atomic_load_explicit(&state.video_paused, memory_order_acquire)) {
                 sc_reverse_touch_tick(&state.touch, av_gettime_relative());
@@ -2104,6 +2181,7 @@ stop:
     }
     if (state.audio_thread_started) sc_thread_join(&state.audio_thread, NULL);
     reverse_cancel_touches(&state); // Also covers worker-start failures.
+    reverse_cancel_keyboard(&state);
     sc_receiver_destroy(&state.receiver);
     sc_mutex_destroy(&state.touch_mutex);
     sc_mutex_destroy(&state.watchdog_mutex);
