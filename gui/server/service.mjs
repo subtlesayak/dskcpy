@@ -216,12 +216,12 @@ export function createControlService({
     broadcast();
   }
 
-  function consumeOutput(source, chunk) {
+  function consumeOutput(source, chunk, onLine) {
     const combined = logRemainders[source] + chunk.toString('utf8');
     const lines = combined.split(/\r?\n/);
     logRemainders[source] = lines.pop() || '';
     for (const line of lines) {
-      appendLog(source, line);
+      if (!onLine?.(line)) appendLog(source, line);
     }
   }
 
@@ -405,6 +405,7 @@ export function createControlService({
       const invitation = await browserReceiver.invite(mode, { viewOnly: Boolean(config.windowId),
         // Typing into a receiver focused on the host itself would feed the
         // injected events back into its own typing field. Local preview omits it.
+        textFocus: mode !== 'local' && !config.windowId && readiness.features?.browserTextFocus === true,
         keyboard: mode !== 'local' && !config.windowId && readiness.features?.browserKeyboard === true,
         rememberProfile: mode === 'internet' && !config.windowId ? { maxSize: config.maxSize, maxFps: config.maxFps, bitRateMbps: config.bitRateMbps } : null }, grant);
       if (usbDevice) {
@@ -501,7 +502,7 @@ export function createControlService({
       const session = reconnectSession;
       if (config.windowId && (platform !== 'darwin' || !state.readiness?.features?.macWindowCapture))
         throw new Error('This native host cannot capture a selected Mac window.');
-      const args = buildScrcpyArgs({ ...config, browserKeyboard: browserBridge?.keyboard === true }, internetBridge?.port);
+      const args = buildScrcpyArgs({ ...config, browserKeyboard: browserBridge?.keyboard === true, browserTextFocus: browserBridge?.textFocus === true }, internetBridge?.port);
       state.command = formatCommand(path.basename(runtime.executable), args);
       appendLog('gui', 'Starting ' + state.command);
       const child = spawnProcess(runtime.executable, args, {
@@ -513,7 +514,15 @@ export function createControlService({
       streamProcess = child;
       state.pid = child.pid ?? null;
       child.stdin.on('error', () => {}); // Child may exit before reading q.
-      child.stdout.on('data', (chunk) => consumeOutput('stdout', chunk));
+      child.stdout.on('data', (chunk) => consumeOutput('stdout', chunk, line => {
+        if (!line.startsWith('DSKCPY_TEXT_FOCUS ')) return false;
+        // Consume metadata separately from user logs. Only the current child
+        // and negotiated full-desktop keyboard session can publish a hint.
+        const match = /^DSKCPY_TEXT_FOCUS ([01?])$/.exec(line);
+        if (match && streamProcess === child && browserBridge?.textFocus)
+          browserBridge.focusHint(match[1] === '?' ? null : match[1] === '1');
+        return true;
+      }));
       child.stderr.on('data', (chunk) => consumeOutput('stderr', chunk));
       child.on('error', (error) => {
         state.error = error.message;

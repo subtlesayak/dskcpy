@@ -20,9 +20,9 @@ function packet(pts, flags, payload = Buffer.from([1, 2, 3])) {
   result.writeUInt32BE(flags, 12); payload.copy(result, 16); return result;
 }
 async function fixture(t, options = {}) {
-  let native, calls = 0;
+  let native, bridgeState, calls = 0;
   const receiver = createBrowserReceiver({ configuredPort: 0, onConnect: async (bridge) => {
-    calls++;
+    calls++; bridgeState=bridge;
     native = net.connect(bridge.port, '127.0.0.1');
     native.on('error', () => {});
     await once(native, 'connect');
@@ -39,7 +39,7 @@ async function fixture(t, options = {}) {
     await once(ws, 'open');
     return ws;
   };
-  return { receiver, invitation, open, native: () => native, calls: () => calls };
+  return { receiver, invitation, open, native: () => native, bridge:()=>bridgeState, calls: () => calls };
 }
 
 async function until(predicate) {
@@ -431,3 +431,63 @@ test('default host arms five-minute recovery; expiration revokes resumption', as
   assert.equal(f.receiver.status().connected, false);
   assert.equal(await resumable(f, cookie), false);
 });
+
+
+test('older cached viewers stay connected without optional focus messages', async t => {
+  const f = await fixture(t, { inputPolicy: { keyboard: true, textFocus: true } });
+  const ws = await login(f);
+  f.bridge().focusHint(true);
+  f.native().write(packet(101, 0));
+  await until(() => ws.received.some(m => m.binary && m.data.length > 16 && m.data.readBigUInt64BE(4) === 101n));
+  assert.equal(ws.received.some(m => !m.binary && JSON.parse(m.data).type === 'text-focus'), false);
+  assert.equal(ws.readyState, WebSocket.OPEN);
+});
+
+test('text focus is bounded advisory metadata on an authenticated capable session',async t=>{
+  const f=await fixture(t,{inputPolicy:{keyboard:true,textFocus:true}});const ws=await login(f);
+  const subscribed = once(f.native(), 'data');
+  ws.send('text-focus-subscribe'); ws.send(Buffer.from([8,2,0,0,0])); await subscribed;
+  assert.equal(f.bridge().textFocus,true);f.bridge().focusHint(true);
+  await until(()=>ws.received.some(m=>!m.binary&&m.data.toString().includes('text-focus')));
+  const hints=()=>ws.received.filter(m=>!m.binary&&m.data.toString().includes('text-focus'));
+  assert.deepEqual(JSON.parse(hints()[0].data.toString()),{type:'text-focus',focused:true});
+  f.bridge().focusHint('private text');await new Promise(setImmediate);assert.equal(hints().length,1);
+  const paused=once(f.native(),'data');ws.send('suspend');await paused;
+  f.bridge().focusHint(false);await new Promise(setImmediate);assert.equal(hints().length,1);
+});
+
+test('focus subscriptions belong to the current socket, not a resumed session', async t => {
+  const f = await fixture(t, { inputPolicy: { keyboard: true, textFocus: true } });
+  const first = await login(f);
+  const cookie = first.cookie.split(';')[0];
+  let barrier = once(f.native(), 'data');
+  first.send('text-focus-subscribe'); first.send(Buffer.from([8,2,0,0,0])); await barrier;
+  f.bridge().focusHint(true);
+  await until(() => first.received.some(m => !m.binary && JSON.parse(m.data).type === 'text-focus'));
+  barrier = once(f.native(), 'data'); first.terminate(); await barrier;
+  const second = await f.open(undefined, cookie);
+  await until(() => second.received.some(m => m.binary));
+  barrier = once(f.native(), 'data'); second.send('resume'); second.send(Buffer.from([8,2,0,0,0])); await barrier;
+  f.bridge().focusHint(false); f.native().write(packet(102, 0));
+  await until(() => second.received.some(m => m.binary && m.data.length > 16 && m.data.readBigUInt64BE(4) === 102n));
+  assert.equal(second.received.some(m => !m.binary && JSON.parse(m.data).type === 'text-focus'), false);
+  barrier = once(f.native(), 'data'); second.send('text-focus-subscribe'); second.send(Buffer.from([8,2,0,0,0])); await barrier;
+  f.bridge().focusHint(true);
+  await until(() => second.received.some(m => !m.binary && JSON.parse(m.data).type === 'text-focus'));
+  assert.equal(f.calls(), 1);
+});
+
+test('focus subscription cannot enable a capability the host did not advertise', async t => {
+  const f = await fixture(t, { inputPolicy: { keyboard: true } });
+  const ws = await login(f), ended = once(ws, 'close');
+  ws.send('text-focus-subscribe'); await ended;
+  assert.equal(f.receiver.status().connected, false);
+});
+
+for(const policy of [{keyboard:false,textFocus:true},{keyboard:true,textFocus:true,viewOnly:true},{keyboard:true}]){
+ test(`focus hints require full-desktop negotiated capability ${JSON.stringify(policy)}`,async t=>{
+  const f=await fixture(t,{inputPolicy:policy});const ws=await login(f);
+  assert.equal(f.bridge().textFocus,false);f.bridge().focusHint(true);await new Promise(setImmediate);
+  assert.equal(ws.received.some(m=>!m.binary&&m.data.toString().includes('text-focus')),false);
+ });
+}

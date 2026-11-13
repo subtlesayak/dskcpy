@@ -133,7 +133,7 @@ export function buildScrcpyArgs(config, bridgePort) {
     args.push(`--video-encoder=${config.encoder}`);
   }
   if (config.windowId) args.push(`--reverse-window=${config.windowId}`, '--no-audio');
-  else if (config.connection === 'browser' && config.browserKeyboard === true) args.push('--reverse-keyboard');
+  else if (config.connection === 'browser' && config.browserKeyboard === true) { args.push('--reverse-keyboard'); if (config.browserTextFocus === true) args.push('--reverse-text-focus'); }
   if (config.windowOwnerPid) args.push(`--reverse-window-owner=${config.windowOwnerPid}`);
   return args;
 }

@@ -720,3 +720,30 @@ test('owner Stop durably pauses remembered access; remote origin cannot re-enabl
   assert.equal((await f.request('/api/browser/trusted', { action: 'resume' })).body.paused, false);
   assert.equal(f.children.length, 0);
 });
+
+test('current native child focus metadata reaches only its capable browser and is not logged',async t=>{
+  const reserve=net.createServer();reserve.listen(0,'127.0.0.1');await once(reserve,'listening');
+  const browserPort=reserve.address().port;await new Promise(r=>reserve.close(r));
+  const origin='https://viewer.example.test';
+  const f=await fixture(t,{platform:'darwin',browserPort,
+    environment:{...process.env,SCRCPY_GUI_BINARY:process.execPath,DSKCPY_VIEWER_ORIGIN:origin},
+    readinessProbe:async()=>({...ready,features:{browserKeyboard:true,browserTextFocus:true}})});
+  const {body}=await f.request('/api/browser/invite',{browserTransport:'wifi'});assert.equal(f.children.length,0);
+  const ws=new WebSocket(`ws://127.0.0.1:${browserPort}/stream`,{origin,headers:{Host:'viewer.example.test'}});
+  ws.on('error',()=>{});t.after(()=>ws.terminate());const messages=[];
+  ws.on('message',(data,binary)=>{if(!binary)messages.push(JSON.parse(data));});
+  await once(ws,'open');ws.send(body.key);await waitFor(()=>f.children.length===1);
+  const child=f.children[0];assert.ok(child.args.includes('--reverse-text-focus'));
+  const port=Number(child.args.find(x=>x.startsWith('--reverse-socket=')).split('=')[1]);
+  const native=net.connect(port,'127.0.0.1');native.on('error',()=>{});t.after(()=>native.destroy());await once(native,'connect');
+  native.write(Buffer.from('535244310000000100000280000001e0','hex'));
+  await waitFor(() => messages.some(m => m.type === 'authenticated'));
+  const subscribed = once(native, 'data');
+  ws.send('text-focus-subscribe'); ws.send(Buffer.from([8,2,0,0,0])); await subscribed;
+  child.child.stdout.write('DSKCPY_TEXT_');child.child.stdout.write('FOCUS 1\n');
+  await waitFor(()=>messages.some(m=>m.type==='text-focus'));
+  assert.deepEqual(messages.find(m=>m.type==='text-focus'),{type:'text-focus',focused:true});
+  child.child.stdout.write('DSKCPY_TEXT_FOCUS never-forward-this\n');
+  assert.equal(f.publicState().logs.some(x=>x.message.includes('DSKCPY_TEXT_FOCUS')||x.message.includes('never-forward')),false);
+  await f.request('/api/stream/stop',{});
+});

@@ -13,6 +13,7 @@
 #include "reverse_audio_encoder.h"
 #include "reverse_macos_audio.h"
 #include "reverse_macos_keyboard.h"
+#include "reverse_macos_focus.h"
 #include "receiver.h"
 #include "options.h"
 #include "util/binary.h"
@@ -40,7 +41,7 @@ struct mac_state {
     uint64_t audio_epoch; // Epoch changes even for rapid mute/unmute.
     uint64_t audio_queue_drops; // Protected by mutex; no device identity.
     _Atomic bool audio_route_changed;
-    _Atomic bool keyboard_release_pending;
+    _Atomic bool keyboard_release_pending, focus_probe_pending;
     CVPixelBufferRef latest; // Exactly one newest capture, protected by mutex.
     uint64_t generation;
     VTCompressionSessionRef encoder;
@@ -97,6 +98,7 @@ static bool mac_session_ended(struct mac_state *s) {
         atomic_init(&state.audio_enabled, false); atomic_init(&state.audio_available, false);
         atomic_init(&state.audio_route_changed, false);
         atomic_init(&state.keyboard_release_pending, false);
+        atomic_init(&state.focus_probe_pending, false);
         atomic_init(&state.audio_acked_pts, -1); atomic_init(&state.acked_pts, -1);
         atomic_init(&state.sent_pts, -1); atomic_init(&state.encoding_since, 0);
         sc_reverse_watchdog_init(&state.watchdog);
@@ -528,6 +530,7 @@ static void mac_mouse(struct mac_state *s, CGEventType type, CGPoint point) {
     CGEventRef event = CGEventCreateMouseEvent(NULL, type, point, kCGMouseButtonLeft);
     if (event) { CGEventPost(kCGHIDEventTap, event); CFRelease(event); }
     s->mouse_point = point;
+    if (type == kCGEventLeftMouseUp) atomic_store(&s->focus_probe_pending, true);
 }
 static void mac_cancel_input(struct mac_state *s) {
     if (s->mouse_down) mac_mouse(s, kCGEventLeftMouseUp, s->mouse_point);
@@ -950,11 +953,21 @@ sc_reverse_display_macos_run(sc_socket video_socket, sc_socket control_socket, c
                     window ? "; view-only, audio off" : "; touch maps to mouse, two fingers scroll");
                 bool gui_pipe = mac_gui_pipe();
                 int64_t display_check_us = 0;
+                int previous_focus = -2;
                 for (;;) {
                     if (mac_gui_quit(gui_pipe) || atomic_load(&s->quit)) { result = SCRCPY_EXIT_SUCCESS; break; }
                     int64_t display_now = av_gettime_relative();
                     if (display_now >= display_check_us) {
                         display_check_us = display_now + 250000;
+                        if (options->reverse_text_focus && s->keyboard_enabled) {
+                            int focused = atomic_load(&s->paused) || mac_session_ended(s) ? -1 : sc_reverse_macos_editable_focus();
+                            bool clicked = atomic_exchange(&s->focus_probe_pending, false);
+                            if (focused != previous_focus || clicked) {
+                                // Fixed one-bit/unknown IPC, not field contents or app identity.
+                                printf("DSKCPY_TEXT_FOCUS %c\n", focused < 0 ? '?' : focused ? '1' : '0'); fflush(stdout);
+                                previous_focus = focused;
+                            }
+                        }
                         if (s->keyboard_enabled && (!AXIsProcessTrusted() || atomic_load(&s->keyboard_release_pending))) mac_cancel_keyboard(s);
                         if (!mac_display_matches(s)) {
                             LOGI("Mac display changed; reconnect to refresh capture and input geometry");

@@ -85,7 +85,7 @@ reverse_macos = get_option('reverse_macos') and host_machine.system() == 'darwin
 conf.set('HAVE_REVERSE_MACOS', reverse_macos)
 if reverse_macos
     add_languages('objc', native: false)
-    src += ['src/reverse_display_macos.m', 'src/reverse_macos_audio.m', 'src/reverse_macos_keyboard.m']
+    src += ['src/reverse_display_macos.m', 'src/reverse_macos_audio.m', 'src/reverse_macos_keyboard.m', 'src/reverse_macos_focus.m']
     add_project_arguments('-fobjc-arc', '-fblocks', '-std=gnu11', '-mmacosx-version-min=13.0', language: 'objc')
     add_project_arguments('-mmacosx-version-min=13.0', language: 'c')
     add_project_link_arguments('-mmacosx-version-min=13.0', language: ['c', 'objc'])
@@ -254,6 +254,10 @@ if get_option('buildtype') == 'debug'
             ['tests/test_reverse_macos_keyboard.m', 'src/reverse_macos_keyboard.m'],
             include_directories: src_dir, dependencies: dependencies)
         test('test_reverse_macos_keyboard', mac_keyboard_test)
+        mac_focus_test = executable('test_reverse_macos_focus',
+            ['tests/test_reverse_macos_focus.m', 'src/reverse_macos_focus.m'],
+            dependencies: dependencies, include_directories: include_directories('src'))
+        test('test_reverse_macos_focus', mac_focus_test)
         mac_audio_test = executable('test_reverse_macos_audio',
             ['tests/test_reverse_macos_audio.m', 'src/reverse_macos_audio.m', 'src/reverse_audio_encoder.c'],
             include_directories: src_dir, dependencies: dependencies)

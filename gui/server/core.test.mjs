@@ -138,3 +138,11 @@ test('explicit window selection is strict, browser-only and never silently becom
   assert.ok(args.includes('--reverse-window=17')); assert.ok(args.includes('--no-audio'));
   assert.equal(args.includes('--reverse-keyboard'), false);
 });
+
+
+test('native focus reporting is browser keyboard only and omitted for window/Android routes',()=>{
+  const base=sanitizeStreamConfig({connection:'browser'});
+  assert.ok(buildScrcpyArgs({...base,browserKeyboard:true,browserTextFocus:true},1234).includes('--reverse-text-focus'));
+  assert.equal(buildScrcpyArgs({...base,browserTextFocus:true},1234).includes('--reverse-text-focus'),false);
+  assert.equal(buildScrcpyArgs({...base,connection:'usb',browserKeyboard:true,browserTextFocus:true},1234).includes('--reverse-text-focus'),false);
+});

@@ -101,6 +101,7 @@ export async function inspectReadiness(runtime, runCommand) {
     return [connection, { ready: failed.length === 0, message: failed[0]?.message || 'Local components are ready.', required }];
   }));
   return { checks, transports, features: {
+    browserTextFocus: platform === 'darwin' && macBackend && nativeHelp.includes('--reverse-keyboard') && nativeHelp.includes('--reverse-text-focus'),
     browserKeyboard: platform === 'darwin' && macBackend && nativeHelp.includes('--reverse-keyboard'),
     macWindowCapture: platform === 'darwin' && macBackend && nativeHelp.includes('--list-reverse-windows') && nativeHelp.includes('--reverse-window-owner'),
   }, checkedAt: new Date().toISOString() };

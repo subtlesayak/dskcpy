@@ -14,7 +14,7 @@ const parameters = new Uint8Array([0, 0, 1, 0x67, 0x64, 0, 0x28, 0, 0, 1, 0x68, 
 
 // Deterministic lifecycle tests against the actual receiver script. These model
 // delayed browser callbacks; rendered/device QA is separate from this harness.
-function receiver(t, { portrait = false, lockFails = false, webRtc = false, webCodecs = true, qrKey = '', keyboard = false, viewOnly = false, visualHeight = 0, webAudio = false, now = () => Date.now(), resumable = false } = {}) {
+function receiver(t, { portrait = false, lockFails = false, webRtc = false, webCodecs = true, qrKey = '', keyboard = false, viewOnly = false, visualHeight = 0, webAudio = false, textFocus = false, virtualKeyboard = null, now = () => Date.now(), resumable = false } = {}) {
   const timers = new Set(), sockets = [], decoders = [], orientation = [];
   let resize;
   const locationState = { protocol: 'https:', host: 'receiver.test', pathname: qrKey ? '/join' : '/', search: '', hash: qrKey ? `#connect=${qrKey}` : '' };
@@ -105,7 +105,7 @@ function receiver(t, { portrait = false, lockFails = false, webRtc = false, webC
       fetch: (...args) => context.fetch(...args),
       setTimeout: (fn, ms) => { const timer = setTimeout(fn, ms); timers.add(timer); return timer; }, clearTimeout }),
     createVideoReceiver: (options) => createVideoReceiver({ ...options, Decoder }),
-    window, document, WebSocket: Socket, VideoDecoder: Decoder, AudioDecoder: SoundDecoder, AudioContext,
+    navigator: { virtualKeyboard }, window, document, WebSocket: Socket, VideoDecoder: Decoder, AudioDecoder: SoundDecoder, AudioContext,
     EncodedAudioChunk: class { constructor(value) { Object.assign(this, value); } },
     EncodedVideoChunk: class { constructor(value) { Object.assign(this, value); } },
     ResizeObserver: class { constructor(callback) { resize = callback; } observe() {} }, getComputedStyle: () => ({ paddingTop: '0', paddingRight: '0', paddingBottom: '0', paddingLeft: '0' }),
@@ -121,7 +121,7 @@ function receiver(t, { portrait = false, lockFails = false, webRtc = false, webC
   t.after(() => { for (const timer of timers) clearTimeout(timer); });
   if (!qrKey) { $('session-key').value = 'x'.repeat(32); $('join-form').emit('submit'); }
   const socket = sockets[0]; socket.emit('open');
-  socket.emit('message', { data: JSON.stringify({ type: 'authenticated', keyboard, viewOnly, mediaMode: webRtc ? 'webrtc' : 'webcodecs' }) });
+  socket.emit('message', { data: JSON.stringify({ type: 'authenticated', keyboard, viewOnly, textFocus, mediaMode: webRtc ? 'webrtc' : 'webcodecs' }) });
   const header = new ArrayBuffer(16), view = new DataView(header);
   view.setUint32(0, 0x53524431); view.setUint32(4, 1); view.setUint32(8, 640); view.setUint32(12, 480);
   socket.emit('message', { data: header });
@@ -702,3 +702,36 @@ for (const [elapsed, expectedSockets] of [[180000,2],[300001,1]]) {
     if(expectedSockets===1)assert.match(h.$('error').textContent,/session ended/);
   });
 }
+
+
+test('editable-focus hints open typing only after opt-in and never refocus an open IME', (t) => {
+  let shown=0; const h=receiver(t,{keyboard:true,textFocus:true,virtualKeyboard:{show(){shown++;},boundingRect:{height:0}}});
+  assert.equal(h.socket.sent.filter(m => m === 'text-focus-subscribe').length, 1);
+  const hint=focused=>h.socket.emit('message',{data:JSON.stringify({type:'text-focus',focused})});
+  hint(true);assert.notEqual(h.$('keyboard').attrs.get('aria-expanded'),'true');
+  h.$('auto-keyboard').checked=true;h.$('auto-keyboard').emit('change');
+  hint(null);hint(false);assert.equal(shown,0);
+  hint(true);assert.equal(h.$('keyboard').attrs.get('aria-expanded'),'true');assert.equal(shown,1);
+  assert.equal(h.document.activeElement,h.$('keyboard-input'));
+  h.$('keyboard-input').value='composing';hint(true);
+  assert.equal(h.$('keyboard-input').value,'composing');assert.equal(shown,1);
+  h.document.activeElement=h.$('display');hint(true);assert.equal(shown,2);
+  assert.equal(h.document.activeElement,h.$('keyboard-input'));
+  h.$('close-keyboard').emit('click');h.$('pause').emit('click');hint(true);assert.equal(shown,2);
+  h.$('pause').emit('click');h.$('touch').emit('click');hint(true);assert.equal(shown,2);
+  h.$('touch').emit('click');h.document.hidden=true;hint(true);assert.equal(shown,2);
+  h.document.hidden=false;h.$('disconnect').emit('click');assert.equal(h.$('auto-keyboard').checked,false);
+});
+
+test('auto keyboard keeps manual fallback without VirtualKeyboard API and cannot bypass view-only or absent capability', t=>{
+  const h=receiver(t,{keyboard:true,textFocus:true});h.$('auto-keyboard').checked=true;h.$('auto-keyboard').emit('change');
+  h.socket.emit('message',{data:JSON.stringify({type:'text-focus',focused:true})});
+  assert.equal(h.$('keyboard').attrs.get('aria-expanded'),'true');assert.equal(h.$('auto-keyboard-feedback').hidden,false);
+  for(const policy of [{keyboard:true},{keyboard:true,textFocus:true,viewOnly:true}]){
+    const denied=receiver(t,policy);denied.$('auto-keyboard').checked=true;denied.$('auto-keyboard').emit('change');
+    assert.equal(denied.socket.sent.includes('text-focus-subscribe'), false);
+    denied.socket.emit('message',{data:JSON.stringify({type:'text-focus',focused:true})});
+    assert.notEqual(denied.$('keyboard').attrs.get('aria-expanded'),'true');
+    assert.equal(denied.$('auto-keyboard-setting').hidden,true);
+  }
+});

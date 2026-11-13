@@ -344,6 +344,7 @@ struct scrcpy_options {
     uint32_t reverse_window; // Explicit Mac window ID; 0 selects a display.
     uint32_t reverse_window_owner;
     bool list_reverse_windows;
+    bool reverse_text_focus; // Optional stdout metadata; requires browser keyboard.
     bool reverse_keyboard; // Browser-only opt-in; never inferred from Android.
     uint16_t reverse_socket; // Authenticated GUI proxy on loopback; no ADB.
     const char *start_app;

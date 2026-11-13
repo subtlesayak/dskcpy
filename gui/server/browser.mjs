@@ -301,7 +301,8 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
     trustedTicket = grant;
     rememberProfile = policy.rememberProfile || null;
     mode = connection;
-    inputPolicy = { keyboard: policy.keyboard === true && policy.viewOnly !== true, viewOnly: policy.viewOnly === true };
+    inputPolicy = { keyboard: policy.keyboard === true && policy.viewOnly !== true, viewOnly: policy.viewOnly === true,
+      textFocus: policy.textFocus === true && policy.keyboard === true && policy.viewOnly !== true };
     invitation = randomBytes(24);
     failures = 0;
     const duration = grant ? 15000 : invitationMs;
