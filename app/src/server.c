@@ -75,6 +75,7 @@ push_server(struct sc_intr *intr, const char *serial) {
 
 static bool
 install_reverse_display_app(struct sc_intr *intr, const char *serial) {
+    LOGI("Reverse startup: install-start");
     char *apk_path = sc_get_env(SC_REVERSE_DISPLAY_APK_ENV);
     if (!apk_path) {
 #ifdef PORTABLE
@@ -85,6 +86,7 @@ install_reverse_display_app(struct sc_intr *intr, const char *serial) {
     }
     if (!apk_path) {
         LOG_OOM();
+        LOGI("Reverse startup: install-failed");
         return false;
     }
 
@@ -92,12 +94,14 @@ install_reverse_display_app(struct sc_intr *intr, const char *serial) {
         LOGE("Reverse display companion APK '%s' does not exist or is not a "
              "regular file", apk_path);
         free(apk_path);
+        LOGI("Reverse startup: install-failed");
         return false;
     }
 
     LOGD("Installing reverse display companion: %s", apk_path);
     bool ok = sc_adb_install(intr, serial, apk_path, 0);
     free(apk_path);
+    LOGI("Reverse startup: %s", ok ? "install-ready" : "install-failed");
     return ok;
 }
 
@@ -280,12 +284,14 @@ execute_server(struct sc_server *server,
     assert(serial);
 
     if (params->reverse_display) {
+        LOGI("Reverse startup: launch-start");
         const char *const force_stop_cmd[] = {
             sc_adb_get_executable(), "-s", serial, "shell", "am",
             "force-stop", SC_REVERSE_DISPLAY_PACKAGE, NULL,
         };
         if (!run_adb_command(&server->intr, force_stop_cmd,
                              "adb shell am force-stop")) {
+            LOGI("Reverse startup: launch-failed");
             return SC_PROCESS_NONE;
         }
 
@@ -305,8 +311,10 @@ execute_server(struct sc_server *server,
         };
         if (!run_adb_command(&server->intr, start_cmd,
                              "adb shell am start")) {
+            LOGI("Reverse startup: launch-failed");
             return SC_PROCESS_NONE;
         }
+        LOGI("Reverse startup: launch-ready");
 
         // Keep a child adb shell alive so the existing server lifecycle and
         // process observer can stop the companion Activity with the session.
@@ -769,11 +777,14 @@ sc_server_connect_to(struct sc_server *server, struct sc_server_info *info) {
 
         unsigned attempts = 100;
         sc_tick delay = SC_TICK_FROM_MS(100);
+        if (server->params.reverse_display) LOGI("Reverse startup: socket-wait");
         sc_socket first_socket = connect_to_server(server, attempts, delay,
                                                    tunnel_host, tunnel_port);
         if (first_socket == SC_SOCKET_NONE) {
+            if (server->params.reverse_display) LOGI("Reverse startup: socket-failed");
             goto fail;
         }
+        if (server->params.reverse_display) LOGI("Reverse startup: socket-ready");
 
         if (video) {
             video_socket = first_socket;
@@ -801,11 +812,13 @@ sc_server_connect_to(struct sc_server *server, struct sc_server_info *info) {
             } else {
                 control_socket = net_socket();
                 if (control_socket == SC_SOCKET_NONE) {
+                    if (server->params.reverse_display) LOGI("Reverse startup: control-failed");
                     goto fail;
                 }
                 bool ok = net_connect_intr(&server->intr, control_socket,
                                            tunnel_host, tunnel_port);
                 if (!ok) {
+                    if (server->params.reverse_display) LOGI("Reverse startup: control-failed");
                     goto fail;
                 }
             }
@@ -831,6 +844,7 @@ sc_server_connect_to(struct sc_server *server, struct sc_server_info *info) {
     // The sockets will be closed on stop if device_read_info() fails
     bool ok = device_read_info(&server->intr, first_socket, info);
     if (!ok) {
+        if (server->params.reverse_display) LOGI("Reverse startup: metadata-failed");
         goto fail;
     }
 
@@ -841,6 +855,7 @@ sc_server_connect_to(struct sc_server *server, struct sc_server_info *info) {
     server->video_socket = video_socket;
     server->audio_socket = audio_socket;
     server->control_socket = control_socket;
+    if (server->params.reverse_display) LOGI("Reverse startup: transport-ready");
 
     return true;
 

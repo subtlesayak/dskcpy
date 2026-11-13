@@ -10,6 +10,7 @@ import { parseMdnsServices } from './discovery.mjs';
 import { createBrowserReceiver } from './browser.mjs';
 import { createTrustedDevices } from './trusted-devices.mjs';
 import { browserJoinUrl } from '../receiver/protocol.mjs';
+import { createNativeStartupHistory } from './native-startup.mjs';
 
 import {
   buildScrcpyArgs,
@@ -75,6 +76,7 @@ export function createControlService({
   const clients = new Set();
   const pendingClients = new Set();
   const logLimit = 160;
+  const nativeStartup = createNativeStartupHistory();
 
   let streamProcess = null;
   let streamStopRequested = false;
@@ -163,6 +165,7 @@ export function createControlService({
   function publicState() {
     return {
       ...state,
+      nativeStartup: nativeStartup.snapshot(),
       browser: browserReceiver.status(),
       binaryAvailable: state.readiness?.checks.some((check) => check.id === 'binary' && check.ready) ?? false,
     };
@@ -477,6 +480,8 @@ export function createControlService({
     state.command = null;
     state.lastExitCode = null;
     state.startedAt = new Date().toISOString();
+    const startupAttempt = !browserBridge && ['usb', 'wifi', 'ip'].includes(config.connection)
+      ? nativeStartup.begin({ retry: Boolean(retrySession) }) : (nativeStartup.clear(), null);
     lastNativeError = null;
     streamStopRequested = false;
     broadcast();
@@ -518,10 +523,12 @@ export function createControlService({
         stdio: ['pipe', 'pipe', 'pipe'],
       });
       streamProcess = child;
+      startupAttempt?.spawned();
       let captureEndReason = null;
       state.pid = child.pid ?? null;
       child.stdin.on('error', () => {}); // Child may exit before reading q.
       child.stdout.on('data', (chunk) => consumeOutput('stdout', chunk, line => {
+        if (streamProcess === child) startupAttempt?.observe(line);
         if (line.startsWith('DSKCPY_CAPTURE_END ')) {
           const match = /^DSKCPY_CAPTURE_END (display-change|sleep|permission-lost|user-stop)$/.exec(line);
           if (match && platform === 'darwin' && streamProcess === child && browserBridge && readiness.features?.browserCaptureRecovery) captureEndReason = match[1];
@@ -540,7 +547,10 @@ export function createControlService({
           browserBridge.focusHint(match[1] === '?' ? null : match[1] === '1');
         return true;
       }));
-      child.stderr.on('data', (chunk) => consumeOutput('stderr', chunk));
+      child.stderr.on('data', (chunk) => consumeOutput('stderr', chunk, line => {
+        if (streamProcess === child) startupAttempt?.observe(line);
+        return false;
+      }));
       child.on('error', (error) => {
         state.error = error.message;
         appendLog('error', error.message);
@@ -553,10 +563,12 @@ export function createControlService({
         stopTimer = null;
         for (const source of ['stdout', 'stderr']) {
           if (logRemainders[source]) {
+            startupAttempt?.observe(logRemainders[source]);
             appendLog(source, logRemainders[source]);
             logRemainders[source] = '';
           }
         }
+        startupAttempt?.finish({ stopped: streamStopRequested || shuttingDown });
         child.stdin.destroy();
         child.stdout.destroy();
         child.stderr.destroy();
@@ -610,6 +622,7 @@ export function createControlService({
       broadcast();
       return publicState();
     } catch (error) {
+      startupAttempt?.finish({ stopped: attempt.signal.aborted || shuttingDown, preflight: true });
       browserBridge?.close();
       internetBridge?.close();
       internetBridge = null;
