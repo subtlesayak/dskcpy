@@ -6,6 +6,9 @@ export const SHORTCUT_KEYS = Object.freeze([
   ...Array.from({ length: 26 }, (_, i) => `Key${String.fromCharCode(65 + i)}`),
   ...Array.from({ length: 10 }, (_, i) => `Digit${i}`),
   ...Array.from({ length: 20 }, (_, i) => `F${i + 1}`),
+  ...['Minus', 'Equal', 'BracketLeft', 'BracketRight', 'Backslash', 'Semicolon', 'Quote', 'Backquote', 'Comma', 'Period', 'Slash', 'CapsLock',
+    'NumLock', 'NumpadDivide', 'NumpadMultiply', 'NumpadSubtract', 'NumpadAdd', 'NumpadEnter', 'NumpadDecimal', 'IntlBackslash', 'NumpadEqual'],
+  ...Array.from({ length: 10 }, (_, i) => `Numpad${i}`),
 ]);
 const codes = new Set(SHORTCUT_KEYS);
 const storageKey = 'dskcpy.shortcuts.v1';
@@ -14,10 +17,19 @@ export function shortcutBinding(code, modifiers) {
   if (!codes.has(code) || !keyboardUsage(code) || !Number.isInteger(modifiers) || modifiers < 0 || modifiers > 15) return null;
   return { code, modifiers };
 }
+export function shortcutKeyLabel(code) {
+  if (!codes.has(code)) return '';
+  const names = { PageUp: 'Page Up', PageDown: 'Page Down', Minus: '−', Equal: '=', BracketLeft: '[', BracketRight: ']',
+    Backslash: String.fromCharCode(92), Semicolon: ';', Quote: String.fromCharCode(39), Backquote: String.fromCharCode(96), Comma: ',', Period: '.', Slash: '/',
+    CapsLock: 'Caps Lock', NumLock: 'Num Lock / Clear', IntlBackslash: 'ISO extra key', NumpadDivide: 'Keypad /', NumpadMultiply: 'Keypad *',
+    NumpadSubtract: 'Keypad −', NumpadAdd: 'Keypad +', NumpadEnter: 'Keypad Enter', NumpadDecimal: 'Keypad decimal', NumpadEqual: 'Keypad =' };
+  if (/^Numpad\d$/.test(code)) return `Keypad ${code.at(-1)}`;
+  return names[code] || code.replace(/^Key|^Digit/, '').replace(/^Arrow/, '');
+}
 export function shortcutLabel(binding) {
   const b = shortcutBinding(binding?.code, binding?.modifiers);
   if (!b) return '';
-  const name = b.code.replace(/^Key|^Digit/, '').replace(/^Arrow/, '');
+  const name = shortcutKeyLabel(b.code);
   return [...['Ctrl', 'Shift', 'Alt', 'Meta'].filter((_, i) => b.modifiers & (1 << i)), name].join(' + ');
 }
 export function createKeyboardShortcuts({ send, canSend, storage = () => null }) {

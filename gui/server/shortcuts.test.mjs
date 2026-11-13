@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createKeyboardShortcuts, shortcutBinding, shortcutLabel, SHORTCUT_KEYS } from '../receiver/shortcuts.mjs';
+import { createKeyboardShortcuts, shortcutBinding, shortcutLabel, shortcutKeyLabel, SHORTCUT_KEYS } from '../receiver/shortcuts.mjs';
 import { validBrowserInput } from './browser-protocol.mjs';
 function fixture(raw) {
   const data = new Map(raw ? [['dskcpy.shortcuts.v1', raw]] : []), packets = [];
@@ -20,6 +20,8 @@ test('configured shortcut is an explicit balanced key pair within the existing w
   assert.ok(f.packets.every(p => validBrowserInput(p, 640, 480, { keyboard: true })));
   assert.ok(f.packets.every(p => !validBrowserInput(p, 640, 480, { keyboard: false })));
   assert.equal(shortcutLabel({ code: 'KeyS', modifiers: 11 }), 'Ctrl + Shift + Meta + S');
+  assert.equal(shortcutKeyLabel('BracketLeft'), '['); assert.equal(shortcutKeyLabel('Numpad0'), 'Keypad 0');
+  assert.equal(shortcutKeyLabel('NumLock'), 'Num Lock / Clear'); assert.equal(shortcutKeyLabel('LaunchMail'), '');
   f.deny(); const count = f.packets.length; assert.equal(f.keys.tap(0), false); assert.equal(f.packets.length, count);
 });
 test('only six validated single-key bindings persist; invalid and oversized data falls back atomically', () => {

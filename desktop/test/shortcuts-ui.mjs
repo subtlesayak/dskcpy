@@ -2,6 +2,7 @@
 // collector. No OS input, media capture, device, permission or live service.
 import { chromium } from 'playwright';
 import { createBrowserReceiver } from '../../gui/server/browser.mjs';
+import { SHORTCUT_KEYS, shortcutKeyLabel } from '../../gui/receiver/shortcuts.mjs';
 import { validBrowserInput } from '../../gui/server/browser-protocol.mjs';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
@@ -47,6 +48,8 @@ try { for (const variant of [{ width: 390, height: 844 }, { width: 844, height: 
     }
     const open = () => page.getByRole('button', { name: 'Shortcuts', exact: true }).click();
     await open();
+    assert.deepEqual(await page.locator('#shortcut-key').evaluate(e => [...e.options].map(o => o.value)), [...SHORTCUT_KEYS], 'every offered code matches the bounded host-mapped key set');
+    assert.deepEqual(await page.locator('#shortcut-key').evaluate(e => [...e.options].map(o => o.textContent)), SHORTCUT_KEYS.map(shortcutKeyLabel));
     const before = inputs.length;
     await page.locator('#shortcut-customize summary').click();
     await page.locator('#shortcut-slot').selectOption('0');

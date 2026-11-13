@@ -10,7 +10,7 @@ Alt or Meta modifiers, then select **Apply shortcut**. Applying or resetting
 changes only the button, without sending keys. Meta means Command on Mac and
 Windows on Windows; Alt means Option on Mac. App bindings and system handling
 can differ, so a transmitted chord is not proof that an app performed an action.
-Only keys mapped by the existing Mac and Windows native hosts are offered.
+The choices include mapped navigation, letter, number, symbol, function and keypad keys. Only codes mapped by both existing Mac and Windows native hosts are offered; pure modifiers use the modifier checkboxes.
 The palette adds no script, recorded macro, text-snippet or held-modifier mode.
 
 The six validated bindings are saved locally under `dskcpy.shortcuts.v1`.
