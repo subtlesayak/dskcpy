@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { inventory, hashFile } from '../tools/build-identity.mjs';
 import { inspectMachO } from '../release/package_macos_host.mjs';
 import { stageAdb } from './stage-adb.mjs';
+import { stageRuntimeNotices } from './runtime-notices.mjs';
 
 const execute = promisify(execFile);
 const repository = fileURLToPath(new URL('../', import.meta.url));
@@ -67,6 +68,7 @@ export async function stageHost({ native, output = path.join(repository, 'deskto
   await execute(process.platform === 'win32' ? process.execPath : 'npm', process.platform === 'win32' ? [npmCli, ...npmArgs] : npmArgs,
     { timeout: 180000, maxBuffer: 1024 * 1024 });
   await rm(path.join(appDir, 'node_modules/.bin'), { recursive: true, force: true });
+  const runtimeNotices = await stageRuntimeNotices(appDir, hostDir);
   const { stdout: stagedHelp } = await execute(path.join(hostDir, 'bin', filename), ['--help'], {
     cwd: hostDir, timeout: 10000, killSignal: 'SIGKILL', maxBuffer: 1024 * 1024,
     env: process.platform === 'win32' ? isolatedWindowsEnvironment(process.env, path.join(hostDir, 'bin')) : { ...process.env, PATH: '/usr/bin:/bin' },
@@ -75,7 +77,7 @@ export async function stageHost({ native, output = path.join(repository, 'deskto
   const { stdout: commit } = await execute('git', ['rev-parse', 'HEAD'], { cwd: repository });
   const { stdout: changes } = await execute('git', ['status', '--porcelain'], { cwd: repository });
   const manifest = { schemaVersion: 1, product: 'dskcpy-host-desktop-development', sourceCommit: commit.trim(), sourceModified: Boolean(changes.trim()),
-    nativeSha256: await hashFile(native), platform: process.platform, architecture: process.arch, linkage, usbRuntime,
+    nativeSha256: await hashFile(native), platform: process.platform, architecture: process.arch, linkage, usbRuntime, runtimeNotices,
     qualification: { helpOnly: true, nativePhysicalTest: false, desktopPhysicalTest: false,
       signed: false, notarized: false, nativeNoticesIncluded: Boolean(licenses), thirdPartyNoticesReviewed: false, publicReleaseReady: false },
     files: await inventory(output) };
