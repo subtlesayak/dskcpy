@@ -155,7 +155,7 @@ test('long typing retains a bounded recent preview without truncating host text;
 
 test('suggestion commit after transient IME focus loss replaces the existing word once', () => {
   const e=editor(); e.append('hel');
-  e.emit('blur'); // Native suggestion UI can temporarily take field focus.
+  e.emit('blur'); e.input.release(); // Both field and window focus can change during native IME UI.
   e.field.focus();
   e.emit('compositionstart');
   e.change('hello',5,5,{isComposing:true});
@@ -172,4 +172,16 @@ test('leaving the typing context clears its preview and a transient blur release
   e.emit('blur'); assert.deepEqual([...e.packets.at(-1)],[8,2,0,0,0]);
   assert.equal(e.field.value,'local');
   e.input.setEnabled(false); assert.equal(e.field.value,''); assert.equal(e.host(),'host:local');
+});
+
+
+test('Gboard-style composing word replacement uses balanced deletes without synthetic Shift selection', () => {
+  const e=editor(); for(const c of 'germ') e.append(c);
+  e.input.release(); e.field.focus(); e.emit('compositionstart');
+  e.change('German',6,6,{isComposing:true}); e.emit('compositionend',{data:'German'});
+  e.change('German',6,6,{inputType:'insertReplacementText'});
+  assert.equal(e.host(),'host:German'); assert.equal(e.field.value,'German');
+  assert.equal(e.packets.some(p=>p[0]===8&&(p[4]&2)),false);
+  const deletes=e.packets.filter(p=>p[0]===8&&p.readUInt16BE(2)===42);
+  assert.deepEqual(deletes.map(p=>p[1]),[0,1,0,1,0,1,0,1]);
 });
