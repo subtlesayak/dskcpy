@@ -30,3 +30,13 @@ fake native host, exercise narrow/landscape/RTL/200% layouts, serve real mixed
 old/new files, and reload without a new invitation or native restart. Those
 checks do not establish uninterrupted real-device audio/video or physical Mac
 key handling. The actual phone refresh remains under the user's control.
+
+The typing field retains a recent local preview while focused. Ordinary edits,
+selection replacement, Backspace/Delete, pasted text and composition send only
+new changes, rather than resending the visible history. The preview is not a
+readback of the Mac field: clicking elsewhere, navigating to another context or
+closing/pausing the panel clears it locally without deleting host text. Long
+continuous typing keeps a bounded recent tail so the field's length limit does
+not stop input. Nothing is stored in browser storage or read from the clipboard.
+Cursor edits assume an ordinary text editor; application-specific editing and
+real phone IME behavior still require physical qualification.
