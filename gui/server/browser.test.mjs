@@ -410,3 +410,24 @@ for (const input of [Buffer.from([8,0,0,4,0]), Buffer.from(touchPacket(0, 1, 20,
     assert.equal(f.receiver.status().connected, false);
   });
 }
+
+
+test('default host arms five-minute recovery; expiration revokes resumption', async (t) => {
+  const f = await fixture(t);
+  const ws = await login(f), cookie = ws.cookie.split(';')[0];
+  const original = globalThis.setTimeout; let expire, duration;
+  // Observe only this session's grace timer; keep I/O and WebSocket close
+  // timers real so the test cannot strand a socket during fake-clock cleanup.
+  const timerMock = t.mock.method(globalThis, 'setTimeout', (fn, ms, ...args) => {
+    if (ms === 300000) { expire = fn; duration = ms; }
+    return original(fn, ms, ...args);
+  });
+  const paused = once(f.native(), 'data'); ws.send('suspend'); await paused;
+  timerMock.mock.restore();
+  assert.equal(duration, 300000); assert.equal(typeof expire, 'function');
+  assert.equal(f.receiver.status().connected, true);
+  assert.equal(await resumable(f, cookie), true);
+  const ended = once(ws, 'close'); expire(); await ended;
+  assert.equal(f.receiver.status().connected, false);
+  assert.equal(await resumable(f, cookie), false);
+});
