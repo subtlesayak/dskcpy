@@ -1,11 +1,82 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { RTCPeerConnection, useH264, useOPUS } from 'werift';
+import { RTCPeerConnection, useH264, useOPUS, H264RtpPayload, splitH264NalUnits } from 'werift';
 import { createRtcMedia, privateRtcBind, rtpTimestamp, sessionScopedIceLite } from './browser-rtc.mjs';
 
 const configuration = Buffer.from('000000016742c01e0102030000000168ce3c80', 'hex');
 const key = Buffer.from('0000000165888401020304', 'hex');
 const delta = Buffer.from('00000001419a01020304', 'hex');
+const rtpNals = packets => packets.flatMap(p => splitH264NalUnits(H264RtpPayload.deSerialize(p.payload).payload, 4, 'annexb'));
+
+test('RTC sends configuration with an IDR when the native frame omits parameter sets', async t => {
+  let peer;
+  const media = createRtcMedia({ configuration, peerFactory: options => (peer = new RTCPeerConnection(options)) });
+  t.after(() => media.close());
+  const packets = []; peer.getSenders()[0].sendRtp = async p => { packets.push(p); };
+  peer.connectionStateChange.execute('connected');
+  assert.equal(await media.frame(key, 100n, true), true);
+  const nals = rtpNals(packets);
+  assert.deepEqual(nals.map(n => n[0] & 31), [7, 8, 5]);
+  assert.deepEqual(Buffer.concat(nals.slice(0,2)), Buffer.concat(splitH264NalUnits(configuration,4,'annexb')));
+});
+
+test('legacy SPS-only startup still works when the first IDR carries PPS', async t => {
+  let peer;
+  const sets=splitH264NalUnits(configuration,4,'annexb');
+  const media=createRtcMedia({configuration:Buffer.concat([Buffer.from([0,0,0,1]),sets[0]]),
+    peerFactory:o=>(peer=new RTCPeerConnection(o))});t.after(()=>media.close());
+  const packets=[];peer.getSenders()[0].sendRtp=async p=>{packets.push(p);};peer.connectionStateChange.execute('connected');
+  await media.frame(Buffer.concat([Buffer.from([0,0,0,1]),sets[1],key]),1n,true);
+  assert.deepEqual(rtpNals(packets).map(n=>n[0]&31),[7,8,5]);
+});
+
+test('RTC configuration change retains RTP/audio state, waits for IDR and never retains old pixels', async t => {
+  let peer, requests = 0, time = 0;
+  const media = createRtcMedia({ configuration, now: () => time, onKeyframe: () => requests++,
+    peerFactory: options => (peer = new RTCPeerConnection(options)) });
+  t.after(() => media.close());
+  const video = [], audio = []; peer.getSenders()[0].sendRtp = async p => { video.push(p); };
+  peer.getSenders()[1].sendRtp = async p => { audio.push(p); };
+  peer.connectionStateChange.execute('connected');
+  await media.frame(key,100n,true); await media.sound(Buffer.from([0xf8,0xff,0xfe]),100n);
+  const next = Buffer.from('000000016742c01e1122330000000168ce3c81','hex');
+  time = 400; assert.equal(media.configure(Buffer.concat([next,key])), true);
+  assert.equal(await media.frame(delta,200n,false),false);
+  const start=video.length; assert.equal(await media.frame(key,300n,true),true);
+  const nals=rtpNals(video.slice(start));assert.deepEqual(nals.map(n=>n[0]&31),[7,8,5]);
+  assert.deepEqual(Buffer.concat(nals.slice(0,2)),Buffer.concat(splitH264NalUnits(next,4,'annexb')));
+  assert.equal((video[start].header.sequenceNumber-video[start-1].header.sequenceNumber)&0xffff,1);
+  assert.equal(new Set(video.map(p=>p.header.ssrc)).size,1);
+  await media.sound(Buffer.from([0xf8,0xff,0xfe]),101n);
+  assert.equal((audio[1].header.timestamp-audio[0].header.timestamp)>>>0,480);
+  assert.ok(requests>=2);assert.equal(media.configure(next),false);
+  for(const invalid of [Buffer.alloc(65537),key,configuration.subarray(0,11),Buffer.from('000000016764001e0102030000000168ce3c80','hex')])
+    assert.throws(()=>media.configure(invalid),/configuration|profile|parameter/);
+  assert.equal(await media.frame(delta,400n,false),true,'rejected config preserves last working configuration');
+  await media.close();assert.equal(media.configure(next),false);
+});
+
+test('an old in-flight IDR cannot satisfy a newer configuration epoch', async t => {
+  let peer, finish;
+  const media=createRtcMedia({configuration,peerFactory:o=>(peer=new RTCPeerConnection(o))});
+  t.after(()=>media.close());peer.connectionStateChange.execute('connected');
+  const sender=peer.getSenders()[0];sender.sendRtp=()=>finish?Promise.resolve():new Promise(r=>{finish=r;});
+  const old=media.frame(key,1n,true);
+  media.configure(Buffer.from('000000016742c01e1122330000000168ce3c81','hex'));
+  finish();await old;sender.sendRtp=async()=>{};
+  assert.equal(await media.frame(delta,2n,false),false);
+  assert.equal(await media.frame(key,3n,true),true);
+  assert.equal(await media.frame(delta,4n,false),true);
+});
+
+test('parameter replay keeps AUD first and adds only the missing PPS without duplicating pixels', async t => {
+  let peer;
+  const media=createRtcMedia({configuration,peerFactory:o=>(peer=new RTCPeerConnection(o))});t.after(()=>media.close());
+  const packets=[];peer.getSenders()[0].sendRtp=async p=>{packets.push(p);};peer.connectionStateChange.execute('connected');
+  const sps=splitH264NalUnits(configuration,4,'annexb')[0];
+  await media.frame(Buffer.concat([Buffer.from('0000000109f000000001','hex'),sps,key]),1n,true);
+  assert.deepEqual(rtpNals(packets).map(n=>n[0]&31),[9,7,8,5]);
+});
 async function until(predicate) {
   const deadline = Date.now() + 8000;
   while (!predicate()) {
@@ -97,7 +168,7 @@ test('loss feedback during an in-flight IDR requires a later IDR; bitrate feedba
       peerFactory: (options) => (peer = new RTCPeerConnection(options)) });
     t.after(() => media.close());
     const sender = peer.getSenders()[0];
-    sender.sendRtp = () => new Promise((resolve) => { finish = resolve; });
+    sender.sendRtp = () => finish ? Promise.resolve() : new Promise((resolve) => { finish = resolve; });
     peer.connectionStateChange.execute('connected');
     const inFlight = media.frame(key, 1n, true);
     sender.handleRtcpPacket({ type: 206, feedback: pictureLost ? { count: 1 } : { count: 15, bitrate: 1000000 } });

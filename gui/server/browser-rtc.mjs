@@ -1,6 +1,6 @@
 import net from 'node:net';
 import { randomInt } from 'node:crypto';
-import { RTCPeerConnection, H264Packetizer, RtpHeader, RtpPacket, useH264, useOPUS } from 'werift';
+import { RTCPeerConnection, H264Packetizer, RtpHeader, RtpPacket, useH264, useOPUS, splitH264NalUnits, selectMissingH264ParameterSets } from 'werift';
 import { avcCodec } from '../receiver/protocol.mjs';
 
 export function privateRtcBind(value) {
@@ -28,6 +28,22 @@ export function sessionScopedIceLite(sdp) {
   return scoped.join('\r\n');
 }
 
+const nalPrefix = Buffer.from([0, 0, 0, 1]);
+function readConfiguration(bytes, expectedProfile, requirePps = true) {
+  if (!(bytes instanceof Uint8Array) || !bytes.length || bytes.length > 65536)
+    throw Error('Invalid H.264 parameter configuration size.');
+  const sets = splitH264NalUnits(Buffer.from(bytes), 4, 'annexb').filter(n => [7, 8].includes(n[0] & 31))
+    .map(n => { const owned = Buffer.alloc(n.length); n.copy(owned); return owned; });
+  if (sets.length > 32 || !sets.some(n => (n[0] & 31) === 7) || requirePps && !sets.some(n => (n[0] & 31) === 8)
+      || sets.some(n => n.length < 2)) throw Error('Incomplete H.264 parameter configuration.');
+  const data = Buffer.concat(sets.flatMap(n => [nalPrefix, n]));
+  const profile = avcCodec(data).slice(5);
+  if (expectedProfile && profile !== expectedProfile || sets.some(n => (n[0] & 31) === 7
+      && avcCodec(Buffer.concat([nalPrefix, n])).slice(5) !== profile))
+    throw Error('H.264 configuration changes the negotiated profile.');
+  return { data, sets, profile };
+}
+
 // Existing authenticated WebSocket carries signaling and control. Media uses
 // DTLS-SRTP on ONE explicitly selected private interface. No public STUN/TURN,
 // interface discovery, recording, or unbounded frame queue is installed.
@@ -35,7 +51,10 @@ export function createRtcMedia({ bind = '127.0.0.1', configuration,
   onKeyframe = () => {}, onFailure = () => {}, onConnected = () => {},
   peerFactory = (options) => new RTCPeerConnection(options), now = Date.now } = {}) {
   if (!privateRtcBind(bind)) throw new Error('Choose an explicit private IPv4 interface for browser media.');
-  const profile = avcCodec(configuration).slice(5);
+  // Preserve startup compatibility with hosts whose first IDR carries PPS.
+  // A later replacement must provide a complete independently usable config.
+  let parameters = readConfiguration(configuration, undefined, false);
+  const profile = parameters.profile;
   const pc = peerFactory({
     codecs: { video: [useH264({ payloadType: 96,
       parameters: `profile-level-id=${profile};packetization-mode=1;level-asymmetry-allowed=1` })],
@@ -56,6 +75,16 @@ export function createRtcMedia({ bind = '127.0.0.1', configuration,
   function requestKey() {
     if (now() - lastKeyRequest < 300) return;
     lastKeyRequest = now(); onKeyframe();
+  }
+  function configure(bytes) {
+    if (closed) return false;
+    const next = readConfiguration(bytes, profile);
+    if (parameters.data.equals(next.data)) return false;
+    parameters = next; dropped++; waitingKey = true;
+    // Keep this peer, RTP sequence/SSRC, audio clock and authorization. A new
+    // decoder reference epoch needs an IDR, not a transport/session restart.
+    if (connected) requestKey();
+    return true;
   }
   pc.connectionStateChange.subscribe((state) => {
     if (closed) return;
@@ -91,6 +120,22 @@ export function createRtcMedia({ bind = '127.0.0.1', configuration,
     sendingVideo = true;
     const started = now(), epoch = dropped;
     try {
+      if (key) {
+        const nals = splitH264NalUnits(payload, 4, 'annexb');
+        const missing = selectMissingH264ParameterSets(parameters.sets, nals);
+        if (missing.length) {
+          // Preserve AUD ordering and never prepend a retained picture. Only
+          // missing SPS/PPS types are added, bounded to 64 KiB of configuration.
+          const at = nals.findIndex(n => (n[0] & 31) !== 9);
+          const index = at < 0 ? nals.length : at;
+          const sets = [...nals.filter(n => [7,8].includes(n[0]&31)), ...missing];
+          // A missing PPS must follow its SPS, including when that SPS was in
+          // the native sample. Merely prepending the PPS would reverse them.
+          payload = Buffer.concat([...nals.slice(0,index), ...sets.filter(n=>(n[0]&31)===7),
+            ...sets.filter(n=>(n[0]&31)===8), ...nals.slice(index).filter(n=>![7,8].includes(n[0]&31))]
+            .flatMap(n => [nalPrefix, n]));
+        }
+      }
       const packets = packetizer.packetize(payload, rtpTimestamp(pts, 90000), { isKeyframe: key });
       for (const packet of packets) {
         if (closed || !connected || now() - started > 150) {
@@ -128,5 +173,5 @@ export function createRtcMedia({ bind = '127.0.0.1', configuration,
     closed = true; connected = false;
     await pc.close();
   }
-  return { offer, answer, frame, sound, close, get connected() { return connected; } };
+  return { offer, answer, frame, sound, configure, close, get connected() { return connected; } };
 }
