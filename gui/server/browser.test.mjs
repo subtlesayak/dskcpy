@@ -124,6 +124,48 @@ test('WebRTC keyframe feedback cannot undo an explicit video pause',async t=>{
  ws.close(4000);
 });
 
+test('fresh native codec parameters reach the existing RTC sender without releasing input or audio', async t => {
+ const updates=[],frames=[];
+ const f=await fixture(t,{inputPolicy:{keyboard:true},rtcMediaFactory:()=>({
+  offer:async()=>({type:'offer',sdp:'synthetic'}),answer:async()=>{},close:async()=>{},
+  configure:bytes=>updates.push(Buffer.from(bytes)),frame:async(...args)=>frames.push(args),sound:async()=>{},
+ })});
+ const ws=await f.open(undefined,undefined,'stream/webrtc');ws.send(f.invitation.key);
+ await until(()=>f.calls()===1);
+ const first=Buffer.from('000000016742c01e0102030000000168ce3c80','hex');
+ f.native().write(packet(0,1,first));await until(()=>ws.received.some(m=>!m.binary&&JSON.parse(m.data).type==='rtc-offer'));
+ const chunks=[];f.native().on('data',b=>chunks.push(b));
+ ws.send('resume');ws.send(Buffer.from([8,0,0,224,1]));ws.send(Buffer.from([5,10]));
+ ws.ping();await once(ws,'pong');await until(()=>Buffer.concat(chunks).includes(Buffer.from([5,10])));
+ const before=Buffer.concat(chunks).length;
+ const next=Buffer.from('000000016742c01e1122330000000168ce3c81','hex');
+ f.native().write(packet(0,1,next));f.native().write(packet(10,2,Buffer.from('0000000165888401020304','hex')));
+ await until(()=>updates.length===1&&frames.length===1);
+ assert.deepEqual(updates[0],next);assert.equal(f.calls(),1);assert.equal(ws.readyState,WebSocket.OPEN);
+ const after=Buffer.concat(chunks).subarray(before);
+ assert.equal(after.includes(Buffer.from([8,2,0,0,0])),false);
+ assert.equal(after.includes(Buffer.from([5,7])),false);assert.equal(after.includes(Buffer.from([5,11])),false);
+ assert.equal(ws.received.filter(m=>!m.binary&&JSON.parse(m.data).type==='rtc-offer').length,1);
+ ws.close(4000);
+});
+
+test('rejected native codec configuration uses only the existing negotiated media recovery grant', async t => {
+ const f=await fixture(t,{inputPolicy:{keyboard:true},rtcMediaFactory:()=>({
+  offer:async()=>({type:'offer',sdp:'synthetic'}),answer:async()=>{},close:async()=>{},
+  configure:()=>{throw Error('Owned incompatible codec profile');},frame:async()=>{},sound:async()=>{},
+ })});
+ const first=await f.open(undefined,undefined,'stream/webrtc',MEDIA_FALLBACK_PROTOCOL);first.send(f.invitation.key);
+ await until(()=>f.calls()===1);
+ f.native().write(packet(0,1,Buffer.from('000000016742c01e0102030000000168ce3c80','hex')));
+ await until(()=>first.received.some(m=>!m.binary&&JSON.parse(m.data).type==='rtc-offer'));
+ const cookie=first.cookie.split(';')[0],closed=once(first,'close');
+ f.native().write(packet(0,1,Buffer.from('000000016764001e0102030000000168ce3c80','hex')));
+ const [code]=await closed;assert.equal(code,1012);assert.equal(f.receiver.status().mediaMode,'webcodecs');
+ assert.equal(await resumable(f,cookie),true);
+ const next=await f.open(undefined,cookie);await until(()=>next.received.some(m=>m.binary));
+ assert.equal(f.calls(),1);assert.equal(next.readyState,WebSocket.OPEN);next.close(4000);
+});
+
 test('receiver origin accepts explicit HTTPS origins, no paths or credentials; direct listeners stay private', () => {
   assert.equal(receiverOrigin(), null);
   assert.equal(receiverOrigin('https://desktop.example.ts.net/'), 'https://desktop.example.ts.net');

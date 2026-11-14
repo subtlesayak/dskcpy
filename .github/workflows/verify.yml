@@ -81,8 +81,8 @@ jobs:
           brew install ffmpeg
           node desktop/node_modules/playwright/cli.js install chromium webkit
       - name: Decode generated media with real browser engines
-        # No real capture, permission requests or desktop input. WebKit RTC
-        # remains a separate known failure; auto reports whether fallback was used.
+        # Generated media only: no real capture, permission requests or desktop
+        # input. Auto reports whether native RTC or negotiated fallback was used.
         run: |
           node desktop/test/browser-media-ui.mjs chromium webrtc
           node desktop/test/browser-media-ui.mjs chromium webcodecs
@@ -92,6 +92,7 @@ jobs:
           node desktop/test/browser-media-ui.mjs chromium native-only
           node desktop/test/browser-media-ui.mjs webkit auto
           node desktop/test/browser-media-ui.mjs chromium adaptive
+          node desktop/test/browser-media-ui.mjs chromium codec-update
       - name: Preserve sanitized synthetic-media results
         if: always()
         uses: actions/upload-artifact@v7

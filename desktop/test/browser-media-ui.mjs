@@ -14,9 +14,11 @@ import { mkdir, writeFile } from 'node:fs/promises';
 const engine = process.argv[2] || 'webkit';
 assert.ok(['webkit', 'chromium'].includes(engine), 'Choose webkit or chromium');
 const transport = process.argv[3] || 'webrtc';
-assert.ok(['webrtc', 'webcodecs', 'fallback', 'auto', 'native-only', 'connected-fallback', 'adaptive'].includes(transport), 'Choose webrtc, webcodecs, fallback, auto, native-only, connected-fallback or adaptive');
+assert.ok(['webrtc', 'webcodecs', 'fallback', 'auto', 'native-only', 'connected-fallback', 'adaptive', 'codec-update'].includes(transport), 'Choose a supported generated-media test transport');
 const output = path.resolve(`desktop/out/browser-media-${engine}-${transport}`); await mkdir(output, { recursive: true });
-const fixture = await generateMediaFixture();
+const fixture = await generateMediaFixture({outOfBandParameters:transport==='codec-update',retainSps:transport==='codec-update'});
+const replacement = transport==='codec-update' ? await generateMediaFixture({replacement:true,outOfBandParameters:true}) : null;
+let activeFixture=fixture;
 const browser = await ({ chromium, webkit })[engine].launch(engine === 'chromium'
   ? { headless: true, channel: 'chromium', args: ['--disable-gpu'] } : { headless: true });
 const until = async (condition, label, timeout = 15000) => {
@@ -84,7 +86,7 @@ const receiver = createBrowserReceiver({ configuredPort: 0, onChange: () => brok
   videoTimer = setInterval(() => {
     const pts = videoTick++ * 100000;
     if (paused || native.destroyed || native.writableLength > 65536 || sourcePendingVideo.size >= 2) return;
-    const frame = fixture.frames[frameIndex++ % fixture.frames.length]; sourcePendingVideo.add(pts); native.write(mediaPacket(frame.payload, pts, frame.key ? 2 : 0));
+    const frame = activeFixture.frames[frameIndex++ % activeFixture.frames.length]; sourcePendingVideo.add(pts); native.write(mediaPacket(frame.payload, pts, frame.key ? 2 : 0));
   }, 100);
   audioTimer = setInterval(() => {
     const tick = audioTick++;
@@ -158,7 +160,7 @@ try {
   report.initialRtcStates = await page.evaluate(() => window.__testPeers?.map(p => ({connection: p.connectionState, ice: p.iceConnectionState})) || []);
   report.fallbackObserved = !['webcodecs','adaptive'].includes(transport) && currentMode() === 'webcodecs';
   if (transport === 'fallback') assert.equal(report.fallbackObserved, true);
-  if (['webrtc', 'native-only'].includes(transport)) assert.equal(currentMode(), 'webrtc');
+  if (['webrtc', 'native-only','codec-update'].includes(transport)) assert.equal(currentMode(), 'webrtc');
   if (transport === 'native-only') { assert.equal(report.initialSocketStates[0].mediaFallback, false); assert.equal(report.initialSocketStates[0].negotiatedProtocol, ''); }
   if (report.fallbackObserved) {
     assert.equal(report.initialSocketStates[0].recoveryAcknowledged, true);
@@ -191,6 +193,26 @@ try {
   if (currentMode() === 'webrtc') assert.equal(await page.locator('#rtc-display').evaluate(v => v.muted), true);
   await page.getByRole('button', { name: 'Audio off', exact: true }).click(); await until(() => audioSent > beforeMute + 3, 'audio resume');
   report.opusTransportAndMuteResume = true;
+  if (transport==='codec-update') {
+    assert.notDeepEqual(fixture.configuration,replacement.configuration);
+    assert.deepEqual(fixture.parameterSetIds,{sps:[0],pps:[0]});assert.deepEqual(replacement.parameterSetIds,{sps:[1],pps:[1]});
+    await page.getByRole('button',{name:'Keyboard',exact:true}).click();
+    await page.keyboard.down('Control');await until(()=>heldKeys.size===1,'held input before codec configuration update');
+    const sentBefore=audioSent,answersBefore=counts.answers;
+    native.write(mediaPacket(replacement.configuration,0,1));activeFixture=replacement;frameIndex=0;
+    await until(()=>page.locator('#rtc-display').evaluate(v=>{
+      const c=document.createElement('canvas');c.width=1;c.height=1;const x=c.getContext('2d');x.drawImage(v,0,0,1,1);
+      const [r,g,b]=x.getImageData(0,0,1,1).data;return b>200&&r<30&&g<30;
+    }),'new SPS/PPS identifiers and actual replacement pixels on the same RTC peer');
+    assert.equal(heldKeys.size,1);assert.equal(audioEnabled,true);await until(()=>audioSent>sentBefore+5,'audio continues during codec configuration update');
+    assert.equal(counts.answers,answersBefore);assert.equal(counts.nativeConnections,1);
+    assert.equal((await page.evaluate(()=>window.__testSockets)).length,1);
+    assert.equal(await page.evaluate(()=>window.__testPeers.length),1);
+    await page.keyboard.up('Control');await page.locator('#close-keyboard').click();
+    report.codecUpdate={outOfBandParameterSets:true,initialSampleSpsOnly:true,replacementPixelsDecoded:true,changedParameterSetIdentifiers:true,
+      retainedAudioAndHeldInput:true,sameRtcPeer:true,sameNativeCapture:true,newInvitation:false,actualNativeEncoderQualified:false};
+    report.codecUpdate.parameterSetIds=[fixture.parameterSetIds,replacement.parameterSetIds];
+  }
   if (transport === 'adaptive') {
     await page.getByRole('button',{name:'Keyboard',exact:true}).click();
     await page.keyboard.down('Control'); await until(()=>heldKeys.size>0,'held input during quality adjustment');

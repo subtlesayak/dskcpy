@@ -319,6 +319,10 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
             videoConfig = Buffer.alloc(16 + parameters.length);
             videoConfig.writeUInt32BE(parameters.length); videoConfig.writeUInt32BE(1, 12);
             videoConfig.set(parameters, 16);
+            if (mediaMode === 'webrtc' && rtc) {
+              try { rtc.configure?.(parameters); }
+              catch { rtcFailure(rtcGeneration, peer); return; }
+            }
           }
         }
         if (flags === 4 || flags === 16) audioConfig = packet;
