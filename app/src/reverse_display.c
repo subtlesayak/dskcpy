@@ -14,6 +14,8 @@
 #include "receiver.h"
 #include "reverse_watchdog.h"
 #include "reverse_pause.h"
+#include "reverse_quality.h"
+#include "reverse_h264.h"
 #include "reverse_audio.h"
 #include "reverse_touch.h"
 #include "util/env.h"
@@ -85,6 +87,8 @@ struct reverse_display_state {
     _Atomic bool force_refresh;
     _Atomic bool stream_ready;
     _Atomic bool audio_enabled;
+    _Atomic bool adaptive_video;
+    _Atomic unsigned quality_level;
     _Atomic int64_t audio_acked_pts;
     sc_mutex send_mutex;
     sc_mutex watchdog_mutex;
@@ -100,6 +104,12 @@ struct reverse_display_state {
     _Atomic int64_t last_acked_pts;
     _Atomic int64_t stream_start_us;
     int64_t last_metrics_log_us;
+    // Capture-thread-owned immutable launch limits and negotiated H.264 profile.
+    unsigned manual_fps;
+    uint32_t manual_bit_rate;
+    uint8_t video_profile[3];
+    bool have_video_profile;
+    bool quality_announced;
 
     struct reverse_capture capture;
     struct sc_receiver receiver;
@@ -121,6 +131,14 @@ struct reverse_buffer {
     const uint8_t *data;
     size_t size;
     uint8_t *owned;
+};
+
+struct reverse_encoder_spec {
+    const char *name;
+    enum AVPixelFormat format;
+    bool mf_hardware;
+    int profile;
+    int level;
 };
 
 static void
@@ -819,7 +837,8 @@ reverse_get_bit_rate(const struct scrcpy_options *options, int width,
 
 static AVCodecContext *
 reverse_open_encoder(const struct scrcpy_options *options, int width, int height,
-                    unsigned fps) {
+                    unsigned fps, const struct reverse_encoder_spec *retained,
+                    struct reverse_encoder_spec *selected) {
     static const char *const preferred_encoders[] = {
         "h264_nvenc",
         "h264_amf",
@@ -827,10 +846,10 @@ reverse_open_encoder(const struct scrcpy_options *options, int width, int height
         "h264_mf",
         "libx264",
     };
-    unsigned count = options->video_encoder ? 1
+    unsigned count = retained || options->video_encoder ? 1
                                              : ARRAY_LEN(preferred_encoders);
     for (unsigned i = 0; i < count; ++i) {
-        const char *name = options->video_encoder
+        const char *name = retained ? retained->name : options->video_encoder
                          ? options->video_encoder : preferred_encoders[i];
         const AVCodec *codec = avcodec_find_encoder_by_name(name);
         if (!codec) {
@@ -842,9 +861,9 @@ reverse_open_encoder(const struct scrcpy_options *options, int width, int height
         }
 
         bool is_mf = !strcmp(codec->name, "h264_mf");
-        unsigned variants = is_mf ? 2 : 1;
+        unsigned variants = is_mf && !retained ? 2 : 1;
         for (unsigned variant = 0; variant < variants; ++variant) {
-            bool force_mf_hardware = is_mf && variant == 0;
+            bool force_mf_hardware = is_mf && (retained ? retained->mf_hardware : variant == 0);
             AVCodecContext *context = avcodec_alloc_context3(codec);
             if (!context) {
                 LOG_OOM();
@@ -859,6 +878,11 @@ reverse_open_encoder(const struct scrcpy_options *options, int width, int height
                                  || is_mf;
             context->pix_fmt = hardware_encoder ? AV_PIX_FMT_NV12
                                                 : AV_PIX_FMT_YUV420P;
+            if (retained) {
+                context->pix_fmt = retained->format;
+                context->profile = retained->profile;
+                context->level = retained->level;
+            }
             context->bit_rate = reverse_get_bit_rate(options, width, height,
                                                      fps);
             context->rc_max_rate = context->bit_rate;
@@ -917,12 +941,21 @@ reverse_open_encoder(const struct scrcpy_options *options, int width, int height
 
             int ret = avcodec_open2(context, codec, NULL);
             if (ret >= 0) {
+                *selected = (struct reverse_encoder_spec) {
+                    .name = codec->name, .format = context->pix_fmt,
+                    .mf_hardware = force_mf_hardware,
+                    .profile = context->profile, .level = context->level,
+                };
                 const char *mode = is_mf
                                  ? (force_mf_hardware ? ", hardware" : ", software")
                                  : "";
-                LOGI("Reverse display encoder: %s%s (%dx%d, %.1f Mbps)",
-                     codec->name, mode, width, height,
-                     context->bit_rate / 1000000.0);
+                if (retained) {
+                    LOGI("Windows encoder candidate: %s%s (%dx%d, %.1f Mbps nominal target, not published)",
+                         codec->name, mode, width, height, context->bit_rate / 1000000.0);
+                } else {
+                    LOGI("Reverse display encoder: %s%s (%dx%d, %.1f Mbps)",
+                         codec->name, mode, width, height, context->bit_rate / 1000000.0);
+                }
                 return context;
             }
 
@@ -1233,6 +1266,8 @@ reverse_send_config(struct reverse_display_state *state,
         LOGE("Could not convert the Windows H.264 encoder configuration");
         return false;
     }
+    if (!state->have_video_profile)
+        state->have_video_profile = sc_reverse_h264_profile(buffer.data,buffer.size,state->video_profile);
     ok = reverse_send_frame_packet(state, buffer.data, buffer.size, 0,
                                    REVERSE_DISPLAY_FRAME_FLAG_CONFIG);
     free(buffer.owned);
@@ -1285,6 +1320,13 @@ reverse_encode_frame(struct reverse_display_state *state,
             ok = false;
         } else {
             *sent_pts = pts;
+            if (!state->have_video_profile)
+                state->have_video_profile = sc_reverse_h264_profile(buffer.data,buffer.size,state->video_profile);
+            if (!state->quality_announced && state->have_video_profile
+                    && atomic_load_explicit(&state->adaptive_video,memory_order_acquire)) {
+                state->quality_announced = true;
+                printf("DSKCPY_VIDEO_QUALITY 0 %u %u\n",state->manual_fps,state->manual_bit_rate);fflush(stdout);
+            }
         }
         free(buffer.owned);
         av_packet_unref(packet);
@@ -1295,6 +1337,67 @@ reverse_encode_frame(struct reverse_display_state *state,
 
     av_packet_free(&packet);
     return ok;
+}
+
+enum reverse_quality_result { REVERSE_QUALITY_RETAINED, REVERSE_QUALITY_APPLIED,
+                              REVERSE_QUALITY_DEFERRED, REVERSE_QUALITY_FATAL };
+
+static enum reverse_quality_result
+reverse_try_video_quality(struct reverse_display_state *state,
+                          AVCodecContext **encoder, struct reverse_encoder_spec *spec,
+                          AVFrame *frame, struct sc_reverse_quality target,
+                          unsigned requested, int64_t *sent_pts) {
+    if (atomic_load_explicit(&state->stopped,memory_order_acquire)
+            || atomic_load_explicit(&state->video_paused,memory_order_acquire)
+            || atomic_load_explicit(&state->quality_level,memory_order_acquire)!=requested)
+        return REVERSE_QUALITY_DEFERRED;
+    // Caller has drained the old ACK window. Open/encode/validate privately,
+    // retaining the old context until the first configuration byte is published.
+    struct scrcpy_options options = *state->options;
+    options.video_bit_rate = target.bit_rate;
+    struct reverse_encoder_spec retained = *spec, selected;
+    retained.profile = state->video_profile[0];
+    if (retained.profile == AV_PROFILE_H264_BASELINE && (state->video_profile[1]&0x40))
+        retained.profile = AV_PROFILE_H264_CONSTRAINED_BASELINE;
+    retained.level = state->video_profile[2];
+    AVCodecContext *candidate = reverse_open_encoder(&options,frame->width,frame->height,
+                                                     target.fps,&retained,&selected);
+    AVPacket *packet = av_packet_alloc(), *extra = av_packet_alloc();
+    struct reverse_buffer config = {0}, picture = {0};
+    uint8_t *parameters = NULL; size_t parameters_size = 0;
+    enum reverse_quality_result result = REVERSE_QUALITY_RETAINED;
+    if (!candidate || !packet || !extra || candidate->pix_fmt != frame->format) goto done;
+    frame->pict_type = AV_PICTURE_TYPE_I;
+    if (avcodec_send_frame(candidate,frame) < 0 || avcodec_receive_packet(candidate,packet) < 0
+            || !(packet->flags&AV_PKT_FLAG_KEY) || packet->size<=0
+            || (size_t)packet->size>REVERSE_DISPLAY_MAX_FRAME_SIZE
+            || (packet->pts!=AV_NOPTS_VALUE && packet->pts!=frame->pts)) goto done;
+    // Never publish a delayed/multiple-picture warm-up or retain a packet queue.
+    if (avcodec_receive_packet(candidate,extra) != AVERROR(EAGAIN)) goto done;
+    if (candidate->extradata_size>0
+            && !reverse_normalize_h264_config(candidate->extradata,candidate->extradata_size,&config)) goto done;
+    if (!reverse_normalize_h264(candidate,packet->data,packet->size,&picture)
+            || !sc_reverse_h264_parameters(config.data,config.size,picture.data,picture.size,
+                &parameters,&parameters_size)
+            || !sc_reverse_h264_validate(config.data,config.size,picture.data,picture.size,
+                frame->width,frame->height,state->video_profile)) goto done;
+    if (atomic_load_explicit(&state->stopped,memory_order_acquire)
+            || atomic_load_explicit(&state->video_paused,memory_order_acquire)
+            || atomic_load_explicit(&state->quality_level,memory_order_acquire)!=requested) {
+        result=REVERSE_QUALITY_DEFERRED;goto done;
+    }
+    // A write failure after publication is transport failure, not a safe rollback.
+    if (!reverse_send_frame_packet(state,parameters,parameters_size,0,REVERSE_DISPLAY_FRAME_FLAG_CONFIG)
+            || !reverse_send_frame_packet(state,picture.data,picture.size,frame->pts,REVERSE_DISPLAY_FRAME_FLAG_KEY)) {
+        result=REVERSE_QUALITY_FATAL;goto done;
+    }
+    AVCodecContext *previous=*encoder;*encoder=candidate;candidate=NULL;*spec=selected;
+    avcodec_free_context(&previous);
+    *sent_pts=frame->pts;result=REVERSE_QUALITY_APPLIED;
+done:
+    free(parameters);free(config.owned);free(picture.owned);
+    av_packet_free(&packet);av_packet_free(&extra);avcodec_free_context(&candidate);
+    return result;
 }
 
 static bool
@@ -1315,9 +1418,12 @@ reverse_capture_and_encode(struct reverse_display_state *state) {
                           memory_order_release);
 
     unsigned fps = reverse_get_fps(state->options->max_fps);
+    state->manual_fps = fps;
+    state->manual_bit_rate = reverse_get_bit_rate(state->options,capture->target_width,capture->target_height,fps);
+    struct reverse_encoder_spec spec;
     AVCodecContext *encoder = reverse_open_encoder(state->options,
                                                    capture->target_width,
-                                                   capture->target_height, fps);
+                                                   capture->target_height, fps, NULL, &spec);
     if (!encoder) {
         reverse_capture_destroy(capture);
         return false;
@@ -1361,15 +1467,22 @@ reverse_capture_and_encode(struct reverse_display_state *state) {
     sc_tick frame_interval = SC_TICK_FREQ / fps;
     sc_tick next_capture = sc_tick_now();
     bool have_frame = false;
+    unsigned applied_quality = 0;
+    int64_t next_quality_attempt = 0;
     while (ok && !atomic_load_explicit(&state->stopped, memory_order_acquire)) {
         if (atomic_load_explicit(&state->video_paused, memory_order_acquire)) {
             Sleep(20);
             next_capture = sc_tick_now();
             continue;
         }
-        while (pending_count >= REVERSE_DISPLAY_MAX_FRAMES_IN_FLIGHT
+        unsigned requested_quality = atomic_load_explicit(&state->quality_level,memory_order_acquire);
+        bool adjust = atomic_load_explicit(&state->adaptive_video,memory_order_acquire)
+            && state->have_video_profile && requested_quality != applied_quality
+            && av_gettime_relative() >= next_quality_attempt;
+        while ((pending_count >= REVERSE_DISPLAY_MAX_FRAMES_IN_FLIGHT || (adjust && pending_count))
                 && !atomic_load_explicit(&state->stopped,
-                                         memory_order_acquire)) {
+                                         memory_order_acquire)
+                && !atomic_load_explicit(&state->video_paused,memory_order_acquire)) {
             int64_t acked_pts = atomic_load_explicit(&state->last_acked_pts,
                                                      memory_order_acquire);
             unsigned consumed = 0;
@@ -1381,7 +1494,7 @@ reverse_capture_and_encode(struct reverse_display_state *state) {
                 pending_count -= consumed;
                 memmove(pending_pts, pending_pts + consumed,
                         pending_count * sizeof(*pending_pts));
-                break;
+                if (!adjust || !pending_count) break;
             }
             Sleep(1);
         }
@@ -1396,6 +1509,7 @@ reverse_capture_and_encode(struct reverse_display_state *state) {
         if (!reverse_wait_for_capture(state, next_capture)) {
             break;
         }
+        if (atomic_load_explicit(&state->video_paused,memory_order_acquire)) continue;
         // Pace capture from the end of the previous iteration. This prevents
         // a high-refresh monitor from outrunning the Android decoder and
         // accumulating stale frames in the transport/codec pipeline.
@@ -1403,8 +1517,8 @@ reverse_capture_and_encode(struct reverse_display_state *state) {
 
         enum reverse_capture_result result = reverse_capture_next(capture, frame);
         if (result == REVERSE_CAPTURE_TIMEOUT
-                && (!have_frame || !atomic_load_explicit(&state->force_refresh,
-                                                          memory_order_acquire))) {
+                && (!have_frame || (!adjust && !atomic_load_explicit(&state->force_refresh,
+                                                          memory_order_acquire)))) {
             continue;
         }
         if (result == REVERSE_CAPTURE_ERROR) {
@@ -1423,13 +1537,39 @@ reverse_capture_and_encode(struct reverse_display_state *state) {
         // relative to this stream; host and device monotonic clocks have
         // unrelated epochs and must not be compared by MediaCodec.
         frame->pts = av_gettime_relative() - start_pts;
-        int64_t sent_pts;
+        int64_t sent_pts = AV_NOPTS_VALUE;
         sc_mutex_lock(&state->watchdog_mutex);
         sc_reverse_watchdog_begin(&state->watchdog, av_gettime_relative());
         sc_mutex_unlock(&state->watchdog_mutex);
-        if (!reverse_encode_frame(state, encoder, frame, &sent_pts)) {
-            ok = false;
-        } else if (sent_pts != AV_NOPTS_VALUE) {
+        enum reverse_quality_result change = REVERSE_QUALITY_DEFERRED;
+        if (adjust && !pending_count) {
+            struct sc_reverse_quality target;
+            if (sc_reverse_quality_target(state->manual_fps,state->manual_bit_rate,requested_quality,&target)) {
+                // Bound actual encoder attempts too, including coalesced requests.
+                next_quality_attempt=av_gettime_relative()+INT64_C(5000000);
+                change = reverse_try_video_quality(state,&encoder,&spec,frame,target,requested_quality,&sent_pts);
+                if (change==REVERSE_QUALITY_APPLIED) {
+                    fps=target.fps;applied_quality=requested_quality;
+                    frame_interval=SC_TICK_FREQ/fps;next_capture=sc_tick_now()+frame_interval;
+                    printf("DSKCPY_VIDEO_QUALITY %u %u %u\n",applied_quality,fps,target.bit_rate);fflush(stdout);
+                }
+            } else change=REVERSE_QUALITY_RETAINED;
+            if (change==REVERSE_QUALITY_RETAINED
+                    && !atomic_load_explicit(&state->stopped,memory_order_acquire)
+                    && !atomic_load_explicit(&state->video_paused,memory_order_acquire)) {
+                atomic_store_explicit(&state->adaptive_video,false,memory_order_release);
+                LOGW("Adaptive encoder preparation failed; retaining the last working Windows video target");
+                printf("DSKCPY_VIDEO_QUALITY unsupported\n");fflush(stdout);
+            }
+        }
+        if (change==REVERSE_QUALITY_FATAL) ok=false;
+        else if (change!=REVERSE_QUALITY_APPLIED
+                && !atomic_load_explicit(&state->stopped,memory_order_acquire)
+                && !atomic_load_explicit(&state->video_paused,memory_order_acquire)) {
+            frame->pict_type=refresh?AV_PICTURE_TYPE_I:AV_PICTURE_TYPE_NONE;
+            if (!reverse_encode_frame(state,encoder,frame,&sent_pts)) ok=false;
+        }
+        if (ok && sent_pts != AV_NOPTS_VALUE) {
             assert(pending_count < REVERSE_DISPLAY_MAX_FRAMES_IN_FLIGHT);
             pending_pts[pending_count++] = sent_pts;
         }
@@ -1881,6 +2021,13 @@ reverse_video_request_keyframe(void *context) {
 }
 
 static void
+reverse_request_video_quality(struct reverse_display_state *state, unsigned level) {
+    if (atomic_load_explicit(&state->adaptive_video,memory_order_acquire)
+            && !atomic_load_explicit(&state->video_paused,memory_order_acquire) && level<=2)
+        atomic_store_explicit(&state->quality_level,level,memory_order_release);
+}
+
+static void
 reverse_apply_system_action(struct reverse_display_state *state,
                             enum sc_reverse_system_action action) {
     switch (action) {
@@ -1973,9 +2120,10 @@ reverse_receiver_on_system_action(struct sc_receiver *receiver,
                 action == SC_REVERSE_SYSTEM_ACTION_PAUSE_VIDEO, &callbacks, state);
             return;
         }
-        // These remain unsupported on Windows. An ignored Mac quality action
-        // must not release Windows input or imply encoder reconfiguration.
-        if (action >= SC_REVERSE_SYSTEM_ACTION_QUALITY_ORIGINAL && action <= SC_REVERSE_SYSTEM_ACTION_QUALITY_REDUCED) return;
+        if (action >= SC_REVERSE_SYSTEM_ACTION_QUALITY_ORIGINAL && action <= SC_REVERSE_SYSTEM_ACTION_QUALITY_REDUCED) {
+            reverse_request_video_quality(state,action-SC_REVERSE_SYSTEM_ACTION_QUALITY_ORIGINAL);
+            return;
+        }
         if (action != SC_REVERSE_SYSTEM_ACTION_AUDIO_ENABLE
                 && action != SC_REVERSE_SYSTEM_ACTION_AUDIO_DISABLE) reverse_cancel_keyboard(state);
         reverse_apply_system_action(state, action);
@@ -2099,6 +2247,8 @@ sc_reverse_display_run(sc_socket video_socket, sc_socket control_socket,
     atomic_init(&state.force_refresh, false);
     atomic_init(&state.stream_ready, false);
     atomic_init(&state.audio_enabled, false); // Old phones receive video only.
+    atomic_init(&state.adaptive_video,options->reverse_adaptive_video);
+    atomic_init(&state.quality_level,0);
     atomic_init(&state.audio_acked_pts, -1);
     atomic_init(&state.desktop_left, 0);
     atomic_init(&state.desktop_top, 0);

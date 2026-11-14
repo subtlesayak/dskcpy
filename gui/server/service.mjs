@@ -408,7 +408,7 @@ export function createControlService({
       }
       if (attempt.signal.aborted) throw new Error('Connection cancelled.');
       const invitation = await browserReceiver.invite(mode, { viewOnly: Boolean(config.windowId),
-        adaptiveVideo: platform === 'darwin' && !config.windowId && config.browserAdaptiveVideo === true && readiness.features?.browserAdaptiveVideo === true,
+        adaptiveVideo: ['darwin','win32'].includes(platform) && !config.windowId && config.browserAdaptiveVideo === true && readiness.features?.browserAdaptiveVideo === true,
         captureRecovery: platform === 'darwin' && !config.windowId && readiness.features?.browserCaptureRecovery === true,
         // Typing into a receiver focused on the host itself would feed the
         // injected events back into its own typing field. Local preview omits it.

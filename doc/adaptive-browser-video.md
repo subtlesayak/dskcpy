@@ -1,4 +1,4 @@
-# Adaptive browser video — Mac candidate
+# Adaptive browser video candidates
 
 The updated Mac host can reduce video bitrate and encoded frame rate when the
 receiving browser reports sustained network, queue or decoder pressure. Quality
@@ -11,8 +11,9 @@ The beginner desktop shell requests automatic video on capable hosts. In the
 receiver's Options, the same labeled switch can restore manual limits for the
 current session. The status shows the last settings reported by the native
 encoder, as targets/caps rather than measured throughput. The switch is disabled
-while paused or unavailable. Windows and older native hosts retain manual mode;
-no Windows encoder adaptation is claimed by this first implementation.
+while paused or unavailable. Older native hosts retain manual mode. The separate
+[Windows candidate](windows-adaptive-video.md) uses checked encoder replacement;
+its additional native marker is required before enabling it.
 
 ## Capability and authority
 
@@ -40,7 +41,7 @@ The native host independently computes each target from immutable launch limits:
 | Reduced | Smaller of 15 or owner's limit | 30% of owner's limit |
 
 Reduced rates have a 0.5 Mbps floor and never exceed the owner-selected cap.
-The encode thread changes VideoToolbox's AverageBitRate property and its own
+On Mac, the encode thread changes VideoToolbox's AverageBitRate property and its own
 frame pacing. Capture continues to retain only its newest frame. There is no
 encoder/capture restart, geometry change, permission request, audio transition,
 input cancellation, new invitation or added public listener. A failed property
@@ -89,7 +90,7 @@ mapped input, reload and Stop. The same flow can run as `webkit adaptive`.
 It does not measure real native bitrate changes, audible quality, latency,
 different-network adaptation, physical touch or a mobile software keyboard.
 No live service is upgraded by these tests. Physical Mac/phone/Safari, Windows
-adaptation, output routes, original Android blockers and release gates remain open.
+encoder/driver qualification, output routes, original Android blockers and release gates remain open.
 
 References: [Apple VTSessionSetProperty](https://developer.apple.com/documentation/videotoolbox/vtsessionsetproperty(_:key:value:)),
 [WebRTC statistics](https://www.w3.org/TR/webrtc-stats/).

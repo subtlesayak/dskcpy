@@ -27,10 +27,11 @@ A native Meson fixture separately exercises the lifecycle helper on all native
 build platforms. The callback compilation test skips only if no standalone C
 compiler is available; a skip is not physical Windows input qualification.
 
-Mac pause behavior is unchanged. Windows video adaptation is still manual:
-reserved quality actions 12–14 are ignored without releasing input. This source
-does not advertise Windows adaptive bitrate or claim hardware input/recovery
-qualification. No installed host is updated by tests or builds.
+Mac pause behavior is unchanged. Quality actions 12–14 are ignored without
+releasing input unless the separate experimental Windows adaptation option is
+active and unpaused. See [Windows adaptation](windows-adaptive-video.md) for
+candidate preparation and remaining hardware gates. No installed host is updated
+by tests or builds.
 
 ## Windows adaptive-video work still required
 
@@ -41,12 +42,9 @@ fields or accepting a frame therefore cannot by itself confirm a live bitrate
 change. See the [FFmpeg 8.1.2 source](https://github.com/FFmpeg/FFmpeg/blob/n8.1.2/libavcodec/nvenc.c).
 No dependency internals or global logging callbacks are used to infer success.
 
-A possible next implementation is a bounded, transactional same-codec replacement
-using public APIs: wait for the old media window to drain, retain the working
-encoder, open the requested configuration and validate a fresh keyframe before
-publishing codec data. Failure before publication must leave the old encoder
-usable. A commit must preserve capture geometry, monotonic timestamps, audio,
-input and authorization and send fresh configuration/keyframe data. This remains
-an investigation target, not implemented or qualified behavior. Confirming native
-bitrate application and measuring actual Windows driver/network performance are
-still required before enabling that feature.
+The experimental candidate uses same-codec replacement through public APIs:
+drain the old media window, retain its working encoder, open the requested target
+and validate a fresh keyframe before publication. Software-only regressions cover
+preparation failures, cancellation and publication; actual Windows driver/network
+performance and safe physical deployment remain unqualified. This is not a claim
+that a public API confirms live reconfiguration of an existing NVENC context.

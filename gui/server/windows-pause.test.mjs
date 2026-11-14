@@ -27,7 +27,7 @@ test('actual Windows resume dispatch preserves held input and active watchdogs o
   while(depth&&end<text.length){if(text[end]==='{')depth++;if(text[end]==='}')depth--;end++}
   assert.equal(depth,0);return text.slice(start,end);
  }
- const callbacks=['reverse_video_pause_transition','reverse_video_request_keyframe','reverse_receiver_on_system_action'].map(name=>{
+ const callbacks=['reverse_video_pause_transition','reverse_video_request_keyframe','reverse_request_video_quality','reverse_receiver_on_system_action'].map(name=>{
   // A Windows checkout changes source line endings, not the callback. Exercise
   // both forms on every platform before compiling the production bodies.
   assert.equal(body(name,source.replace(/\r\n/g,'\n')),body(name,source.replace(/\r?\n/g,'\r\n')));
@@ -43,7 +43,7 @@ test('actual Windows resume dispatch preserves held input and active watchdogs o
 ${enumeration}
 struct sc_receiver { int unused; };
 struct sc_device_msg { struct { enum sc_reverse_system_action action; } reverse_system_action; };
-struct reverse_display_state { atomic_bool stopped,video_paused,force_refresh,audio_enabled; struct sc_reverse_watchdog watchdog,audio_watchdog;int watchdog_mutex;bool key_held,mouse_held,fail_cleanup,check_paused_cleanup;unsigned key_cancels,touch_cancels,other; };
+struct reverse_display_state { atomic_bool stopped,video_paused,force_refresh,audio_enabled,adaptive_video;atomic_uint quality_level; struct sc_reverse_watchdog watchdog,audio_watchdog;int watchdog_mutex;bool key_held,mouse_held,fail_cleanup,check_paused_cleanup;unsigned key_cancels,touch_cancels,other; };
 static void sc_mutex_lock(int *m){(void)m;} static void sc_mutex_unlock(int *m){(void)m;}
 static int64_t av_gettime_relative(void){return 1000;}
 #define LOGI(...) ((void)0)
@@ -61,6 +61,10 @@ int main(void){
  for(unsigned i=0;i<10000;i++){atomic_store(&s.force_refresh,false);action(&s,SC_REVERSE_SYSTEM_ACTION_RESUME_VIDEO);assert(s.key_held&&s.mouse_held);assert(atomic_load(&s.force_refresh));assert(s.watchdog.deadline==vd&&s.audio_watchdog.deadline==ad);}
  assert(!s.key_cancels&&!s.touch_cancels&&!s.other);
  for(unsigned i=12;i<=14;i++)action(&s,(enum sc_reverse_system_action)i);assert(s.key_held&&s.mouse_held&&!s.key_cancels&&!s.other);
+ atomic_store(&s.adaptive_video,true);action(&s,SC_REVERSE_SYSTEM_ACTION_QUALITY_BALANCED);assert(atomic_load(&s.quality_level)==1&&s.key_held&&s.mouse_held&&!s.key_cancels);
+ atomic_store(&s.video_paused,true);action(&s,SC_REVERSE_SYSTEM_ACTION_QUALITY_REDUCED);assert(atomic_load(&s.quality_level)==1);
+ atomic_store(&s.video_paused,false);action(&s,SC_REVERSE_SYSTEM_ACTION_QUALITY_REDUCED);assert(atomic_load(&s.quality_level)==2&&s.watchdog.deadline==vd&&s.audio_watchdog.deadline==ad);
+ atomic_store(&s.adaptive_video,false);
  s.check_paused_cleanup=true;s.fail_cleanup=true;action(&s,SC_REVERSE_SYSTEM_ACTION_PAUSE_VIDEO);assert(s.key_held&&s.mouse_held&&atomic_load(&s.video_paused));assert(s.key_cancels==1&&s.touch_cancels==1&&s.watchdog.paused&&s.audio_watchdog.paused);
  s.fail_cleanup=false;action(&s,SC_REVERSE_SYSTEM_ACTION_PAUSE_VIDEO);assert(!s.key_held&&!s.mouse_held&&s.key_cancels==2&&s.touch_cancels==2);assert(s.watchdog.deadline==vd&&s.audio_watchdog.deadline==ad);
  action(&s,SC_REVERSE_SYSTEM_ACTION_RESUME_VIDEO);assert(!atomic_load(&s.video_paused)&&!s.watchdog.paused&&!s.audio_watchdog.paused);assert(s.key_cancels==3&&s.touch_cancels==3);assert(atomic_load(&s.audio_enabled));

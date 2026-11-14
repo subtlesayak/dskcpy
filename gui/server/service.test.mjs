@@ -923,8 +923,8 @@ test('controller prepares an owned HTTPS receiver without granting access or lau
   assert.equal((await f.request('/api/browser/prepare', { mode: 'internet' })).code, 400);
 });
 
-test('adaptive video flag and native status require owner choice, Mac capability and the current child',async t=>{
- for(const [choice,capable,platform,expected] of [[true,true,'darwin',true],[false,true,'darwin',false],[true,false,'darwin',false],[true,true,'win32',false]]) {
+test('adaptive video flag and native status require owner choice, platform capability and the current child',async t=>{
+ for(const [choice,capable,platform,expected] of [[true,true,'darwin',true],[false,true,'darwin',false],[true,false,'darwin',false],[true,true,'win32',true],[false,true,'win32',false],[true,false,'win32',false]]) {
   const reservation=net.createServer();reservation.listen(0,'127.0.0.1');await once(reservation,'listening');const browserPort=reservation.address().port;await new Promise(r=>reservation.close(r));
   const origin='https://quality.example.test';
   let binary=process.execPath;

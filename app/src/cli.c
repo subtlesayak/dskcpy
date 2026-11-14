@@ -1007,7 +1007,11 @@ static const struct sc_option options[] = {
     {
         .longopt_id = OPT_REVERSE_ADAPTIVE_VIDEO,
         .longopt = "reverse-adaptive-video",
-        .text = "Enable browser-adaptive-video-v1 fixed video levels within manual bitrate/FPS limits on the experimental Mac full-desktop reverse socket. Does not change audio or input state.",
+        .text = "Enable experimental browser-adaptive-video-v1 fixed video levels within manual bitrate/FPS limits on a Windows or experimental Mac full-desktop reverse socket. Does not change audio or input state."
+#ifdef _WIN32
+                " Windows candidate encoder validation: browser-adaptive-windows-v1."
+#endif
+                ,
     },
     {
         .longopt_id = OPT_REVERSE_CLIPBOARD,
@@ -3134,7 +3138,7 @@ parse_args_with_getopt(struct scrcpy_cli_args *args, int argc, char *argv[],
     }
     if (opts->reverse_adaptive_video && (!opts->reverse_display || !opts->reverse_socket
             || opts->reverse_window || opts->video_bit_rate < 500000 || opts->video_bit_rate > 64000000)) {
-        LOGE("Adaptive video requires a Mac full-desktop reverse socket and 0.5..64 Mbps manual cap"); return false;
+        LOGE("Adaptive video requires a full-desktop reverse socket and 0.5..64 Mbps manual cap"); return false;
     }
     if (opts->reverse_text_focus && !opts->reverse_keyboard) {
         LOGE("--reverse-text-focus requires --reverse-keyboard"); return false;
@@ -3145,11 +3149,12 @@ parse_args_with_getopt(struct scrcpy_cli_args *args, int argc, char *argv[],
         return false;
     }
 #ifndef HAVE_REVERSE_MACOS
-    if (opts->reverse_window || opts->list_reverse_windows || opts->reverse_text_focus || opts->reverse_adaptive_video) {
+    if (opts->reverse_window || opts->list_reverse_windows || opts->reverse_text_focus) {
         LOGE("These capture/input options require the experimental Mac host");
         return false;
     }
 # ifndef _WIN32
+    if (opts->reverse_adaptive_video) { LOGE("Adaptive video requires Windows or the experimental Mac host"); return false; }
     if (opts->reverse_keyboard) { LOGE("Browser keyboard requires Windows or the experimental Mac host"); return false; }
 # endif
 #endif

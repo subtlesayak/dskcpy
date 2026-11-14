@@ -288,6 +288,27 @@ int main(int argc, char *argv[]) {
     (void) argc;
     (void) argv;
 
+    struct scrcpy_cli_args adaptive = {.opts = scrcpy_options_default};
+    char *adaptive_args[] = {"scrcpy", "--reverse-display", "--reverse-socket=1234", "--reverse-adaptive-video", "--video-bit-rate=8M"};
+#if defined(_WIN32) || defined(HAVE_REVERSE_MACOS)
+    assert(scrcpy_parse_args(&adaptive, ARRAY_LEN(adaptive_args), adaptive_args));
+    assert(adaptive.opts.reverse_adaptive_video);
+#else
+    assert(!scrcpy_parse_args(&adaptive, ARRAY_LEN(adaptive_args), adaptive_args));
+#endif
+    adaptive.opts = scrcpy_options_default;
+    char *adaptive_without_cap[] = {"scrcpy", "--reverse-display", "--reverse-socket=1234", "--reverse-adaptive-video"};
+    assert(!scrcpy_parse_args(&adaptive, ARRAY_LEN(adaptive_without_cap), adaptive_without_cap));
+    adaptive.opts = scrcpy_options_default;
+    char *adaptive_without_socket[] = {"scrcpy", "--reverse-display", "--reverse-adaptive-video"};
+    assert(!scrcpy_parse_args(&adaptive, ARRAY_LEN(adaptive_without_socket), adaptive_without_socket));
+    adaptive.opts = scrcpy_options_default;
+    char *adaptive_low_cap[] = {"scrcpy", "--reverse-display", "--reverse-socket=1234", "--reverse-adaptive-video", "--video-bit-rate=100K"};
+    assert(!scrcpy_parse_args(&adaptive, ARRAY_LEN(adaptive_low_cap), adaptive_low_cap));
+    adaptive.opts = scrcpy_options_default;
+    char *adaptive_window[] = {"scrcpy", "--reverse-display", "--reverse-socket=1234", "--reverse-adaptive-video", "--video-bit-rate=8M", "--reverse-window=17"};
+    assert(!scrcpy_parse_args(&adaptive, ARRAY_LEN(adaptive_window), adaptive_window));
+
     test_flag_version();
     test_flag_help();
     test_options();

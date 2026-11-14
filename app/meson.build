@@ -34,6 +34,7 @@ src = [
     'src/receiver.c',
     'src/recorder.c',
     'src/reverse_display.c',
+    'src/reverse_h264.c',
     'src/reverse_touch.c',
     'src/reverse_audio.c',
     'src/reverse_audio_encoder.c',
@@ -288,6 +289,7 @@ if get_option('buildtype') == 'debug'
         ['test_reverse_watchdog', ['tests/test_reverse_watchdog.c']],
         ['test_reverse_pause', ['tests/test_reverse_pause.c']],
         ['test_reverse_quality', ['tests/test_reverse_quality.c']],
+        ['test_reverse_h264', ['tests/test_reverse_h264.c', 'src/reverse_h264.c']],
         ['test_reverse_macos_helpers', ['tests/test_reverse_macos_helpers.c', 'src/reverse_macos_helpers.c']],
         ['test_adb_parser', [
             'tests/test_adb_parser.c',
