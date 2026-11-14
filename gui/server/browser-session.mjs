@@ -2,7 +2,7 @@ import net from 'node:net';
 import { WebSocket } from 'ws';
 import { SrdParser, validBrowserInput, MAX_PACKET } from './browser-protocol.mjs';
 import { ack, avcParameters, touchPacket, MEDIA_FALLBACK_PROTOCOL } from '../receiver/protocol.mjs';
-import { createRtcMedia } from './browser-rtc.mjs';
+import { createRtcMedia, completeLegacyConfiguration } from './browser-rtc.mjs';
 import { createClipboardBroker } from './browser-clipboard.mjs';
 import { createAdaptiveVideo, validVideoFeedback } from './adaptive-video.mjs';
 import { publicWindowState } from './window-targets.mjs';
@@ -353,9 +353,14 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
       } else {
         const flags = packet.readUInt32BE(12);
         if (flags === 32) { clipboardBroker.reply(packet.subarray(16)); return; }
-        if ((flags & 1) || (flags === 2 && !videoConfig)) {
-          const parameters = avcParameters(packet.subarray(16));
-          if (parameters.length) {
+        if ((flags & 1) || flags === 2) {
+          let parameters;
+          try {
+            parameters = flags === 2 && videoConfig
+              ? completeLegacyConfiguration(videoConfig.subarray(16), packet.subarray(16))
+              : avcParameters(packet.subarray(16));
+          } catch { /* A malformed legacy IDR cannot replace the working cache. */ }
+          if (parameters?.length) {
             videoConfig = Buffer.alloc(16 + parameters.length);
             videoConfig.writeUInt32BE(parameters.length); videoConfig.writeUInt32BE(1, 12);
             videoConfig.set(parameters, 16);

@@ -44,6 +44,20 @@ function readConfiguration(bytes, expectedProfile, requirePps = true) {
   return { data, sets, profile };
 }
 
+// Older native senders may announce only SPS, then carry PPS in the first IDR.
+// Complete that startup cache so a later viewer can decode without restarting
+// capture. A complete or changed configuration is never merged with old sets.
+export function completeLegacyConfiguration(configuration, frame) {
+  const retained = readConfiguration(configuration, undefined, false);
+  if (retained.sets.some(n => (n[0] & 31) === 8)) return;
+  const incoming = splitH264NalUnits(Buffer.from(frame), 4, 'annexb').filter(n => [7, 8].includes(n[0] & 31));
+  if (incoming.some(n => (n[0] & 31) === 7 && !retained.sets.some(old => old.equals(n)))) return;
+  const pps = incoming.filter(n => (n[0] & 31) === 8);
+  if (!pps.length || incoming.length > 32 || retained.sets.length + pps.length > 32
+      || retained.data.length + pps.reduce((sum, n) => sum + 4 + n.length, 0) > 65536) return;
+  return readConfiguration(Buffer.concat([retained.data, ...pps.flatMap(n => [nalPrefix, n])]), retained.profile).data;
+}
+
 // Existing authenticated WebSocket carries signaling and control. Media uses
 // DTLS-SRTP on ONE explicitly selected private interface. No public STUN/TURN,
 // interface discovery, recording, or unbounded frame queue is installed.

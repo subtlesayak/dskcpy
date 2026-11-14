@@ -124,6 +124,27 @@ test('WebRTC keyframe feedback cannot undo an explicit video pause',async t=>{
  ws.close(4000);
 });
 
+test('legacy in-band PPS completes the cached configuration for a replacement RTC peer', async t => {
+ const configurations=[],frames=[];
+ const f=await fixture(t,{rtcMediaFactory:options=>{
+  configurations.push(Buffer.from(options.configuration));
+  return {offer:async()=>({type:'offer',sdp:'synthetic'}),answer:async()=>{},close:async()=>{},
+   configure:()=>{},frame:async(...args)=>frames.push(args),sound:async()=>{}};
+ }});
+ const first=await f.open(undefined,undefined,'stream/webrtc');first.send(f.invitation.key);
+ await until(()=>f.calls()===1);
+ const sps=Buffer.from('000000016742c01e010203','hex'),pps=Buffer.from('0000000168ce3c80','hex');
+ f.native().write(packet(0,1,sps));await until(()=>configurations.length===1);
+ f.native().write(packet(10,2,Buffer.concat([pps,Buffer.from('0000000165888401020304','hex')])));
+ await until(()=>frames.length===1);
+ const cookie=first.cookie.split(';')[0];first.terminate();await once(first,'close');
+ const second=await f.open(undefined,cookie,'stream/webrtc');
+ await until(()=>configurations.length===2);
+ assert.deepEqual(configurations[1],Buffer.concat([sps,pps]));
+ assert.equal(f.calls(),1,'reconnection keeps the original native capture');
+ second.close(4000);
+});
+
 test('fresh native codec parameters reach the existing RTC sender without releasing input or audio', async t => {
  const updates=[],frames=[];
  const f=await fixture(t,{inputPolicy:{keyboard:true},rtcMediaFactory:()=>({

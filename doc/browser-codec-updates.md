@@ -13,7 +13,11 @@ native capture and held input. A keyframe already in flight cannot satisfy the
 new configuration epoch. Only SPS/PPS are retained; old pictures are never cached
 for replay. Configuration input is limited to 64 KiB and 32 parameter sets, with
 both SPS and PPS required for updates. Startup remains compatible with an
-SPS-only initial configuration when PPS arrives in the first keyframe. An invalid or changed negotiated profile is rejected
+SPS-only initial configuration when PPS arrives in the first keyframe. The broker
+completes that incomplete startup cache for later receiver reconnects, retaining
+only bounded parameter sets. A conflicting in-band SPS cannot complete the old
+cache, and complete configurations are never merged with later keyframes.
+An invalid or changed negotiated profile is rejected
 before replacing the last working configuration. The existing negotiated media
 failure policy then determines recovery; no new capture consent is created.
 
@@ -26,8 +30,7 @@ modifier and generated Opus remain active. Reload, Unicode input, mute and Stop
 are also checked. These checks use generated media and fake native input. They
 do not qualify audible playback, real applications, a phone or Safari hardware.
 
-This is a prerequisite for Windows encoder replacement, not Windows adaptive
-streaming itself. Windows still uses manual video settings. Candidate encoder
-preparation, verified first IDR/configuration, bounded rollback, fixed geometry,
-timestamps, actual hardware bitrate/FPS and network behavior remain separate
-implementation and qualification gates. No installed host is updated by tests.
+The [Windows adaptive encoder candidate](windows-adaptive-video.md) uses this
+path after preparing and validating a replacement encoder and its first IDR.
+Actual hardware bitrate/FPS, driver behavior and network recovery still require
+physical verification. No installed host is updated by tests.
