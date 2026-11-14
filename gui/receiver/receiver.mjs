@@ -1,5 +1,6 @@
 import { rememberedBrowser } from './remembered.mjs';
 import { createBrowserClipboard } from './clipboard.mjs';
+import { createKeyboardShortcuts, shortcutLabel } from './shortcuts.mjs';
 import { createDesktopView } from './view.mjs';
 import { createRelativeTrackpad } from './trackpad.mjs';
 import { receiverIsAway } from './lifecycle.mjs';
@@ -40,7 +41,7 @@ function clearFocusCapability(clearPreference = true) {
   if (autoFeedback) autoFeedback.hidden = true;
 }
 function autoFocusKeyboard(focused) {
-  if (viewNavigationActive() || focused !== true || !focusSupported || !autoKeyboard || !canSendKeys() || away()) return;
+  if (openControlTray === 'shortcuts' || viewNavigationActive() || focused !== true || !focusSupported || !autoKeyboard || !canSendKeys() || away()) return;
   if (clipboardTools?.isActive()) return;
   const field = $('keyboard-input');
   if (keyboardOpen && document.activeElement === field) return;
@@ -85,6 +86,8 @@ const controlTrays = [
 // Tolerate an older document during a static-assets-only rolling update.
 const arrowPadPresent = ['arrows', 'arrow-controls', 'close-arrows', 'arrow-up', 'arrow-left', 'arrow-down', 'arrow-right'].every(id => $(id));
 if (arrowPadPresent) controlTrays.push({ trigger: 'arrows', panel: 'arrow-controls', first: 'arrow-up' });
+const shortcutsPresent = ['shortcuts', 'shortcut-controls', 'close-shortcuts', 'shortcut-form', 'shortcut-slot', 'shortcut-key', 'shortcut-reset', 'shortcut-status', 'shortcut-customize', ...Array.from({ length: 6 }, (_, i) => `shortcut-${i}`), ...Array.from({ length: 4 }, (_, i) => `shortcut-mod-${i}`)].every(id => $(id));
+if (shortcutsPresent) controlTrays.push({ trigger: 'shortcuts', panel: 'shortcut-controls', first: 'shortcut-0' });
 const viewPresent = ['view', 'view-controls', 'close-view', 'view-scale', 'view-in', 'view-out', 'view-fit', 'view-up', 'view-down', 'view-left', 'view-right'].every(id => $(id));
 if (viewPresent) controlTrays.push({ trigger: 'view', panel: 'view-controls', first: 'close-view' });
 let openControlTray = null;
@@ -217,11 +220,56 @@ const clipboardTools = $('clipboard-tools') ? createBrowserClipboard({ section: 
 }) : null;
 function updateArrowAvailability() {
   paintTrackpad();
+  paintShortcuts();
   clipboardTools?.refresh();
   if (!arrowPadPresent) return;
   $('arrows').hidden = !keyboardSupported || viewOnly;
   const available = canSendKeys();
   for (const id of ['arrows', 'arrow-up', 'arrow-left', 'arrow-down', 'arrow-right']) $(id).disabled = !available;
+}
+const shortcutKeys = createKeyboardShortcuts({ send, canSend: () => canSendKeys() && openControlTray === 'shortcuts', storage: () => window.localStorage });
+function paintShortcuts() {
+  if (!shortcutsPresent) return;
+  $('shortcuts').hidden = !keyboardSupported || viewOnly;
+  $('shortcuts').disabled = !canSendKeys();
+  shortcutKeys.bindings().forEach((binding, i) => {
+    const label = shortcutLabel(binding), button = $(`shortcut-${i}`);
+    button.textContent = label; button.setAttribute('aria-label', `Send ${label}`); button.setAttribute('title', `Send ${label}`);
+    button.disabled = !canSendKeys() || openControlTray !== 'shortcuts';
+  });
+}
+function loadShortcutEditor() {
+  if (!shortcutsPresent) return;
+  const binding = shortcutKeys.bindings()[Number($('shortcut-slot').value)] || shortcutKeys.bindings()[0];
+  $('shortcut-key').value = binding.code;
+  for (let i = 0; i < 4; i++) $(`shortcut-mod-${i}`).checked = !!(binding.modifiers & (1 << i));
+}
+if (shortcutsPresent) {
+  for (let i = 0; i < 6; i++) $(`shortcut-${i}`).addEventListener('click', () => {
+    if (!canSendKeys() || openControlTray !== 'shortcuts') return;
+    releaseTouches();
+    const ok = shortcutKeys.tap(i);
+    $('shortcut-status').textContent = ok ? `Sent ${shortcutLabel(shortcutKeys.bindings()[i])}.` : 'Shortcut not sent. Check the connection and keyboard permission.';
+    fitCanvas();
+  });
+  $('shortcut-slot').addEventListener('change', loadShortcutEditor);
+  $('shortcut-form').addEventListener('submit', event => {
+    event.preventDefault();
+    const index = Number($('shortcut-slot').value), mask = [0, 1, 2, 3].reduce((n, i) => n | ($(`shortcut-mod-${i}`).checked ? 1 << i : 0), 0);
+    const result = shortcutKeys.configure(index, $('shortcut-key').value, mask);
+    $('shortcut-key').setAttribute('aria-invalid', String(!result.ok));
+    if (!result.ok) { $('shortcut-status').textContent = 'Choose an available key and button.'; $('shortcut-key').focus(); return; }
+    paintShortcuts();
+    $('shortcut-status').textContent = `Button ${index + 1} is now ${shortcutLabel(shortcutKeys.bindings()[index])}. ${result.saved ? 'Saved in this browser.' : 'Browser storage is unavailable; this change lasts until the page closes.'}`;
+    fitCanvas();
+  });
+  $('shortcut-reset').addEventListener('click', () => {
+    const result = shortcutKeys.reset(); paintShortcuts(); loadShortcutEditor();
+    $('shortcut-key').setAttribute('aria-invalid', 'false');
+    $('shortcut-status').textContent = result.saved ? 'Default shortcuts restored in this browser.' : 'Default shortcuts restored for this page; browser storage is unavailable.';
+    fitCanvas();
+  });
+  $('close-shortcuts').addEventListener('click', () => setControlTray(null, true));
 }
 function tapArrow(code, modifiers = 0) {
   if (!canSendKeys() || openControlTray !== 'arrows' || !/^Arrow(?:Up|Left|Down|Right)$/.test(code)) return;
@@ -305,7 +353,7 @@ function clearMedia() {
   if (audio && audio.state !== 'closed') audio.close(); audio = null;
   clipboardTools?.setSupported(false);
   header = false; videoConfig = null; configBytes = null; audioConfig = null;
-  paintTrackpad();
+  paintTrackpad(); paintShortcuts();
 }
 function disconnect() {
   if (closing) return;
@@ -833,6 +881,7 @@ function setControlTray(name = null, focus = false) {
   if (name) hideKeyboard();
   const previous = openControlTray;
   openControlTray = name;
+  if (name === 'shortcuts') loadShortcutEditor();
   for (const tray of controlTrays) {
     const expanded = tray.trigger === name;
     $(tray.panel).hidden = !expanded;
@@ -846,7 +895,7 @@ function setControlTray(name = null, focus = false) {
 }
 for (const { trigger } of controlTrays) {
   $(trigger).addEventListener('click', () => {
-    if (trigger === 'arrows' && !canSendKeys()) return;
+    if (['arrows', 'shortcuts'].includes(trigger) && !canSendKeys()) return;
     setControlTray(openControlTray === trigger ? null : trigger, true);
   });
 }
@@ -870,6 +919,7 @@ function fitCanvas() {
     && needsControlsRow(canvas.width, canvas.height, fullWidth, fullHeight));
   const stage = $('stage');
   document.body.classList.toggle('view-navigation', viewNavigationActive());
+  document.body.classList.toggle('shortcuts-open', openControlTray === 'shortcuts');
   stage.tabIndex = viewNavigationActive() ? 0 : -1;
   if (viewNavigationActive()) { stage.setAttribute('role', 'group'); stage.setAttribute('aria-label', 'Move the local view'); stage.setAttribute('aria-describedby', 'view-help'); }
   else { stage.removeAttribute('role'); stage.removeAttribute('aria-label'); stage.removeAttribute('aria-describedby'); }
@@ -882,6 +932,11 @@ function fitCanvas() {
   updateArrowAvailability();
   if ($('view-scroll-hint')) $('view-scroll-hint').hidden = true;
   if ($('view-scroll-hint')) $('view-scroll-hint').hidden = !viewNavigationActive() || $('control-panels').scrollHeight <= $('control-panels').clientHeight + 1;
+  if ($('shortcut-scroll-hint')) {
+    const cue = $('shortcut-scroll-hint'), scroller = $('control-panels');
+    cue.hidden = true; cue.hidden = openControlTray !== 'shortcuts' || scroller.scrollHeight <= scroller.clientHeight + 1;
+    document.documentElement.style.setProperty('--shortcut-heading-clearance', `${($('shortcut-heading')?.offsetHeight || 48) + 12}px`);
+  }
   const controls = $('primary-controls'), hint = $('rail-scroll-hint');
   hint.hidden = true;
   hint.hidden = !(controls.scrollHeight > controls.clientHeight + 1);

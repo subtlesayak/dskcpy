@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 import { createBrowserClipboard } from '../receiver/clipboard.mjs';
+import { createKeyboardShortcuts, shortcutLabel } from '../receiver/shortcuts.mjs';
 import { createDesktopView } from '../receiver/view.mjs';
 import { createRelativeTrackpad } from '../receiver/trackpad.mjs';
 import { rememberedBrowser } from '../receiver/remembered.mjs';
@@ -103,7 +104,7 @@ function receiver(t, { portrait = false, lockFails = false, webRtc = false, webC
   if (webRtc) window.RTCPeerConnection = true;
   window.history = { replaceState(_state, _title, url) { locationState.hash = ''; historyChanges.push(url); } };
   const context = vm.createContext({ ...protocol,
-    createDesktopView, createRelativeTrackpad, createBrowserKeyboard, keyboardUsage, keyPacket, receiverIsAway,
+    createKeyboardShortcuts, shortcutLabel, createDesktopView, createRelativeTrackpad, createBrowserKeyboard, keyboardUsage, keyPacket, receiverIsAway,
     createBrowserClipboard: options => createBrowserClipboard({ ...options, setTimer: (fn, ms) => { const timer = setTimeout(fn, ms); timers.add(timer); return timer; }, clearTimer: clearTimeout }),
     rememberedBrowser: options => rememberedBrowser({ ...options, document, location: locationState,
       fetch: (...args) => context.fetch(...args),
@@ -923,5 +924,26 @@ test('local view navigation never emits remote gestures and cancels stale contac
   assert.equal(h.socket.sent.length, start);
   h.$('close-view').emit('click');
   assert.equal(h.$('view').attrs.get('aria-expanded'), 'false');
+  h.$('disconnect').emit('click');
+});
+
+
+test('phone shortcut controls send one balanced chord and obey pause, touch, view and keyboard gates', async t => {
+  const h = receiver(t, { keyboard: true, textFocus: true });
+  h.$('shortcuts').emit('click');
+  assert.equal(h.$('shortcuts').attrs.get('aria-expanded'), 'true');
+  h.$('shortcut-slot').value = '0'; h.$('shortcut-key').value = 'KeyS'; h.$('shortcut-mod-0').checked = true;
+  h.$('shortcut-customize').open = true; h.$('shortcut-customize').emit('toggle');
+  assert.equal(h.$('shortcut-key').value, 'KeyS', 'a delayed disclosure event cannot discard an edit');
+  const before = h.socket.sent.length; h.$('shortcut-form').emit('submit'); assert.equal(h.socket.sent.length, before);
+  h.$('shortcut-0').emit('click');
+  assert.deepEqual(h.socket.sent.slice(-2).map(p => [...p]), [[8, 0, 0, 22, 1], [8, 1, 0, 22, 0]]);
+  h.$('pause').emit('click'); const paused = h.socket.sent.length; h.$('shortcut-0').emit('click'); assert.equal(h.socket.sent.length, paused);
+  h.$('pause').emit('click'); h.$('touch').emit('click'); const off = h.socket.sent.length; h.$('shortcut-0').emit('click'); assert.equal(h.socket.sent.length, off);
+  h.$('touch').emit('click'); h.$('close-shortcuts').emit('click'); h.$('view').emit('click');
+  const view = h.socket.sent.length; h.$('shortcut-0').emit('click'); assert.equal(h.socket.sent.length, view);
+  h.$('close-view').emit('click'); h.$('shortcuts').emit('click'); h.$('auto-keyboard').checked = true; h.$('auto-keyboard').emit('change');
+  h.socket.emit('message', { data: JSON.stringify({ type: 'text-focus', focused: true }) });
+  assert.equal(h.$('shortcuts').attrs.get('aria-expanded'), 'true'); assert.equal(h.$('keyboard-controls').hidden, true);
   h.$('disconnect').emit('click');
 });
