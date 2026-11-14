@@ -135,6 +135,8 @@ test('window and keyboard features require the real Mac backend and explicit nat
   assert.equal(status.features.browserCaptureRecovery,false);
   status = await inspectReadiness(runtime, probe('--reverse-adaptive-video browser-adaptive-video-v1'));
   assert.equal(status.features.browserAdaptiveVideo,false);
+  status = await inspectReadiness(runtime, probe('--reverse-adaptive-video browser-adaptive-video-v1 browser-adaptive-windows-v1'));
+  assert.equal(status.features.browserAdaptiveVideo,true);
 });
 
 test('clipboard requires the separate current native marker and platform keyboard support', async t => {

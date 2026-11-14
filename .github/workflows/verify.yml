@@ -140,7 +140,7 @@ jobs:
           SCRCPY_WINDOWS_RUNTIME_TEST_BINARY: .tmp/ci-native/app/scrcpy.exe
         run: |
           npm ci --prefix gui --ignore-scripts
-          DSKCPY_PAUSE_TEST_CC=gcc DSKCPY_REQUIRE_PAUSE_FIXTURE=1 node --test gui/server/telemetry.test.mjs gui/server/windows-runtime-native.test.mjs gui/server/windows-pause.test.mjs
+          DSKCPY_PAUSE_TEST_CC=gcc DSKCPY_REQUIRE_PAUSE_FIXTURE=1 DSKCPY_ENCODER_TEST_CC=gcc DSKCPY_REQUIRE_ENCODER_FIXTURE=1 node --test gui/server/telemetry.test.mjs gui/server/windows-runtime-native.test.mjs gui/server/windows-pause.test.mjs gui/server/windows-encoder.test.mjs
       - name: Assemble and inspect the unsigned Windows desktop prototype without capture
         env:
           MSYS2_PATH_TYPE: inherit
