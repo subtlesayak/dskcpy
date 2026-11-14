@@ -29,12 +29,12 @@ export function sessionScopedIceLite(sdp) {
 }
 
 const nalPrefix = Buffer.from([0, 0, 0, 1]);
-function readConfiguration(bytes, expectedProfile) {
+function readConfiguration(bytes, expectedProfile, requirePps = true) {
   if (!(bytes instanceof Uint8Array) || !bytes.length || bytes.length > 65536)
     throw Error('Invalid H.264 parameter configuration size.');
   const sets = splitH264NalUnits(Buffer.from(bytes), 4, 'annexb').filter(n => [7, 8].includes(n[0] & 31))
     .map(n => { const owned = Buffer.alloc(n.length); n.copy(owned); return owned; });
-  if (sets.length > 32 || !sets.some(n => (n[0] & 31) === 7) || !sets.some(n => (n[0] & 31) === 8)
+  if (sets.length > 32 || !sets.some(n => (n[0] & 31) === 7) || requirePps && !sets.some(n => (n[0] & 31) === 8)
       || sets.some(n => n.length < 2)) throw Error('Incomplete H.264 parameter configuration.');
   const data = Buffer.concat(sets.flatMap(n => [nalPrefix, n]));
   const profile = avcCodec(data).slice(5);
@@ -51,7 +51,9 @@ export function createRtcMedia({ bind = '127.0.0.1', configuration,
   onKeyframe = () => {}, onFailure = () => {}, onConnected = () => {},
   peerFactory = (options) => new RTCPeerConnection(options), now = Date.now } = {}) {
   if (!privateRtcBind(bind)) throw new Error('Choose an explicit private IPv4 interface for browser media.');
-  let parameters = readConfiguration(configuration);
+  // Preserve startup compatibility with hosts whose first IDR carries PPS.
+  // A later replacement must provide a complete independently usable config.
+  let parameters = readConfiguration(configuration, undefined, false);
   const profile = parameters.profile;
   const pc = peerFactory({
     codecs: { video: [useH264({ payloadType: 96,

@@ -12,7 +12,8 @@ It retains the peer, RTP sequence/SSRC, audio sample clock, authenticated sessio
 native capture and held input. A keyframe already in flight cannot satisfy the
 new configuration epoch. Only SPS/PPS are retained; old pictures are never cached
 for replay. Configuration input is limited to 64 KiB and 32 parameter sets, with
-both SPS and PPS required. An invalid or changed negotiated profile is rejected
+both SPS and PPS required for updates. Startup remains compatible with an
+SPS-only initial configuration when PPS arrives in the first keyframe. An invalid or changed negotiated profile is rejected
 before replacing the last working configuration. The existing negotiated media
 failure policy then determines recovery; no new capture consent is created.
 

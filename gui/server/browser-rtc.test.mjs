@@ -20,6 +20,16 @@ test('RTC sends configuration with an IDR when the native frame omits parameter 
   assert.deepEqual(Buffer.concat(nals.slice(0,2)), Buffer.concat(splitH264NalUnits(configuration,4,'annexb')));
 });
 
+test('legacy SPS-only startup still works when the first IDR carries PPS', async t => {
+  let peer;
+  const sets=splitH264NalUnits(configuration,4,'annexb');
+  const media=createRtcMedia({configuration:Buffer.concat([Buffer.from([0,0,0,1]),sets[0]]),
+    peerFactory:o=>(peer=new RTCPeerConnection(o))});t.after(()=>media.close());
+  const packets=[];peer.getSenders()[0].sendRtp=async p=>{packets.push(p);};peer.connectionStateChange.execute('connected');
+  await media.frame(Buffer.concat([Buffer.from([0,0,0,1]),sets[1],key]),1n,true);
+  assert.deepEqual(rtpNals(packets).map(n=>n[0]&31),[7,8,5]);
+});
+
 test('RTC configuration change retains RTP/audio state, waits for IDR and never retains old pixels', async t => {
   let peer, requests = 0, time = 0;
   const media = createRtcMedia({ configuration, now: () => time, onKeyframe: () => requests++,
