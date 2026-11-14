@@ -15,6 +15,7 @@ const assets = new Map([
   ['/receiver.mjs', ['receiver.mjs', 'text/javascript; charset=utf-8']],
   ['/rtc.mjs', ['rtc.mjs', 'text/javascript; charset=utf-8']],
   ['/video.mjs', ['video.mjs', 'text/javascript; charset=utf-8']],
+  ['/trackpad.mjs', ['trackpad.mjs', 'text/javascript; charset=utf-8']],
   ['/keyboard.mjs', ['keyboard.mjs', 'text/javascript; charset=utf-8']],
   ['/clipboard.mjs', ['clipboard.mjs', 'text/javascript; charset=utf-8']],
   ['/protocol.mjs', ['protocol.mjs', 'text/javascript; charset=utf-8']],

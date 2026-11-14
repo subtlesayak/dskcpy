@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 import { createBrowserClipboard } from '../receiver/clipboard.mjs';
+import { createRelativeTrackpad } from '../receiver/trackpad.mjs';
 import { rememberedBrowser } from '../receiver/remembered.mjs';
 import { receiverIsAway } from '../receiver/lifecycle.mjs';
 import * as protocol from '../receiver/protocol.mjs';
@@ -101,7 +102,7 @@ function receiver(t, { portrait = false, lockFails = false, webRtc = false, webC
   if (webRtc) window.RTCPeerConnection = true;
   window.history = { replaceState(_state, _title, url) { locationState.hash = ''; historyChanges.push(url); } };
   const context = vm.createContext({ ...protocol,
-    createBrowserKeyboard, keyboardUsage, keyPacket, receiverIsAway,
+    createRelativeTrackpad, createBrowserKeyboard, keyboardUsage, keyPacket, receiverIsAway,
     createBrowserClipboard: options => createBrowserClipboard({ ...options, setTimer: (fn, ms) => { const timer = setTimeout(fn, ms); timers.add(timer); return timer; }, clearTimer: clearTimeout }),
     rememberedBrowser: options => rememberedBrowser({ ...options, document, location: locationState,
       fetch: (...args) => context.fetch(...args),
@@ -844,4 +845,54 @@ test('soft-keyboard viewport changes preserve clipboard preparation without weak
   f.reflow();f.window.visualViewport.height=220;f.window.visualViewport.emit('resize');
   assert.equal(f.$('clipboard-text').value,'prepared fixture');assert.equal(f.$('clipboard-enable').checked,true);
   f.window.emit('blur');assert.equal(f.$('clipboard-text').value,'');assert.equal(f.$('clipboard-enable').checked,false);
+});
+
+
+test('trackpad sends bounded hover, one tap and held drag, without direct-touch jumps', async t => {
+  const h = receiver(t);
+  h.$('trackpad-mode').emit('click');
+  assert.equal(h.$('trackpad-mode').attrs.get('aria-pressed'), 'true');
+  pointer(h, 'pointerdown', 1, 10, 20); pointer(h, 'pointermove', 1, 90, 20); pointer(h, 'pointerup', 1, 90, 20);
+  await new Promise(r => setTimeout(r, 25));
+  let packets = inputs(h); assert.equal(packets.length, 1); assert.equal(packets[0][0], 7);
+  assert.equal(packets[0].readInt32BE(13), 0); assert.equal(packets[0].readInt32BE(17), 0);
+  assert.equal(packets[0].readUInt32BE(1), 383);
+  pointer(h, 'pointerdown', 2, 500, 250); pointer(h, 'pointerup', 2, 500, 250);
+  packets = inputs(h); assert.deepEqual(packets.slice(-2).map(p => p[1]), [0, 1]);
+  assert.ok(packets.every(p => validBrowserInput(p, 640, 480)));
+  h.$('drag-mode').emit('click'); assert.equal(h.$('drag-mode-label').textContent, 'Release drag');
+  pointer(h, 'pointerdown', 3, 300, 200); pointer(h, 'pointermove', 3, 340, 200); pointer(h, 'pointerup', 3, 340, 200);
+  h.$('display').emit('lostpointercapture', { pointerId: 3 });
+  await new Promise(r => setTimeout(r, 25));
+  assert.equal(h.$('drag-mode').attrs.get('aria-pressed'), 'true', 'normal capture release after finger up must preserve deliberate drag');
+  h.window.emit('blur'); assert.equal(inputs(h).at(-1)[1], 3); assert.equal(h.$('drag-mode').attrs.get('aria-pressed'), 'false');
+});
+test('trackpad keyboard alternative, gesture coalescing and lifecycle restrictions', async t => {
+  const h = receiver(t);
+  h.$('trackpad-mode').emit('click');
+  for (let i = 0; i < 100; i++) h.$('display').emit('keydown', { key: 'ArrowRight' });
+  await new Promise(r => setTimeout(r, 25)); assert.equal(inputs(h).length, 1);
+  h.$('display').emit('keydown', { key: 'Enter', repeat: false });
+  assert.deepEqual(inputs(h).slice(-2).map(p => p[1]), [0, 1]);
+  h.$('display').emit('keydown', { key: 'Enter', repeat: true }); assert.equal(inputs(h).length, 3);
+  h.$('drag-mode').emit('click'); h.$('pause').emit('click');
+  const n = inputs(h).length; assert.equal(inputs(h).at(-1)[1], 3);
+  h.$('display').emit('keydown', { key: 'Enter' }); pointer(h, 'pointerdown', 1, 10, 10); pointer(h, 'pointerup', 1, 10, 10);
+  assert.equal(inputs(h).length, n);
+  h.$('pause').emit('click'); h.$('touch').emit('click'); h.$('trackpad-mode').emit('click');
+  h.$('display').emit('keydown', { key: 'Enter' }); assert.equal(inputs(h).length, n);
+  const readOnly = receiver(t, { viewOnly: true });
+  assert.equal(readOnly.$('trackpad-mode').hidden, true); readOnly.$('trackpad-mode').emit('click');
+  pointer(readOnly, 'pointerdown', 1, 10, 10); pointer(readOnly, 'pointerup', 1, 10, 10); assert.equal(inputs(readOnly).length, 0);
+});
+
+
+test('trackpad clears queued motion and intentional hold across connection loss', async t => {
+  const h = receiver(t); h.$('trackpad-mode').emit('click'); h.$('drag-mode').emit('click');
+  h.$('display').emit('keydown', { key: 'ArrowRight' });
+  h.socket.close(4001);
+  const count = inputs(h).length;
+  await new Promise(r => setTimeout(r, 30));
+  assert.equal(inputs(h).length, count); assert.equal(h.$('drag-mode').attrs.get('aria-pressed'), 'false');
+  assert.equal(h.$('trackpad-mode').disabled, true); assert.equal(h.$('trackpad-cursor').hidden, true);
 });
