@@ -5,6 +5,7 @@ import vm from 'node:vm';
 import { createBrowserClipboard } from '../receiver/clipboard.mjs';
 import { createKeyboardShortcuts, shortcutLabel } from '../receiver/shortcuts.mjs';
 import { createDesktopView } from '../receiver/view.mjs';
+import { createTypingView } from '../receiver/typing-view.mjs';
 import { createRelativeTrackpad } from '../receiver/trackpad.mjs';
 import { rememberedBrowser } from '../receiver/remembered.mjs';
 import { receiverIsAway } from '../receiver/lifecycle.mjs';
@@ -114,7 +115,7 @@ function receiver(t, { portrait = false, lockFails = false, webRtc = false, webC
   const context = vm.createContext({ ...protocol,
     createWindowChooser, createVideoPreference,
     createVideoFeedback: options => createVideoFeedback({...options,setTimer:(fn,ms)=>{const timer=setInterval(fn,ms);timers.add(timer);return timer},clearTimer:clearInterval}),
-    createKeyboardShortcuts, shortcutLabel, createDesktopView, createRelativeTrackpad, createBrowserKeyboard, keyboardUsage, keyPacket, receiverIsAway,
+    createKeyboardShortcuts, shortcutLabel, createDesktopView, createTypingView, createRelativeTrackpad, createBrowserKeyboard, keyboardUsage, keyPacket, receiverIsAway,
     createBrowserClipboard: options => createBrowserClipboard({ ...options, setTimer: (fn, ms) => { const timer = setTimeout(fn, ms); timers.add(timer); return timer; }, clearTimer: clearTimeout }),
     rememberedBrowser: options => rememberedBrowser({ ...options, document, location: locationState,
       fetch: (...args) => context.fetch(...args),
