@@ -103,6 +103,14 @@ The optional native-license input is for development staging; a missing input
 is recorded as incomplete. Public distribution remains blocked on a reviewed
 complete notice/source-offer set. Electron and npm notices must also ship.
 
+Staging supplements the pinned `werift@0.27.0` package's missing primary MIT
+notice from its exact upstream release; its separate bundled libwebrtc notice
+is retained. The bundle verifier independently checks the supplemental bytes,
+package identity and inventory entry. A dependency version/license change fails
+this check until its notice is reviewed. See `desktop/notices/README.md`.
+`completeNoticesReviewed` remains false: this is one verified file fix, not a
+complete licensing or release approval.
+
 Windows CI collects the transitive x64 DLL closure with the existing bounded PE
 parser, including delay imports,
 rejects missing/conflicting libraries, and probes the copied executable with
