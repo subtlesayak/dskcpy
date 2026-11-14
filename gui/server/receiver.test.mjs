@@ -14,7 +14,7 @@ const parameters = new Uint8Array([0, 0, 1, 0x67, 0x64, 0, 0x28, 0, 0, 1, 0x68, 
 
 // Deterministic lifecycle tests against the actual receiver script. These model
 // delayed browser callbacks; rendered/device QA is separate from this harness.
-function receiver(t, { portrait = false, lockFails = false, webRtc = false, webCodecs = true, qrKey = '', keyboard = false, viewOnly = false, visualHeight = 0, webAudio = false, textFocus = false, virtualKeyboard = null, now = () => Date.now(), resumable = false } = {}) {
+function receiver(t, { portrait = false, lockFails = false, webRtc = false, webCodecs = true, qrKey = '', keyboard = false, viewOnly = false, visualHeight = 0, webAudio = false, textFocus = false, keyboardStatus = false, virtualKeyboard = null, now = () => Date.now(), resumable = false } = {}) {
   const timers = new Set(), sockets = [], decoders = [], orientation = [];
   let resize;
   const locationState = { protocol: 'https:', host: 'receiver.test', pathname: qrKey ? '/join' : '/', search: '', hash: qrKey ? `#connect=${qrKey}` : '' };
@@ -121,7 +121,7 @@ function receiver(t, { portrait = false, lockFails = false, webRtc = false, webC
   t.after(() => { for (const timer of timers) clearTimeout(timer); });
   if (!qrKey) { $('session-key').value = 'x'.repeat(32); $('join-form').emit('submit'); }
   const socket = sockets[0]; socket.emit('open');
-  socket.emit('message', { data: JSON.stringify({ type: 'authenticated', keyboard, viewOnly, textFocus, mediaMode: webRtc ? 'webrtc' : 'webcodecs' }) });
+  socket.emit('message', { data: JSON.stringify({ type: 'authenticated', keyboard, viewOnly, textFocus, keyboardStatus, mediaMode: webRtc ? 'webrtc' : 'webcodecs' }) });
   const header = new ArrayBuffer(16), view = new DataView(header);
   view.setUint32(0, 0x53524431); view.setUint32(4, 1); view.setUint32(8, 640); view.setUint32(12, 480);
   socket.emit('message', { data: header });
@@ -427,11 +427,12 @@ test('negotiated keyboard input stays on the authenticated socket and releases o
   h.$('keyboard-input').emit('keydown', { code: 'ControlLeft', key: 'Control', ctrlKey: true });
   h.window.emit('blur');
   const keys = () => h.socket.sent.filter((p) => Buffer.isBuffer(p) && p[0] === 8);
-  assert.deepEqual(keys().map((p) => p[1]), [0, 2]);
+  assert.deepEqual(keys().map((p) => p[1]), [2, 0, 2]);
+  assert.deepEqual([...keys()[0]], [8,2,0,0,0]);
   h.document.hidden = true; h.document.emit('visibilitychange');
   assert.equal(h.$('keyboard-controls').hidden, true);
   h.$('keyboard-input').emit('keydown', { code: 'Enter', key: 'Enter' });
-  assert.equal(keys().length, 2); h.$('disconnect').emit('click');
+  assert.equal(keys().length, 3); h.$('disconnect').emit('click');
 });
 
 test('window view-only policy disables touch, keyboard, audio and desktop window controls', async (t) => {
@@ -453,7 +454,7 @@ test('soft-keyboard viewport reflow preserves pending physical key pairing', (t)
   h.$('keyboard-input').emit('keydown', { code: 'ControlLeft', key: 'Control', ctrlKey: true });
   h.reflow(); h.$('keyboard-input').emit('keyup', { code: 'ControlLeft', key: 'Control' });
   const keys = h.socket.sent.filter((p) => Buffer.isBuffer(p) && p[0] === 8);
-  assert.deepEqual(keys.map((p) => p[1]), [0, 1]);
+  assert.deepEqual(keys.map((p) => p[1]), [2, 0, 1]);
   h.$('hide-controls').emit('click'); assert.equal(h.$('keyboard-controls').hidden, true);
   h.$('disconnect').emit('click');
 });
@@ -484,7 +485,7 @@ test('a shrinking visual viewport keeps typing fitted without breaking paired ke
   assert.equal(h.cssVariables.get('--receiver-height'), '240px');
   h.$('keyboard-input').emit('keyup', { code: 'ControlLeft', key: 'Control' });
   const keys = h.socket.sent.filter(data => Buffer.isBuffer(data) && data[0] === 8);
-  assert.deepEqual(keys.map(data => [data[1], data.readUInt16BE(2)]), [[0, 224], [1, 224]]);
+  assert.deepEqual(keys.map(data => [data[1], data.readUInt16BE(2)]), [[2,0], [0, 224], [1, 224]]);
   assert.equal(h.$('keyboard-controls').hidden, false);
   h.$('disconnect').emit('click');
 });
@@ -734,4 +735,31 @@ test('auto keyboard keeps manual fallback without VirtualKeyboard API and cannot
     assert.notEqual(denied.$('keyboard').attrs.get('aria-expanded'),'true');
     assert.equal(denied.$('auto-keyboard-setting').hidden,true);
   }
+});
+
+
+test('negotiated keyboard failure clears the local context; a deliberate reopen sends a fresh release barrier',t=>{
+ const h=receiver(t,{keyboard:true,keyboardStatus:true,textFocus:true});
+ assert.ok(h.socket.sent.includes('keyboard-status-subscribe'));
+ h.$('keyboard').emit('click');h.$('keyboard-input').value='pending';
+ h.socket.emit('message',{data:JSON.stringify({type:'keyboard-status',status:'blocked'})});
+ assert.equal(h.$('keyboard-controls').hidden,true);assert.equal(h.$('keyboard-input').value,'');
+ assert.match(h.$('error').textContent,/could not accept all keyboard input/);
+ const blockedCount=h.socket.sent.length;
+ assert.equal(h.$('arrows').disabled,true);
+ h.$('arrows').emit('click');h.$('arrow-right').emit('click');
+ h.$('auto-keyboard').checked=true;h.$('auto-keyboard').emit('change');
+ h.socket.emit('message',{data:JSON.stringify({type:'text-focus',focused:true})});
+ h.$('keyboard-input').value='stale';h.$('keyboard-input').emit('input');
+ assert.equal(h.$('keyboard-controls').hidden,true);
+ assert.equal(h.socket.sent.length,blockedCount);
+ const before=h.socket.sent.length;h.$('keyboard').emit('click');
+ assert.equal(h.$('keyboard-controls').hidden,false);
+ assert.ok(h.socket.sent.slice(before).some(p=>Buffer.isBuffer(p)&&p.equals(Buffer.from([8,2,0,0,0]))));
+ h.socket.emit('message',{data:JSON.stringify({type:'keyboard-status',status:'ready'})});
+ assert.equal(h.$('error').textContent,'');
+});
+
+test('legacy hosts get no new keyboard-status subscription',t=>{
+ const h=receiver(t,{keyboard:true});assert.equal(h.socket.sent.includes('keyboard-status-subscribe'),false);
 });

@@ -102,7 +102,8 @@ export async function inspectReadiness(runtime, runCommand) {
   }));
   return { checks, transports, features: {
     browserTextFocus: platform === 'darwin' && macBackend && nativeHelp.includes('--reverse-keyboard') && nativeHelp.includes('--reverse-text-focus'),
-    browserKeyboard: platform === 'darwin' && macBackend && nativeHelp.includes('--reverse-keyboard'),
+    browserKeyboard: nativeHelp.includes('--reverse-keyboard') && ((platform === 'darwin' && macBackend)
+      || (platform === 'win32' && supported && nativeHelp.includes('browser-keyboard-v1'))),
     macWindowCapture: platform === 'darwin' && macBackend && nativeHelp.includes('--list-reverse-windows') && nativeHelp.includes('--reverse-window-owner'),
   }, checkedAt: new Date().toISOString() };
 }

@@ -14,6 +14,13 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
   const video = new Set(), audio = new Set(), touches = new Map();
   const focusSupported = textFocus && keyboard && !viewOnly;
   let focusAt = -Infinity, focusSubscribed = false;
+  let keyboardStatusSubscribed = false, lastKeyboardStatus = null;
+  function keyboardStatus(status) {
+    if (!keyboard || viewOnly || !['ready','blocked','unsupported'].includes(status) || closed) return;
+    lastKeyboardStatus = status;
+    if (ready && keyboardStatusSubscribed && !suspended && peer?.readyState === WebSocket.OPEN && peer.bufferedAmount <= MAX_PACKET)
+      peer.send(JSON.stringify({type:'keyboard-status',status}));
+  }
   function focusHint(focused) {
     if (!focusSupported || !focusSubscribed || !ready || closed || suspended || !peer || peer.readyState !== WebSocket.OPEN
         || peer.bufferedAmount > MAX_PACKET || ![true, false, null].includes(focused) || Date.now() - focusAt < 100) return;
@@ -85,7 +92,7 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
   }
   function announce() {
     if (!ready || !peer) return;
-    peer.send(JSON.stringify({ type: 'authenticated', mediaMode, keyboard, viewOnly, textFocus: focusSupported }));
+    peer.send(JSON.stringify({ type: 'authenticated', mediaMode, keyboard, viewOnly, textFocus: focusSupported, keyboardStatus: keyboard && !viewOnly }));
     if (wireHeader) forward(wireHeader);
     if (videoConfig && mediaMode === 'webcodecs') forward(videoConfig);
     if (audioConfig) forward(audioConfig);
@@ -96,6 +103,7 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
   function attach(ws) {
     if (closed) { ws.close(1000); return; }
     if (peer && peer !== ws) detach(peer, true);
+    keyboardStatusSubscribed = false;
     peer = ws; alive = true; rateAt = Date.now(); events = 0;
     // Optional messages require this viewer's explicit acknowledgement. A
     // restored/older cached page must not inherit another socket's subscription.
@@ -115,9 +123,16 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
           if (!focusSupported || !ready) { close(); return; }
           focusSubscribed = true; return;
         }
+        if (message.toString() === 'keyboard-status-subscribe' && ready && keyboard && !viewOnly) {
+          keyboardStatusSubscribed = true;
+          if (lastKeyboardStatus) keyboardStatus(lastKeyboardStatus);
+          return;
+        }
         if (message.toString() === 'suspend') { suspend(); return; }
         if (message.toString() === 'resume') {
-          suspended = false; clearTimeout(awayTimer); return;
+          suspended = false; clearTimeout(awayTimer);
+          if (keyboardStatusSubscribed && lastKeyboardStatus) keyboardStatus(lastKeyboardStatus);
+          return;
         }
         if (mediaMode === 'webrtc' && rtc && message.length <= 32768) {
           try {
@@ -225,7 +240,7 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
       });
       if (closed) { listener.close(); return; }
       ready = true; nativeTimer = setTimeout(close, 10000); announce();
-      await onConnect({ port: listener.address().port, keyboard, viewOnly, textFocus: focusSupported, focusHint, close, get closed() { return closed; } });
+      await onConnect({ port: listener.address().port, keyboard, viewOnly, textFocus: focusSupported, focusHint, keyboardStatus, close, get closed() { return closed; } });
     } catch { close(); }
   }
   return { start, attach, close, mediaMode, get cleanup() { return rtcCleanup; } };

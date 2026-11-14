@@ -123,4 +123,6 @@ test('window and keyboard features require the real Mac backend and explicit nat
   assert.equal(status.features.browserTextFocus,true);
   runtime.platform = 'win32'; status = await inspectReadiness(runtime, probe('--reverse-keyboard --reverse-window --reverse-window-owner --list-reverse-windows'));
   assert.deepEqual(status.features, { browserTextFocus: false, browserKeyboard: false, macWindowCapture: false });
+  status = await inspectReadiness(runtime, probe('--reverse-keyboard browser-keyboard-v1'));
+  assert.deepEqual(status.features,{browserTextFocus:false,browserKeyboard:true,macWindowCapture:false});
 });

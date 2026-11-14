@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createTrustedDevices, deviceDigest } from './trusted-devices.mjs';
@@ -746,4 +746,32 @@ test('current native child focus metadata reaches only its capable browser and i
   child.child.stdout.write('DSKCPY_TEXT_FOCUS never-forward-this\n');
   assert.equal(f.publicState().logs.some(x=>x.message.includes('DSKCPY_TEXT_FOCUS')||x.message.includes('never-forward')),false);
   await f.request('/api/stream/stop',{});
+});
+
+
+test('Windows browser keyboard is authenticated and fixed status IPC is not logged',async t=>{
+ const reserve=net.createServer();reserve.listen(0,'127.0.0.1');await once(reserve,'listening');
+ const browserPort=reserve.address().port;await new Promise(r=>reserve.close(r));
+ const origin='https://viewer.example.test';
+ const directory=await mkdtemp(path.join(os.tmpdir(),'dskcpy-windows-host-'));t.after(()=>rm(directory,{recursive:true,force:true}));
+ const binary=path.join(directory,'fixture.exe');await writeFile(binary,'fake executable, never launched',{mode:0o755});
+ const f=await fixture(t,{platform:'win32',browserPort,
+  environment:{...process.env,SCRCPY_GUI_BINARY:binary,DSKCPY_VIEWER_ORIGIN:origin},
+  readinessProbe:async()=>({...ready,features:{browserKeyboard:true,browserTextFocus:false}})});
+ const {body,code}=await f.request('/api/browser/invite',{browserTransport:'wifi'});assert.equal(code,201);assert.equal(f.children.length,0);
+ const ws=new WebSocket(`ws://127.0.0.1:${browserPort}/stream`,{origin,headers:{Host:'viewer.example.test'}});
+ ws.on('error',()=>{});t.after(()=>ws.terminate());const messages=[];
+ ws.on('message',(data,binary)=>{if(!binary)messages.push(JSON.parse(data));});
+ await once(ws,'open');ws.send(body.key);await waitFor(()=>f.children.length===1);
+ const child=f.children[0];assert.ok(child.args.includes('--reverse-keyboard'));assert.equal(child.args.includes('--reverse-text-focus'),false);
+ ws.send('keyboard-status-subscribe');
+ const port=Number(child.args.find(x=>x.startsWith('--reverse-socket=')).split('=')[1]);
+ const native=net.connect(port,'127.0.0.1');native.on('error',()=>{});t.after(()=>native.destroy());await once(native,'connect');
+ native.write(Buffer.from('535244310000000100000280000001e0','hex'));
+ child.child.stdout.write('DSKCPY_KEYBOARD_STA');child.child.stdout.write('TUS blocked\n');
+ await waitFor(()=>messages.some(m=>m.type==='keyboard-status'));
+ assert.deepEqual(messages.find(m=>m.type==='keyboard-status'),{type:'keyboard-status',status:'blocked'});
+ child.child.stdout.write('DSKCPY_KEYBOARD_STATUS private-sample\n');
+ assert.equal(f.publicState().logs.some(x=>x.message.includes('DSKCPY_KEYBOARD_STATUS')||x.message.includes('private-sample')),false);
+ await f.request('/api/stream/stop',{});
 });

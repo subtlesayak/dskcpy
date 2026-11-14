@@ -1005,8 +1005,8 @@ static const struct sc_option options[] = {
     {
         .longopt_id = OPT_REVERSE_KEYBOARD,
         .longopt = "reverse-keyboard",
-        .text = "Opt in to browser keyboard-v1 input on a Mac full-desktop stream. "
-                "Requires --reverse-display --reverse-socket and Accessibility permission.",
+        .text = "Opt in to browser-keyboard-v1 on a Windows or experimental Mac full-desktop stream. "
+                "Requires --reverse-display --reverse-socket; Mac also needs Accessibility permission.",
     },
     {
         .longopt_id = OPT_REVERSE_SOCKET,
@@ -3119,10 +3119,13 @@ parse_args_with_getopt(struct scrcpy_cli_args *args, int argc, char *argv[],
         return false;
     }
 #ifndef HAVE_REVERSE_MACOS
-    if (opts->reverse_window || opts->list_reverse_windows || opts->reverse_keyboard) {
+    if (opts->reverse_window || opts->list_reverse_windows || opts->reverse_text_focus) {
         LOGE("These capture/input options require the experimental Mac host");
         return false;
     }
+# ifndef _WIN32
+    if (opts->reverse_keyboard) { LOGE("Browser keyboard requires Windows or the experimental Mac host"); return false; }
+# endif
 #endif
     if (opts->reverse_socket && (!opts->reverse_display || connection
             || opts->serial || opts->select_usb || opts->select_tcpip || opts->tcpip)) {
