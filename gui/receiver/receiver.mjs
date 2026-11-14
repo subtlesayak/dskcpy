@@ -1,5 +1,6 @@
 import { rememberedBrowser } from './remembered.mjs';
 import { createBrowserClipboard } from './clipboard.mjs';
+import { createDesktopView } from './view.mjs';
 import { createRelativeTrackpad } from './trackpad.mjs';
 import { receiverIsAway } from './lifecycle.mjs';
 import { BROWSER_RESUME_MS, avcCodec, avcParameters, touchPacket, scrollPacket, takeDecodedTimestamps, fitDisplay, createMediaAcknowledger, needsControlsRow, parseJoinFragment } from './protocol.mjs';
@@ -39,7 +40,7 @@ function clearFocusCapability(clearPreference = true) {
   if (autoFeedback) autoFeedback.hidden = true;
 }
 function autoFocusKeyboard(focused) {
-  if (focused !== true || !focusSupported || !autoKeyboard || !canSendKeys() || away()) return;
+  if (viewNavigationActive() || focused !== true || !focusSupported || !autoKeyboard || !canSendKeys() || away()) return;
   if (clipboardTools?.isActive()) return;
   const field = $('keyboard-input');
   if (keyboardOpen && document.activeElement === field) return;
@@ -84,12 +85,15 @@ const controlTrays = [
 // Tolerate an older document during a static-assets-only rolling update.
 const arrowPadPresent = ['arrows', 'arrow-controls', 'close-arrows', 'arrow-up', 'arrow-left', 'arrow-down', 'arrow-right'].every(id => $(id));
 if (arrowPadPresent) controlTrays.push({ trigger: 'arrows', panel: 'arrow-controls', first: 'arrow-up' });
+const viewPresent = ['view', 'view-controls', 'close-view', 'view-scale', 'view-in', 'view-out', 'view-fit', 'view-up', 'view-down', 'view-left', 'view-right'].every(id => $(id));
+if (viewPresent) controlTrays.push({ trigger: 'view', panel: 'view-controls', first: 'close-view' });
 let openControlTray = null;
+const viewNavigationActive = () => viewPresent && openControlTray === 'view';
 let selectDrag = false, touchGesture = null, trackpadMode = false;
 const trackpadPresent = ['trackpad-mode', 'trackpad-cursor', 'trackpad-help'].every(id => $(id));
 let trackMoveTimer, pendingTrackMove;
 function canSendPointer() {
-  return authenticated && header && !paused && !document.hidden && !away() && touchEnabled && !viewOnly && ws?.readyState === WebSocket.OPEN;
+  return !viewNavigationActive() && authenticated && header && !paused && !document.hidden && !away() && touchEnabled && !viewOnly && ws?.readyState === WebSocket.OPEN;
 }
 function flushTrackMove() {
   clearTimeout(trackMoveTimer); trackMoveTimer = null;
@@ -135,11 +139,77 @@ function paintTrackpad() {
     cursor.style.top = `${(video.top - stage.top + p.y / p.height * video.height) * sy}px`;
   }
 }
+const desktopView = createDesktopView({ changed: paintView });
+let viewImageSize = '';
+function paintView() {
+  const v = desktopView.state();
+  for (const media of [canvas, rtcDisplay]) {
+    media.style.transformOrigin = 'center';
+    media.style.transform = `translate(${v.x}px, ${v.y}px) scale(${v.scale})`;
+  }
+  if (viewPresent) {
+    $('view-scale').textContent = `Zoom: ${Math.round(v.scale * 100)}%`;
+    $('view').disabled = !authenticated || !header || away();
+    for (const id of ['view-in', 'view-out', 'view-fit', 'view-up', 'view-down', 'view-left', 'view-right']) $(id).disabled = !canMoveView();
+    $('view-in').disabled ||= v.scale >= 4;
+    $('view-out').disabled ||= v.scale <= 1;
+  }
+  paintTrackpad();
+}
+function viewPoint(event) {
+  const stage = $('stage'), rect = stage.getBoundingClientRect();
+  return { x: (event.clientX - rect.left) * stage.clientWidth / rect.width,
+    y: (event.clientY - rect.top) * stage.clientHeight / rect.height };
+}
+function canMoveView() { return viewNavigationActive() && authenticated && header && !document.hidden && !away(); }
+function announceView() { if ($('view-announcement')) $('view-announcement').textContent = $('view-scale').textContent; }
+if (viewPresent) {
+  const stage = $('stage');
+  stage.addEventListener('pointerdown', event => {
+    if (!viewNavigationActive()) return;
+    event.preventDefault(); event.stopPropagation();
+    if (!canMoveView() || event.button !== 0) return;
+    const p = viewPoint(event); stage.setPointerCapture(event.pointerId); desktopView.down(event.pointerId, p.x, p.y);
+  }, true);
+  stage.addEventListener('pointermove', event => {
+    if (!viewNavigationActive()) return;
+    event.preventDefault(); event.stopPropagation();
+    if (canMoveView()) { const p = viewPoint(event); desktopView.move(event.pointerId, p.x, p.y); }
+  }, true);
+  for (const name of ['pointerup', 'pointercancel', 'lostpointercapture']) stage.addEventListener(name, event => {
+    if (!viewNavigationActive()) return;
+    event.preventDefault(); event.stopPropagation();
+    if (name === 'pointerup') { desktopView.up(event.pointerId); announceView(); }
+    else if (desktopView.hasPointer(event.pointerId)) desktopView.cancel();
+  }, true);
+  stage.addEventListener('wheel', event => {
+    if (!viewNavigationActive()) return;
+    event.preventDefault(); event.stopPropagation();
+    if (!canMoveView()) return;
+    const p = viewPoint(event), unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? stage.clientHeight : 1;
+    if (event.ctrlKey) desktopView.zoomBy(Math.exp(-Math.max(-100, Math.min(100, event.deltaY * unit)) / 200), p.x, p.y);
+    else desktopView.panBy(-event.deltaX * unit, -event.deltaY * unit);
+  }, { capture: true, passive: false });
+  const viewAction = fn => { if (!canMoveView()) return; releaseTouches(false); fn(); announceView(); };
+  for (const [id, factor] of [['view-in', 1.5], ['view-out', 1 / 1.5]]) $(id).addEventListener('click', () => viewAction(() => desktopView.zoomBy(factor)));
+  $('view-fit').addEventListener('click', () => viewAction(() => desktopView.reset()));
+  for (const [id, dx, dy] of [['view-left', 80, 0], ['view-right', -80, 0], ['view-up', 0, 80], ['view-down', 0, -80]])
+    $(id).addEventListener('click', () => viewAction(() => desktopView.panBy(dx, dy)));
+  $('close-view').addEventListener('click', () => setControlTray(null, true));
+  stage.addEventListener('keydown', event => {
+    if (!canMoveView() || event.altKey || event.ctrlKey || event.metaKey || event.isComposing) return;
+    const directions = { ArrowLeft: [80, 0], ArrowRight: [-80, 0], ArrowUp: [0, 80], ArrowDown: [0, -80] };
+    if (directions[event.key]) { event.preventDefault(); event.stopPropagation(); viewAction(() => desktopView.panBy(...directions[event.key])); }
+    else if (['+', '=', '-', '0'].includes(event.key)) {
+      event.preventDefault(); event.stopPropagation(); viewAction(() => event.key === '0' ? desktopView.reset() : desktopView.zoomBy(event.key === '-' ? 1 / 1.5 : 1.5));
+    }
+  });
+}
 const keyboardInput = createBrowserKeyboard({ field: $('keyboard-input'), send,
-  canSend: () => !keyboardBlocked && keyboardSupported && authenticated && header && !paused && !document.hidden && touchEnabled && !viewOnly,
+  canSend: () => !viewNavigationActive() && !keyboardBlocked && keyboardSupported && authenticated && header && !paused && !document.hidden && touchEnabled && !viewOnly,
   onError: (message) => { $('error').textContent = message; } });
 function canSendKeys() {
-  return !keyboardBlocked && keyboardSupported && authenticated && header && !paused && !document.hidden && touchEnabled && !viewOnly && ws?.readyState === WebSocket.OPEN;
+  return !viewNavigationActive() && !keyboardBlocked && keyboardSupported && authenticated && header && !paused && !document.hidden && touchEnabled && !viewOnly && ws?.readyState === WebSocket.OPEN;
 }
 const clipboardTools = $('clipboard-tools') ? createBrowserClipboard({ section: $('clipboard-tools'), field: $('clipboard-text'), toggle: $('clipboard-enable'), status: $('clipboard-status'),
   buttons: { read: $('clipboard-read-host'), copyLocal: $('clipboard-copy-local'), readLocal: $('clipboard-read-local'), copyHost: $('clipboard-copy-host'), pasteHost: $('clipboard-paste-host') },
@@ -214,6 +284,7 @@ function audioUnavailable() {
   $('error').textContent = 'Opus audio is unavailable in this browser. Video can continue.';
 }
 function releaseTouches(includeKeyboard = true) {
+  desktopView.cancel();
   trackpad.release();
   clearTimeout(trackMoveTimer); trackMoveTimer = null; pendingTrackMove = null;
   if (includeKeyboard) clipboardTools?.reset();
@@ -248,7 +319,7 @@ function disconnect() {
   releaseTouches(); stopAudio(); drainAudioAcks(true);
   ws?.close(4000, 'Disconnected by viewer'); ws = null;
   clearMedia();
-  trackpadMode = false; trackpad.reset();
+  trackpadMode = false; trackpad.reset(); desktopView.reset();
   hideKeyboard(); keyboardSupported = false; viewOnly = false; $('keyboard').hidden = true;
   if (audioContext) void audioContext.close().catch(() => {}); audioContext = null;
   authenticated = false; header = false; muted = true; paused = false; updateArrowAvailability();
@@ -633,7 +704,7 @@ canvas.addEventListener('pointerdown', (event) => {
     if (!canSendPointer() || event.button !== 0) return;
     event.preventDefault(); canvas.setPointerCapture(event.pointerId); trackpad.down(event); return;
   }
-  if (!touchEnabled || paused || !header || pointers.size >= 10 || event.button !== 0) return;
+  if (!canSendPointer() || pointers.size >= 10 || event.button !== 0) return;
   event.preventDefault();
   const used = new Set([...pointers.values()].map((p) => p.id));
   let id = 0; while (used.has(id)) id++;
@@ -702,7 +773,7 @@ canvas.addEventListener('wheel', (event) => {
     event.preventDefault(); const scale = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? canvas.clientHeight : 1;
     trackpad.scroll(event.deltaX * scale, event.deltaY * scale); return;
   }
-  if (!touchEnabled || paused || !header) return;
+  if (!canSendPointer()) return;
   event.preventDefault();
   const p = point(event), scale = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? canvas.clientHeight : 1;
   send(scrollPacket(p.x, p.y, canvas.width, canvas.height, event.deltaX * scale, event.deltaY * scale));
@@ -798,10 +869,19 @@ function fitCanvas() {
   panel.classList.toggle('controls-reserved', document.body.classList.contains('controls-hidden')
     && needsControlsRow(canvas.width, canvas.height, fullWidth, fullHeight));
   const stage = $('stage');
+  document.body.classList.toggle('view-navigation', viewNavigationActive());
+  stage.tabIndex = viewNavigationActive() ? 0 : -1;
+  if (viewNavigationActive()) { stage.setAttribute('role', 'group'); stage.setAttribute('aria-label', 'Move the local view'); stage.setAttribute('aria-describedby', 'view-help'); }
+  else { stage.removeAttribute('role'); stage.removeAttribute('aria-label'); stage.removeAttribute('aria-describedby'); }
   const size = fitDisplay(canvas.width, canvas.height, stage.clientWidth, stage.clientHeight);
   canvas.style.width = `${size.width}px`; canvas.style.height = `${size.height}px`;
   rtcDisplay.style.width = `${size.width}px`; rtcDisplay.style.height = `${size.height}px`;
-  paintTrackpad();
+  const imageSize = `${canvas.width}x${canvas.height}`;
+  if (viewImageSize !== imageSize) { desktopView.reset(); viewImageSize = imageSize; }
+  desktopView.setGeometry({ width: stage.clientWidth, height: stage.clientHeight, contentWidth: size.width, contentHeight: size.height });
+  updateArrowAvailability();
+  if ($('view-scroll-hint')) $('view-scroll-hint').hidden = true;
+  if ($('view-scroll-hint')) $('view-scroll-hint').hidden = !viewNavigationActive() || $('control-panels').scrollHeight <= $('control-panels').clientHeight + 1;
   const controls = $('primary-controls'), hint = $('rail-scroll-hint');
   hint.hidden = true;
   hint.hidden = !(controls.scrollHeight > controls.clientHeight + 1);

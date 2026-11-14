@@ -336,6 +336,10 @@ test('receiver serves only fixed assets, rejects Host rebinding, no control rout
   assert.equal(videoModule.status, 200);
   assert.match(videoModule.headers.get('content-type'), /javascript/);
   assert.match(await videoModule.text(), /export function createVideoReceiver/);
+  const viewModule = await fetch(f.invitation.url + 'view.mjs');
+  assert.equal(viewModule.status, 200);
+  assert.match(viewModule.headers.get('content-type'), /javascript/);
+  assert.match(await viewModule.text(), /export function createDesktopView/);
   for (const route of ['api/status', 'api/stream/start', 'receiver.mjs?key=anything', '../server/service.mjs']) {
     assert.equal((await fetch(f.invitation.url + route)).status, 404);
   }
