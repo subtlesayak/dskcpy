@@ -12,8 +12,11 @@ const run=promisify(execFile);
 // This checks the admission/transition decisions without calling Windows input,
 // capture, audio, permissions or starting the real host.
 test('actual Windows resume dispatch preserves held input and active watchdogs on repeated IDR requests',async t=>{
- const compiler=process.env.CC || 'cc';
- try{await run(compiler,['--version'],{timeout:5000,windowsHide:true})}catch{t.skip('Requires a standalone C compiler; native Meson pause tests run separately');return}
+ const compiler=process.env.DSKCPY_PAUSE_TEST_CC || process.env.CC || 'cc';
+ try{await run(compiler,['--version'],{timeout:5000,windowsHide:true})}catch{
+  if(process.env.DSKCPY_REQUIRE_PAUSE_FIXTURE==='1')throw Error('The native job requires its standalone callback-fixture compiler.');
+  t.skip('Requires a standalone C compiler; native Meson pause tests run separately');return;
+ }
  const source=await readFile(new URL('../../app/src/reverse_display.c',import.meta.url),'utf8');
  const device=await readFile(new URL('../../app/src/device_msg.h',import.meta.url),'utf8');
  const enumeration=device.match(/enum sc_reverse_system_action \{[\s\S]*?\n\};/)[0];
