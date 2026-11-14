@@ -50,6 +50,9 @@ legacy denial, view-only input restrictions, cumulative acknowledgment cleanup,
 late RTC answer/frame failures, canceled setup, pause/away deferral, missing
 close metadata and denial of a new remembered capture after session termination.
 Closing a viewer retires its generation immediately, before the reconnect delay.
+Disconnect during the handoff also revokes the retained session through the
+existing authenticated Stop endpoint, even if the retiring socket still appears
+open. Closing that old socket alone cannot stop a capture it no longer owns.
 
 The generated-media suite adds:
 

@@ -758,3 +758,19 @@ test('media recovery cannot reset the original session lifetime', { timeout: 600
   assert.ok(elapsed >= 2500 && elapsed < 4300, 'expiry stays on the original three-second grant, not a new grant after recovery');
   assert.equal(await resumable(f, cookie), false); assert.equal(f.calls(), 1);
 });
+
+test('viewer Disconnect revokes the retained capture during media handoff', async t => {
+  const f = await fixture(t, { rtcMediaFactory: fakeRtc });
+  const first = await rtcLogin(f), cookie = first.cookie.split(';')[0], native = f.native();
+  native.resume(); // Consume cancellation packets so the fixture observes EOF.
+  first.send('media-fallback');
+  await until(() => f.receiver.status().mediaMode === 'webcodecs');
+  const endpoint = f.invitation.url + 'stream/session';
+  const denied = await fetch(endpoint, { method: 'POST', headers: { Cookie: cookie, Origin: 'https://evil.example' } });
+  assert.equal(denied.status, 403); assert.equal(await resumable(f, cookie), true);
+  const stopped = await fetch(endpoint, { method: 'POST', headers: { Cookie: cookie, Origin: f.invitation.url.slice(0, -1) } });
+  assert.equal(stopped.status, 204);
+  await until(() => native.destroyed);
+  assert.equal(await resumable(f, cookie), false); assert.equal(f.calls(), 1);
+  await assert.rejects(f.open(undefined, cookie), /403/);
+});

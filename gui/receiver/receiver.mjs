@@ -362,11 +362,12 @@ function clearMedia() {
 function disconnect() {
   if (closing) return;
   closing = true;
+  const cancelRetainedCapture = mediaSwitching || sameCaptureRecovery;
   resumeAllowed = false;
   generation++;
   resumePendingMedia = null;
   sameCaptureRecovery = false;
-  if (sessionExpected && ws?.readyState !== WebSocket.OPEN) void fetch('/stream/session', { method: 'POST', credentials: 'same-origin' }).catch(() => {});
+  if (sessionExpected && (cancelRetainedCapture || ws?.readyState !== WebSocket.OPEN)) void fetch('/stream/session', { method: 'POST', credentials: 'same-origin' }).catch(() => {});
   sessionExpected = false; resumeDeadline = 0; clearFocusCapability();
   if (document.fullscreenElement) void document.exitFullscreen().catch(() => {});
   clearTimeout(retryTimer); clearTimeout(connectionTimer);

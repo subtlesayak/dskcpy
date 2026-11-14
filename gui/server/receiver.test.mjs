@@ -1111,3 +1111,13 @@ test('audio and keyboard controls cannot queue actions during the recovery recon
   assert.equal(h.$('keyboard').disabled, true); assert.equal(h.sockets.length, 1);
   h.$('disconnect').emit('click');
 });
+
+test('Disconnect cancels the retained capture even before the retiring socket closes', async t => {
+  const h = receiver(t, { webRtc: true, mediaFallback: true }); const requests = [];
+  h.context.fetch = async (url, options) => { requests.push({url,options}); return {ok:true,json:async()=>({resumable:false})}; };
+  h.socket.emit('message', { data: JSON.stringify({ type: 'media-fallback', mediaMode: 'webcodecs' }) });
+  assert.equal(h.socket.readyState, 1); h.$('disconnect').emit('click');
+  await new Promise(setImmediate);
+  assert.equal(requests.filter(r => r.url === '/stream/session' && r.options.method === 'POST' && r.options.credentials === 'same-origin').length, 1);
+  assert.equal(h.sockets.length, 1); assert.equal(h.$('join-panel').hidden, false);
+});
