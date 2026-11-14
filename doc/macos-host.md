@@ -1,6 +1,6 @@
 # Mac host setup
 
-Send an Apple-silicon Mac desktop to the Android app or a browser. The native
+Send an Apple-silicon or Intel Mac desktop to the Android app or a browser. The native
 host uses ScreenCaptureKit and VideoToolbox and requires macOS 13+.
 This is an experimental source build, not a signed/notarized Mac application.
 
@@ -14,7 +14,9 @@ hosting candidate. Its deployment-target scan still needs clean-machine testing.
 
 ## Requirements
 
-Use a native arm64 Terminal rather than Rosetta. Install Apple's Command Line
+Use a Terminal matching the Mac's native architecture: arm64 on Apple silicon
+(without Rosetta), or x86_64 on Intel. Keep dependency caches and packages separate;
+see [Mac build architectures](mac-host-architectures.md). Install Apple's Command Line
 Tools if they are absent:
 
 ```sh
@@ -148,7 +150,9 @@ private HTTPS route described in that guide.
 
 The dashboard's **Refresh windows** picker enables single-window capture.
 Window mode is view-only with audio off; minimizing, hiding or closing the
-selected target ends the session. Full-desktop browser sessions can offer
+selected target ends the session. The dashboard can also approve a fixed list of
+two to eight windows for [receiver switching](browser-window-switching.md) under
+the same temporary view-only grant. Full-desktop browser sessions can offer
 **Keyboard** with a focused typing field when the native host supports it.
 The **This computer** preview omits typing to avoid input feeding back into itself.
 

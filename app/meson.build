@@ -219,7 +219,7 @@ configure_file(configuration: conf, output: 'config.h')
 
 src_dir = include_directories('src')
 
-executable('scrcpy', src,
+scrcpy_program = executable('scrcpy', src,
            dependencies: dependencies,
            include_directories: src_dir,
            install: true,
@@ -260,6 +260,17 @@ if get_option('buildtype') == 'debug'
         test('test_reverse_windows_clipboard', windows_clipboard_test)
     endif
     if reverse_macos
+        # Actual send callback, synthetic buffers and intercepted OS/socket effects.
+        audio_send_objects = []
+        foreach source : src
+            if source != 'src/main.c' and source != 'src/reverse_display_macos.m'
+                audio_send_objects += scrcpy_program.extract_objects(source)
+            endif
+        endforeach
+        audio_send_test = executable('test_reverse_macos_audio_send',
+            'tests/test_reverse_macos_audio_send.m', objects: audio_send_objects,
+            include_directories: src_dir, dependencies: dependencies)
+        test('test_reverse_macos_audio_send', audio_send_test)
         mac_keyboard_test = executable('test_reverse_macos_keyboard',
             ['tests/test_reverse_macos_keyboard.m', 'src/reverse_macos_keyboard.m'],
             include_directories: src_dir, dependencies: dependencies)

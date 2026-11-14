@@ -912,6 +912,18 @@ test('owner clipboard consent reaches native only for a capable full desktop pri
   }
 });
 
+test('occupied receiver port returns a fixed category and preserves the existing listener', async t => {
+  const existing=net.createServer();existing.listen(0,'127.0.0.1');await once(existing,'listening');
+  t.after(()=>new Promise(resolve=>existing.close(resolve)));
+  const f=await fixture(t,{browserPort:existing.address().port,
+    environment:{...process.env,SCRCPY_GUI_BINARY:process.execPath,DSKCPY_VIEWER_ORIGIN:'https://owned.test.ts.net:8443'}});
+  const result=await f.request('/api/browser/prepare',{mode:'internet'});
+  assert.equal(result.code,400);
+  assert.deepEqual(result.body,{error:'The receiver connection is already in use.',code:'receiver-port-in-use'});
+  assert.equal(existing.listening,true);assert.equal(f.children.length,0);
+  assert.equal(f.publicState().browser.waiting,false);
+});
+
 test('controller prepares an owned HTTPS receiver without granting access or launching native capture', async t => {
   const f = await fixture(t, { environment: { ...process.env, SCRCPY_GUI_BINARY: process.execPath, DSKCPY_VIEWER_ORIGIN: 'https://owned.test.ts.net:8443' } });
   const result = await f.request('/api/browser/prepare', { mode: 'internet' });
@@ -946,4 +958,62 @@ test('adaptive video flag and native status require owner choice, platform capab
   }
   await f.request('/api/stream/stop',{});const before=messages.length;child.child.stdout.write('DSKCPY_VIDEO_QUALITY 0 60 12000000\n');await new Promise(setImmediate);assert.equal(messages.length,before);ws.terminate();
  }
+});
+
+const switchWindows=[{id:11,ownerPid:41,label:'Editor'},{id:12,ownerPid:42,label:'Notes'}];
+async function switchingFixture(t,options={}) {
+ const f=await fixture(t,{platform:'darwin',windowSwitchTimeoutMs:100,
+  readinessProbe:async()=>({...ready,features:{macWindowCapture:true,browserCaptureRecovery:true,browserKeyboard:true,browserClipboard:true}}),...options});
+ const {code,body}=await f.request('/api/browser/invite',{windowId:11,windowOwnerPid:41,browserWindows:switchWindows});
+ assert.equal(code,201);
+ const ws=new WebSocket(body.url.replace('http:','ws:')+'stream',{origin:body.url.slice(0,-1)});
+ const messages=[];let cookie;ws.on('upgrade',res=>cookie=res.headers['set-cookie'][0].split(';')[0]);
+ ws.on('error',()=>{});ws.on('message',(data,binary)=>{if(!binary)messages.push(JSON.parse(data));});t.after(()=>ws.terminate());
+ await once(ws,'open');ws.send(body.key);await waitFor(()=>f.children.length===1);
+ const native=net.connect(Number(f.children[0].args.find(a=>a.startsWith('--reverse-socket=')).split('=')[1]),'127.0.0.1');
+ native.on('error',()=>{});t.after(()=>native.destroy());await once(native,'connect');native.write(Buffer.from('535244310000000100000280000001e0','hex'));
+ ws.send('window-select-subscribe');ws.send('resume');ws.send(Buffer.from([5,8]));
+ await waitFor(()=>messages.some(m=>m.type==='window-state'));
+ return {...f,ws,native,cookie,body,messages,select:()=>ws.send(JSON.stringify({type:'window-select',key:messages.find(m=>m.type==='window-state').windows[1].key}))};
+}
+test('explicit window switch waits for exact drained child close and uses only approved target arguments',async t=>{
+ const f=await switchingFixture(t);const old=f.children[0].child,ended=once(f.ws,'close');f.select();await ended;
+ old.exitCode=2;old.emit('exit',2);assert.equal(f.children.length,1);assert.equal(f.publicState().running,true);
+ old.emit('close',2);await waitFor(()=>f.children.length===2);
+ assert.ok(f.children[1].args.includes('--reverse-window=12'));assert.ok(f.children[1].args.includes('--reverse-window-owner=42'));
+ assert.ok(f.children[1].args.includes('--no-audio'));assert.ok(!f.children[1].args.includes('--reverse-keyboard'));
+ assert.ok(!f.children[1].args.includes('--reverse-clipboard'));
+ assert.equal(f.publicState().error,null);
+ const response=await fetch(f.body.url+'stream/session',{headers:{Cookie:f.cookie}});assert.equal((await response.json()).resumable,true);
+});
+for(const reason of ['user-stop','permission-lost'])test('late '+reason+' vetoes window switch even without final newline',async t=>{
+ const f=await switchingFixture(t),old=f.children[0].child,ended=once(f.ws,'close');f.select();await ended;
+ old.exitCode=2;old.emit('exit',2);old.stdout.write('DSKCPY_CAPTURE_END '+reason);old.emit('close',2);
+ await waitFor(()=>!f.publicState().browser.connected);assert.equal(f.children.length,1);
+ const response=await fetch(f.body.url+'stream/session',{headers:{Cookie:f.cookie}});assert.equal((await response.json()).resumable,false);
+ assert.ok(!JSON.stringify(f.publicState().logs).includes('DSKCPY_CAPTURE_END'));
+});
+test('stalled old window capture times out without spawning a second child',async t=>{
+ const f=await switchingFixture(t);f.select();await once(f.ws,'close');
+ await waitFor(()=>!f.publicState().browser.connected);assert.equal(f.children.length,1);assert.equal(f.children[0].child.forced,true);
+});
+test('owner Stop during explicit retirement prevents any new window capture',async t=>{
+ const f=await switchingFixture(t);f.select();await once(f.ws,'close');
+ await f.request('/api/stream/stop',{});await waitFor(()=>!f.publicState().running);
+ assert.equal(f.children.length,1);assert.equal(f.publicState().browser.connected,false);
+});
+test('window switching cannot be enabled for a desktop or a host without drained-close support',async t=>{
+ for(const features of [{macWindowCapture:true},{macWindowCapture:true,browserCaptureRecovery:true}]){
+  const f=await fixture(t,{platform:'darwin',readinessProbe:async()=>({...ready,features})});
+  const bad=await f.request('/api/browser/invite',{...(features.browserCaptureRecovery?{}:{windowId:11,windowOwnerPid:41}),browserWindows:switchWindows});
+  assert.equal(bad.code,400);assert.equal(f.children.length,0);
+ }
+});
+
+test('owner Stop during new window readiness cancels the switch before a second child is spawned',async t=>{
+ let block=false,entered=false,release;const pending=new Promise(resolve=>release=resolve);
+ const f=await switchingFixture(t,{readinessProbe:async()=>{if(block){entered=true;await pending;}return {...ready,features:{macWindowCapture:true,browserCaptureRecovery:true}};}});
+ block=true;f.select();await once(f.ws,'close');f.children[0].child.exit(2);await waitFor(()=>entered);
+ await f.request('/api/stream/stop',{});release();await waitFor(()=>!f.publicState().running);
+ assert.equal(f.children.length,1);assert.equal(f.publicState().browser.connected,false);assert.equal(f.publicState().error,null);
 });

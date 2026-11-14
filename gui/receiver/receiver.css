@@ -181,3 +181,14 @@ summary { min-height: 44px; padding: 10px 12px; border: 1px solid #405461; borde
   #close-options { grid-column: 2; grid-row: 1 / span 2; }
   #options-scroll-hint { grid-column: 1; grid-row: 2; font-size: .75rem; line-height: 1.2; }
 }
+
+#window-choices { margin-block-start: 8px; padding: 12px; background: #101b22; border: 1px solid #405461; border-radius: 12px; }
+#window-choices .panel-heading { position: sticky; top: 0; z-index: 2; background: #101b22; }
+#window-choice-list { display: grid; gap: 12px; }
+#window-choice-list button { display: grid; gap: 8px; text-align: start; width: 100%; }
+#window-choice-list canvas { display: block; width: 100%; max-width: 160px; height: auto; }
+#window-choice-list small { color: inherit; font-size: .8rem; }
+@container receiver (min-width: 40rem) { #window-choices { margin-block-start: 0; } }
+
+.window-choices-open #control-panels { scroll-padding-block-start: var(--window-choice-clearance, 56px); }
+#window-choice-scroll-hint { flex-basis: 100%; margin: 0; font-size: .75rem; line-height: 1.2; }

@@ -1,12 +1,25 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { RTCPeerConnection, useH264, useOPUS, H264RtpPayload, splitH264NalUnits } from 'werift';
-import { createRtcMedia, privateRtcBind, rtpTimestamp, sessionScopedIceLite } from './browser-rtc.mjs';
+import { createRtcMedia, privateRtcBind, rtpTimestamp, sessionScopedIceLite, completeLegacyConfiguration } from './browser-rtc.mjs';
 
 const configuration = Buffer.from('000000016742c01e0102030000000168ce3c80', 'hex');
 const key = Buffer.from('0000000165888401020304', 'hex');
 const delta = Buffer.from('00000001419a01020304', 'hex');
 const rtpNals = packets => packets.flatMap(p => splitH264NalUnits(H264RtpPayload.deSerialize(p.payload).payload, 4, 'annexb'));
+
+test('legacy cache completion retains only bounded compatible parameter sets', () => {
+  const sps=configuration.subarray(0,11),pps=configuration.subarray(11);
+  assert.deepEqual(completeLegacyConfiguration(sps,Buffer.concat([pps,key])),configuration);
+  assert.deepEqual(completeLegacyConfiguration(sps,Buffer.concat([configuration,key])),configuration);
+  assert.equal(completeLegacyConfiguration(configuration,Buffer.concat([pps,key])),undefined);
+  assert.equal(completeLegacyConfiguration(sps,key),undefined);
+  const changed=Buffer.from(configuration);changed[8]^=1;
+  assert.equal(completeLegacyConfiguration(sps,Buffer.concat([changed,key])),undefined);
+  assert.equal(completeLegacyConfiguration(sps,Buffer.concat(Array(33).fill(pps))),undefined);
+  assert.equal(completeLegacyConfiguration(sps,Buffer.concat([pps,Buffer.alloc(65536,1)])),undefined);
+  assert.throws(()=>completeLegacyConfiguration(sps,Buffer.from('0000000168','hex')),/Incomplete/);
+});
 
 test('RTC sends configuration with an IDR when the native frame omits parameter sets', async t => {
   let peer;

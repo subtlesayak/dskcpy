@@ -17,6 +17,15 @@ function fixture({ failFirstReady = false } = {}) {
   return { backend, children, exits: () => exits };
 }
 const route = { origin: 'https://host.test.ts.net:8443', bind: '100.64.0.1' };
+
+test('only the fixed receiver conflict category crosses owned IPC errors', async () => {
+  const f=fixture();await f.backend.ensure(route);const child=f.children[0].child;
+  child.postMessage=message=>queueMicrotask(()=>child.emit('message',{id:message.id,ok:false,code:'receiver-port-in-use',error:'private diagnostic'}));
+  await assert.rejects(f.backend.prepareReceiver(),error=>error.code==='receiver-port-in-use'&&!error.message.includes('private diagnostic'));
+  child.postMessage=message=>queueMicrotask(()=>child.emit('message',{id:message.id,ok:false,code:'private diagnostic'}));
+  await assert.rejects(f.backend.prepareReceiver(),error=>error.code===undefined&&!error.message.includes('private diagnostic'));
+  child.postMessage=message=>queueMicrotask(()=>child.emit('message',{id:message.id,ok:true}));await f.backend.shutdown();
+});
 test('desktop service is a created child, never an existing controller discovered by port', async () => {
   const f = fixture(); await f.backend.ensure(route); await f.backend.ensure(route);
   assert.equal(f.children.length, 1); assert.deepEqual(f.children[0].child.calls, ['ready']);

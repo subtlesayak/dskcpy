@@ -39,7 +39,22 @@ try { for (const variant of [{ width: 390, height: 844 }, { width: 844, height: 
     if (variant.rtl) await page.locator('html').evaluate(el => el.dir = 'rtl');
     if (variant.zoom) await page.locator('html').evaluate((el, z) => el.style.zoom = z, variant.zoom);
     await page.getByRole('button', { name: 'Trackpad mode', exact: true }).click();
-    const canvas = page.locator('#display'), cdp = await context.newCDPSession(page), fingers = new Map();
+    const canvas = page.locator('#display');
+    // Trackpad mode exposes helper controls and resizes the stage. The product
+    // deliberately cancels touches when geometry changes. Test the stable-mode
+    // gesture only after real layout/observer frames settle, rather than racing
+    // that transition on slower CI renderers. Resize cancellation is checked below.
+    await canvas.evaluate(async canvas => {
+      let previous='',stable=0;
+      for(let frame=0;frame<90;frame++){
+        await new Promise(requestAnimationFrame);
+        const r=canvas.getBoundingClientRect(),sample=[r.x,r.y,r.width,r.height].join(',');
+        stable=sample===previous?stable+1:0;previous=sample;
+        if(r.width>0&&r.height>0&&stable>=3)return;
+      }
+      throw Error('Trackpad geometry did not settle');
+    });
+    const cdp = await context.newCDPSession(page), fingers = new Map();
     const gesture = async (name, pointerId, x, y) => {
       const r = await canvas.boundingBox(); assert.ok(r.width > 0 && r.height > 0);
       if (name === 'pointerup') fingers.delete(pointerId);
@@ -85,6 +100,11 @@ try { for (const variant of [{ width: 390, height: 844 }, { width: 844, height: 
     await until(() => inputs.at(-1)?.[1] === 3);
     assert.deepEqual(errors, []);
     results.push({ ...variant, relativePointer: true, oneTap: true, explicitDragRelease: true, twoFingerScroll: true, keyboardAlternative: true, resizeCancelsHold: true, realNativeInput: false });
+  } catch(error) {
+    console.error(JSON.stringify({variant,error:error.message,inputs:inputs.length,pageErrors:errors,
+      state:await page.evaluate(()=>({status:document.querySelector('#status').textContent,error:document.querySelector('#error').textContent,
+        trackpad:document.querySelector('#trackpad-mode').getAttribute('aria-pressed'),geometry: (()=>{const r=document.querySelector('#display').getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height};})()}))}));
+    throw error;
   } finally { await context.close(); native?.destroy(); await receiver.shutdown(); }
 } await writeFile(path.join(output, 'result.json'), JSON.stringify({ syntheticNative: true, realPhone: false, results }, null, 2) + '\n');
 console.log(`${results.length} Chromium trackpad flows pass with fake native input.`);

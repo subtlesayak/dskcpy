@@ -11,6 +11,7 @@ import { receiverIsAway } from '../receiver/lifecycle.mjs';
 import * as protocol from '../receiver/protocol.mjs';
 import { createVideoReceiver } from '../receiver/video.mjs';
 import { createVideoFeedback } from '../receiver/video-feedback.mjs';
+import { createWindowChooser } from '../receiver/window-chooser.mjs';
 import { createVideoPreference } from '../receiver/video-preference.mjs';
 import { createBrowserKeyboard, keyboardUsage, keyPacket } from '../receiver/keyboard.mjs';
 import { validBrowserInput } from './browser-protocol.mjs';
@@ -20,7 +21,7 @@ const parameters = new Uint8Array([0, 0, 1, 0x67, 0x64, 0, 0x28, 0, 0, 1, 0x68, 
 
 // Deterministic lifecycle tests against the actual receiver script. These model
 // delayed browser callbacks; rendered/device QA is separate from this harness.
-function receiver(t, { portrait = false, lockFails = false, webRtc = false, webCodecs = true, qrKey = '', keyboard = false, viewOnly = false, visualHeight = 0, webAudio = false, textFocus = false, keyboardStatus = false, clipboard = false, clipboardAPI = undefined, virtualKeyboard = null, now = () => Date.now(), resumable = false, mediaFallback = false, adaptiveVideo = false, rtcOffer = async () => {} } = {}) {
+function receiver(t, { portrait = false, lockFails = false, webRtc = false, webCodecs = true, qrKey = '', keyboard = false, viewOnly = false, visualHeight = 0, webAudio = false, textFocus = false, keyboardStatus = false, clipboard = false, clipboardAPI = undefined, virtualKeyboard = null, now = () => Date.now(), resumable = false, mediaFallback = false, adaptiveVideo = false, windowSwitch = false, rtcOffer = async () => {} } = {}) {
   const timers = new Set(), sockets = [], decoders = [], orientation = [], rtcReceivers = [];
   let resize;
   const animationFrames = [];
@@ -28,6 +29,9 @@ function receiver(t, { portrait = false, lockFails = false, webRtc = false, webC
   const locationState = { protocol: 'https:', host: 'receiver.test', pathname: qrKey ? '/join' : '/', search: '', hash: qrKey ? `#connect=${qrKey}` : '' };
   const historyChanges = [];
   class Target {
+    dataset = {}; children = [];
+    replaceChildren(...children) { this.children = children; }
+    append(...children) { this.children.push(...children); }
     listeners = new Map(); attrs = new Map(); hidden = false; value = ''; textContent = ''; style = {};
     width = 640; height = 480; clientWidth = 800; clientHeight = 500;
     constructor() {
@@ -55,7 +59,7 @@ function receiver(t, { portrait = false, lockFails = false, webRtc = false, webC
   const $ = (id) => { if (!elements.has(id)) elements.set(id, new Target()); return elements.get(id); };
   const cssVariables = new Map();
   const document = new Target(); document.body = new Target(); document.documentElement = new Target();
-  document.documentElement.style.setProperty = (key, value) => cssVariables.set(key, value); document.getElementById = $;
+  document.documentElement.style.setProperty = (key, value) => cssVariables.set(key, value); document.getElementById = $; document.createElement = () => new Target();
   document.exitFullscreen = async () => { document.fullscreenElement = null; document.emit('fullscreenchange'); };
   class Socket extends Target {
     static OPEN = 1; readyState = 1; sent = [];
@@ -108,7 +112,7 @@ function receiver(t, { portrait = false, lockFails = false, webRtc = false, webC
   if (webRtc) window.RTCPeerConnection = true;
   window.history = { replaceState(_state, _title, url) { locationState.hash = ''; historyChanges.push(url); } };
   const context = vm.createContext({ ...protocol,
-    createVideoPreference,
+    createWindowChooser, createVideoPreference,
     createVideoFeedback: options => createVideoFeedback({...options,setTimer:(fn,ms)=>{const timer=setInterval(fn,ms);timers.add(timer);return timer},clearTimer:clearInterval}),
     createKeyboardShortcuts, shortcutLabel, createDesktopView, createRelativeTrackpad, createBrowserKeyboard, keyboardUsage, keyPacket, receiverIsAway,
     createBrowserClipboard: options => createBrowserClipboard({ ...options, setTimer: (fn, ms) => { const timer = setTimeout(fn, ms); timers.add(timer); return timer; }, clearTimer: clearTimeout }),
@@ -133,7 +137,7 @@ function receiver(t, { portrait = false, lockFails = false, webRtc = false, webC
   t.after(() => { for (const timer of timers) clearTimeout(timer); });
   if (!qrKey) { $('session-key').value = 'x'.repeat(32); $('join-form').emit('submit'); }
   const socket = sockets[0]; socket.emit('open');
-  socket.emit('message', { data: JSON.stringify({ type: 'authenticated', keyboard, viewOnly, textFocus, keyboardStatus, clipboard, mediaFallback, adaptiveVideo, mediaMode: webRtc ? 'webrtc' : 'webcodecs' }) });
+  socket.emit('message', { data: JSON.stringify({ type: 'authenticated', keyboard, viewOnly, textFocus, keyboardStatus, clipboard, mediaFallback, adaptiveVideo, windowSwitch, mediaMode: webRtc ? 'webrtc' : 'webcodecs' }) });
   const header = new ArrayBuffer(16), view = new DataView(header);
   view.setUint32(0, 0x53524431); view.setUint32(4, 1); view.setUint32(8, 640); view.setUint32(12, 480);
   socket.emit('message', { data: header });
@@ -1156,4 +1160,24 @@ test('automatic-video controls stay capability gated and report actual native se
  h.socket.emit('message',{data:JSON.stringify({type:'video-quality',available:false,automatic:false})});
  assert.match(h.$('video-quality-status').textContent,/last working/);assert.equal(h.$('video-automatic').disabled,true);
  h.$('disconnect').emit('click');assert.equal(h.$('video-quality-setting').hidden,true);
+});
+
+test('WebKit missing close metadata resumes only an acknowledged window switch and never downgrades its grant',async t=>{
+ const h=receiver(t,{viewOnly:true,windowSwitch:true,resumable:true});
+ const catalog={type:'window-state',grant:'g'.repeat(16),current:'a'.repeat(16),switching:true,windows:[{key:'a'.repeat(16),label:'Editor'},{key:'b'.repeat(16),label:'Notes'}]};
+ h.socket.emit('message',{data:JSON.stringify(catalog)});h.socket.emit('close',{code:1005,reason:''});
+ await new Promise(r=>setTimeout(r,300));assert.equal(h.sockets.length,2);
+ assert.equal(h.$('join-panel').hidden,true);
+ const failed=receiver(t,{viewOnly:true,windowSwitch:true,resumable:false});let trustAttempts=0;
+ failed.context.fetch=async route=>{if(String(route).includes('trusted')||String(route).includes('remember'))trustAttempts++;return {ok:true,json:async()=>({resumable:false})};};
+ failed.socket.emit('message',{data:JSON.stringify(catalog)});failed.socket.emit('close',{code:1005,reason:''});
+ await new Promise(r=>setTimeout(r,300));assert.equal(trustAttempts,0);assert.equal(failed.sockets.length,1);
+ assert.match(failed.$('error').textContent,/Sharing ended while restoring/);
+ assert.equal(failed.$('window-choice-list').children.length,0);
+});
+test('unacknowledged 1005 remains terminal and an unsolicited window catalog grants no capability',async t=>{
+ const h=receiver(t,{viewOnly:true,windowSwitch:true,resumable:true});h.socket.emit('close',{code:1005,reason:''});
+ await new Promise(r=>setTimeout(r,300));assert.equal(h.sockets.length,1);assert.equal(h.$('join-panel').hidden,false);
+ const other=receiver(t,{viewOnly:true});other.socket.emit('message',{data:JSON.stringify({type:'window-state',grant:'g'.repeat(16),current:'a'.repeat(16),switching:true,windows:[{key:'a'.repeat(16),label:'Editor'},{key:'b'.repeat(16),label:'Notes'}]})});
+ assert.equal(other.$('join-panel').hidden,false);assert.match(other.$('error').textContent,/Unexpected window/);
 });

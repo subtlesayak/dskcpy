@@ -2,19 +2,27 @@ import net from 'node:net';
 import { WebSocket } from 'ws';
 import { SrdParser, validBrowserInput, MAX_PACKET } from './browser-protocol.mjs';
 import { ack, avcParameters, touchPacket, MEDIA_FALLBACK_PROTOCOL } from '../receiver/protocol.mjs';
-import { createRtcMedia } from './browser-rtc.mjs';
+import { createRtcMedia, completeLegacyConfiguration } from './browser-rtc.mjs';
 import { createClipboardBroker } from './browser-clipboard.mjs';
 import { createAdaptiveVideo, validVideoFeedback } from './adaptive-video.mjs';
+import { publicWindowState } from './window-targets.mjs';
 
 // Keep the native transport alive across a bounded browser suspension. Never
 // retain video frames: only the wire header and codec parameter sets are replayed.
 export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lifetimeMs,
   mediaMode = 'webcodecs', rtcBind, keyboard = false, viewOnly = false, textFocus = false, clipboard = false,
-  captureRecovery = false, adaptiveVideo = false, nativeEndGraceMs = 15000, rtcMediaFactory = createRtcMedia, onChange = () => {} }) {
+  captureRecovery = false, adaptiveVideo = false, nativeEndGraceMs = 15000, rtcMediaFactory = createRtcMedia, onChange = () => {}, windowGroup = null, onRetireWindow }) {
   let native, peer, closed = false, ready = false, nativeTimer, awayTimer;
   let listener, nativeEndTimer, recovering = false, restarting = false;
   let restartTimes = [];
   const canRecover = captureRecovery && !viewOnly;
+  const canSwitchWindow = viewOnly && windowGroup && typeof onRetireWindow === 'function';
+  const ownerToken = Object.freeze({});
+  let currentWindow = windowGroup?.initial, pendingWindow = null, windowSwitching = false, windowSubscribed = false, lastWindowSwitch = -Infinity;
+  function publishWindows(error) {
+    if (!canSwitchWindow || closed || !ready || !windowSubscribed || !peer || peer.readyState !== WebSocket.OPEN || peer.bufferedAmount > 65536) return;
+    peer.send(JSON.stringify({...publicWindowState(windowGroup,currentWindow,windowSwitching),...(error?{error}: {})}));
+  }
   let wireHeader, videoConfig, audioConfig, width = 0, height = 0;
   let suspended = false, capturePaused = false, alive = true, rateAt = Date.now(), events = 0;
   const video = new Set(), audio = new Set(), touches = new Map();
@@ -148,6 +156,7 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
   function announce() {
     if (!ready || !peer) return;
     peer.send(JSON.stringify({ type: 'authenticated', mediaMode, keyboard, viewOnly, textFocus: focusSupported, keyboardStatus: keyboard && !viewOnly, clipboard: clipboardSupported,
+      windowSwitch: Boolean(canSwitchWindow),
       adaptiveVideo: adaptiveSupported,
       mediaFallback: mediaMode === 'webrtc' && !fallbackUsed && peer.protocol === MEDIA_FALLBACK_PROTOCOL }));
     if (wireHeader) forward(wireHeader);
@@ -166,7 +175,7 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
     // Optional messages require this viewer's explicit acknowledgement. A
     // restored/older cached page must not inherit another socket's subscription.
     focusSubscribed = false; focusAt = -Infinity;
-    qualitySubscribed = false; adaptive.reset();
+    qualitySubscribed = false; windowSubscribed = false; adaptive.reset();
     ws.on('pong', () => { if (peer === ws) alive = true; });
     ws.on('close', (code) => {
       if (peer !== ws || closed) return;
@@ -178,12 +187,23 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
       if (Date.now() - rateAt >= 1000) { rateAt = Date.now(); events = 0; }
       if (++events > 1000 || native?.writableLength > 65536) { close(); return; }
       if (!binary) {
+        if (message.toString() === 'window-select-subscribe') {
+          if (!canSwitchWindow || !ready) { close(); return; }
+          windowSubscribed = true; publishWindows(); return;
+        }
         if (message.toString() === 'video-quality-subscribe') {
           if (!adaptiveSupported || !ready) { close(); return; }
           qualitySubscribed = true; publishQuality(); return;
         }
         if (message.length <= 512 && message[0] === 123) {
           let feedback; try { feedback = JSON.parse(message.toString()); } catch { close(); return; }
+          if (feedback.type === 'window-select') {
+            if (!canSwitchWindow || !windowSubscribed || Object.keys(feedback).length !== 2
+                || typeof feedback.key !== 'string' || !/^[A-Za-z0-9_-]{16}$/.test(feedback.key)
+                || !windowGroup.targets.some(t => t.key === feedback.key)) { close(); return; }
+            if (windowSwitching || suspended || capturePaused || recovering || !wireHeader || !native) { publishWindows(); return; }
+            void selectWindow(feedback.key); return;
+          }
           if (['video-feedback','video-automatic'].includes(feedback.type)) {
             if (!qualitySubscribed || !adaptiveSupported) { close(); return; }
             if (feedback.type === 'video-automatic') {
@@ -260,8 +280,8 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
     });
     announce();
   }
-  function prepareRecovery() {
-    if (closed || !canRecover) return false;
+  function prepareRecovery(explicitWindow = false) {
+    if (closed || (!canRecover && !(explicitWindow && canSwitchWindow))) return false;
     if (recovering && !native) return true;
     recovering = true; ready = false;
     adaptive.manual(); qualityAvailable = false; qualityFailed = false; lastQuality = null;
@@ -278,6 +298,25 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
     // the owner may start another child after all old capture/input cleanup.
     nativeEndTimer = setTimeout(() => close('capture-recovery'), nativeEndGraceMs);
     onChange(); return true;
+  }
+  async function selectWindow(key) {
+    const target = windowGroup.targets.find(t => t.key === key);
+    if (target === currentWindow) { publishWindows(); return; }
+    if (Date.now()-lastWindowSwitch < 2000) { publishWindows('wait'); return; }
+    let retirement;
+    try { retirement = onRetireWindow(ownerToken); } catch { publishWindows('busy'); return; }
+    if (!retirement?.done || typeof retirement.done.then !== 'function' || typeof retirement.cancel !== 'function') { publishWindows('busy'); return; }
+    windowSwitching = true; pendingWindow = target; lastWindowSwitch = Date.now(); publishWindows();
+    if (!prepareRecovery(true)) { retirement.cancel(); windowSwitching=false; pendingWindow=null; return; }
+    const previous = peer; peer = null;
+    previous?.close(1012,'window-switch');
+    if (previous) setTimeout(()=>previous.terminate(),1000).unref();
+    try {
+      await rtcCleanup;
+      if (!await retirement.done || closed) { close('capture-recovery'); return; }
+      clearTimeout(nativeEndTimer);
+      await start(); // Original grant/lifetime; only the native capture epoch changes.
+    } catch { close('capture-recovery'); }
   }
   async function restartNative() {
     if (closed || !canRecover || restarting) return false;
@@ -307,15 +346,21 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
       if (closed || native !== socket) return;
       if (header) {
         recovering = false;
+        if (pendingWindow) { currentWindow=pendingWindow;pendingWindow=null;windowSwitching=false;publishWindows(); }
         wireHeader = packet;
         width = packet.readUInt32BE(8); height = packet.readUInt32BE(12);
         if (suspended) command(7);
       } else {
         const flags = packet.readUInt32BE(12);
         if (flags === 32) { clipboardBroker.reply(packet.subarray(16)); return; }
-        if ((flags & 1) || (flags === 2 && !videoConfig)) {
-          const parameters = avcParameters(packet.subarray(16));
-          if (parameters.length) {
+        if ((flags & 1) || flags === 2) {
+          let parameters;
+          try {
+            parameters = flags === 2 && videoConfig
+              ? completeLegacyConfiguration(videoConfig.subarray(16), packet.subarray(16))
+              : avcParameters(packet.subarray(16));
+          } catch { /* A malformed legacy IDR cannot replace the working cache. */ }
+          if (parameters?.length) {
             videoConfig = Buffer.alloc(16 + parameters.length);
             videoConfig.writeUInt32BE(parameters.length); videoConfig.writeUInt32BE(1, 12);
             videoConfig.set(parameters, 16);
@@ -392,6 +437,7 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
       if (closed) { listener.close(); return; }
       ready = true; nativeTimer = setTimeout(close, 10000); announce();
       await onConnect({ port: listener.address().port, keyboard, viewOnly, textFocus: focusSupported, focusHint, keyboardStatus, clipboard: clipboardSupported,
+        windowSwitch: Boolean(canSwitchWindow), windowOwner: ownerToken, windowTarget: pendingWindow || currentWindow,
         adaptiveVideo: adaptiveSupported, videoQuality,
         captureRecovery: canRecover, restartNative, close, get closed() { return closed; } });
     } catch { close(); }

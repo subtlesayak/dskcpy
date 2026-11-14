@@ -409,3 +409,9 @@ select { min-width: 0; height: 37px; padding-inline: 8px; color: var(--text); ba
 .remembered-devices { border-block-start: 1px solid var(--border, #304a58); margin-block: 20px; padding-block: 16px; overflow-wrap: anywhere; }
 .remembered-devices button { min-block-size: 44px; margin: 4px; }
 .remembered-device-request { padding: 14px; border: 1px solid #67dbf6; border-radius: 12px; margin-block: 12px; }
+
+.browser-window-choices { min-inline-size: 0; margin-block: 24px; padding: 16px; border: 1px solid var(--border); border-radius: 8px; }
+.browser-window-choices label { display: flex; gap: 10px; align-items: center; min-block-size: 44px; overflow-wrap: anywhere; }
+.browser-window-choices input { inline-size: 20px; block-size: 20px; flex: none; accent-color: var(--cyan); }
+.browser-host-panel fieldset { min-inline-size: 0; }
+.browser-host-panel select { inline-size: 100%; max-inline-size: 100%; }

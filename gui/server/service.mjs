@@ -35,6 +35,7 @@ export function createControlService({
   reconnectDelayMs = 1500,
   browserPort = Number(environment.DSKCPY_VIEWER_PORT || 27180),
   trustedDevicesPath = environment.DSKCPY_TRUST_STORE || null,
+  windowSwitchTimeoutMs = 8000,
 } = {}) {
   const guiDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   const repoDir = path.resolve(guiDir, '..');
@@ -50,6 +51,7 @@ export function createControlService({
   let discoveryAttempt = null;
   let browserPreparation = null;
   let browserConfig = null;
+  let windowRetirement = null;
   let windowCatalogAttempt = null;
   let browserUsbCleanup = null;
   let browserUsbCleanupPending = Promise.resolve();
@@ -69,7 +71,9 @@ export function createControlService({
         const cleanup = browserUsbCleanup; browserUsbCleanup = null; browserUsbCleanupPending = cleanup();
       }
     },
-    onConnect: (bridge) => startStream(browserConfig, null, bridge),
+    onConnect: (bridge) => startStream(bridge.windowTarget ? { ...browserConfig,
+      windowId: bridge.windowTarget.id, windowOwnerPid: bridge.windowTarget.ownerPid } : browserConfig, null, bridge),
+    onRetireWindow: owner => retireWindowCapture(owner),
   });
   const reconnectLimit = 3;
   const runCommand = commandRunner || defaultRunCommand;
@@ -396,6 +400,8 @@ export function createControlService({
         throw new Error('Rebuild the experimental Mac host with window capture support.');
       }
       if (config.windowId && !config.windowOwnerPid) throw new Error('Refresh and select the window again before sharing.');
+      if (rawConfig.browserWindows !== undefined && (!config.windowId || !readiness.features?.browserCaptureRecovery || grant))
+        throw new Error('Window switching is unavailable on this host. Share one window or update the host.');
       browserConfig = config;
       const mode = rawConfig.browserTransport || 'local';
       let usbDevice;
@@ -408,6 +414,8 @@ export function createControlService({
       }
       if (attempt.signal.aborted) throw new Error('Connection cancelled.');
       const invitation = await browserReceiver.invite(mode, { viewOnly: Boolean(config.windowId),
+        windowTargets: rawConfig.browserWindows,
+        initialWindow: {windowId:config.windowId,windowOwnerPid:config.windowOwnerPid},
         adaptiveVideo: ['darwin','win32'].includes(platform) && !config.windowId && config.browserAdaptiveVideo === true && readiness.features?.browserAdaptiveVideo === true,
         captureRecovery: platform === 'darwin' && !config.windowId && readiness.features?.browserCaptureRecovery === true,
         // Typing into a receiver focused on the host itself would feed the
@@ -449,6 +457,28 @@ export function createControlService({
       // event delivery is delayed. The one-use key remains outside status/logs.
       return { ...invitation, openedOnPhone, status: publicState() };
     } finally { if (browserPreparation === attempt) browserPreparation = null; }
+  }
+
+  // Register before the session closes its old native socket. Only a complete
+  // classified close of this exact child can permit the next capture epoch.
+  function retireWindowCapture(owner) {
+    const bridge = internetBridge, child = streamProcess;
+    if (shuttingDown || streamStopRequested || startAttempt || windowRetirement || !child
+        || !bridge?.windowSwitch || bridge.windowOwner !== owner || bridge.closed || !browserConfig?.windowId) return null;
+    let finish, settled = false;
+    const done = new Promise(resolve => { finish = allowed => {
+      if (settled) return; settled = true; clearTimeout(timer); resolve(allowed);
+    }; });
+    const retirement = {child,bridge,generation:captureGeneration,finish};
+    const timer = setTimeout(() => {
+      finish(false);
+      if (windowRetirement === retirement) windowRetirement = null;
+      // A stalled old capture is never followed by a new one.
+      bridge.close('capture-recovery');
+      if (streamProcess === child) child.kill();
+    },windowSwitchTimeoutMs);
+    windowRetirement = retirement;
+    return {done,cancel:()=>{finish(false);if(windowRetirement===retirement)windowRetirement=null;}};
   }
 
   async function startStream(rawConfig, retrySession = null, browserBridge = null) {
@@ -571,7 +601,10 @@ export function createControlService({
         for (const source of ['stdout', 'stderr']) {
           if (logRemainders[source]) {
             startupAttempt?.observe(logRemainders[source]);
-            appendLog(source, logRemainders[source]);
+            const finalReason = source === 'stdout' && /^DSKCPY_CAPTURE_END (display-change|sleep|permission-lost|user-stop)$/.exec(logRemainders[source]);
+            if (finalReason && platform === 'darwin' && streamProcess === child && browserBridge && readiness.features?.browserCaptureRecovery)
+              captureEndReason = finalReason[1];
+            else appendLog(source, logRemainders[source]);
             logRemainders[source] = '';
           }
         }
@@ -585,19 +618,23 @@ export function createControlService({
         const permissionDenied = captureEndReason === 'permission-lost' || /^Allow Screen Recording\b/.test(lastNativeError || '');
         const recoverCapture = !shuttingDown && !streamStopRequested && !permissionDenied && code === 2
           && browserBridge?.captureRecovery && ['display-change', 'sleep'].includes(captureEndReason);
+        const retirement = windowRetirement?.child === child ? windowRetirement : null;
+        const switchCapture = Boolean(retirement && !shuttingDown && !streamStopRequested && !permissionDenied
+          && captureEndReason !== 'user-stop' && code === 2 && !browserBridge.closed
+          && retirement.bridge === browserBridge && retirement.generation === captureGeneration);
         if (permissionDenied || captureEndReason === 'user-stop') {
           // block() in this action is synchronous: no remembered ticket may
           // race the later durable pause after an OS Stop or permission loss.
           const pausing = browserReceiver.trustAction('pause');
           nativeTrustPause = Promise.all([nativeTrustPause, pausing]).then(() => {}).catch(() => {});
         }
-        if (!recoverCapture) internetBridge?.close(!streamStopRequested && permissionDenied ? 'capture-permission' : undefined);
+        if (!recoverCapture && !switchCapture) internetBridge?.close(!streamStopRequested && permissionDenied ? 'capture-permission' : undefined);
         internetBridge = null;
         state.running = false;
         state.stopping = false;
         state.pid = null;
         state.lastExitCode = code;
-        state.error = streamStopRequested || recoverCapture ? null : state.error ?? (permissionDenied
+        state.error = streamStopRequested || recoverCapture || switchCapture ? null : state.error ?? (permissionDenied
           ? 'Screen capture permission is unavailable. Restore Screen & System Audio Recording for the launching app before restarting sharing.'
           : code ? lastNativeError ?? exitError(code) : null);
         const retryable = !streamStopRequested && (code === 2
@@ -617,6 +654,11 @@ export function createControlService({
               broadcast();
             }
           }).catch(() => browserBridge.close('capture-recovery'));
+        }
+        if (retirement) {
+          if (windowRetirement === retirement) windowRetirement = null;
+          state.reconnecting = switchCapture;
+          retirement.finish(switchCapture);
         }
         broadcast();
       };
@@ -870,7 +912,9 @@ export function createControlService({
       }
       await serveStatic(request, response, url.pathname);
     } catch (error) {
-      writeJson(response, 400, { error: error.message });
+      writeJson(response, 400, error.code === 'EADDRINUSE'
+        ? { error: 'The receiver connection is already in use.', code: 'receiver-port-in-use' }
+        : { error: error.message });
     }
   });
 

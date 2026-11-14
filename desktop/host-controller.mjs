@@ -147,7 +147,7 @@ export class HostController {
         if (mine !== this.generation || this.closed) return this.snapshot();
         this.invitation = validateInvitation(result, this.connection === 'usb' ? 'http://127.0.0.1:27180' : this.route.origin, this.now(), this.connection);
         this.status = result.status || await this.backend.status();
-      } catch {
+      } catch (error) {
         // A remembered receiver may win the race between the last status check
         // and invitation creation. A failed new Start must not stop that stream.
         if (mine === this.generation && !this.closed) {
@@ -164,7 +164,7 @@ export class HostController {
         if (requested && mine === this.generation) await this.backend.stop().catch(() => {});
         if (mine === this.generation && !this.closed) {
           this.invitation = null; this.clipboardAllowed = false;
-          this.error = probeFailure || (this.connection === 'usb' ? 'Sharing could not start. Unlock and authorize the USB phone, then check again. Another sharing app may already be using the connection.'
+          this.error = (error?.code === 'receiver-port-in-use' ? 'Another sharing session or app is already using the receiver connection. Keep using it, or finish that session before trying again here.' : probeFailure) || (this.connection === 'usb' ? 'Sharing could not start. Unlock and authorize the USB phone, then check again. Another sharing app may already be using the connection.'
             : 'Sharing could not start. Check the connection setup, then try again.');
         }
       } finally {

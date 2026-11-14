@@ -260,7 +260,7 @@ enum scrcpy_exit_code sc_reverse_display_macos_list_windows(void) {
     }
 }
 
-static bool mac_send(struct mac_state *s, const void *data, size_t size, int64_t pts, uint32_t flags) {
+static bool mac_send_checked(struct mac_state *s, const void *data, size_t size, int64_t pts, uint32_t flags, const uint64_t *audio_epoch) {
     if (atomic_load(&s->stopped)) return false;
     if (!size || size > SC_REVERSE_MACOS_MAX_PACKET) {
         LOGE("VideoToolbox produced an invalid or oversized packet");
@@ -271,6 +271,14 @@ static bool mac_send(struct mac_state *s, const void *data, size_t size, int64_t
     sc_write32be(header, (uint32_t)size); sc_write64be(header + 4, (uint64_t)pts); sc_write32be(header + 12, flags);
     sc_mutex_lock(&s->send_mutex);
     sc_mutex_lock(&s->mutex);
+    // The optimistic callback check precedes send_mutex and can become stale
+    // behind another packet. Revalidate at admission, before watchdog submit or
+    // any header bytes. Do not hold the capture mutex across socket I/O.
+    if (audio_epoch && (*audio_epoch != s->audio_epoch || !mac_audio_active(s) || mac_session_ended(s))) {
+        sc_mutex_unlock(&s->mutex);
+        sc_mutex_unlock(&s->send_mutex);
+        return true; // Old encoder output is discarded, not a transport failure.
+    }
     bool audio = flags & (SC_REVERSE_AUDIO_CONFIG | SC_REVERSE_AUDIO_PACKET | SC_REVERSE_AUDIO_UNAVAILABLE);
     struct sc_reverse_watchdog *watchdog = audio ? &s->audio_watchdog : &s->watchdog;
     sc_reverse_watchdog_begin(watchdog, av_gettime_relative());
@@ -282,6 +290,10 @@ static bool mac_send(struct mac_state *s, const void *data, size_t size, int64_t
     sc_mutex_unlock(&s->send_mutex);
     if (!ok && !atomic_load(&s->stopped)) atomic_store(&s->failed, true);
     return ok;
+}
+
+static bool mac_send(struct mac_state *s, const void *data, size_t size, int64_t pts, uint32_t flags) {
+    return mac_send_checked(s,data,size,pts,flags,NULL);
 }
 
 static void mac_encoded(void *context, void *frame_context, OSStatus status,
@@ -458,7 +470,7 @@ static bool mac_audio_send(void *context, const uint8_t *data, size_t size, int6
     struct mac_audio_context *audio = context;
     // Phone also discards in-flight data on mute. Avoid sending an old epoch's tail.
     if (!mac_audio_enabled(context)) return true;
-    return mac_send(audio->state, data, size, pts, flags);
+    return mac_send_checked(audio->state, data, size, pts, flags, &audio->epoch);
 }
 
 

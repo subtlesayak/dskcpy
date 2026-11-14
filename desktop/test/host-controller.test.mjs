@@ -17,6 +17,15 @@ function fixture() {
 }
 const tick = () => new Promise(resolve => setImmediate(resolve));
 
+test('receiver port conflict explains recovery without stopping or inviting', async () => {
+  const f=fixture();f.backend.prepareReceiver=async()=>{throw Object.assign(Error('private diagnostic'),{code:'receiver-port-in-use'});};
+  await f.host.start();
+  assert.match(f.host.snapshot().error,/already using the receiver connection/);
+  assert.match(f.host.snapshot().error,/Keep using it/);
+  assert.ok(!f.host.snapshot().error.includes('private diagnostic'));
+  assert.equal(f.counts().stops,0);assert.equal(f.counts().invites,0);
+});
+
 test('one start produces a single private invitation; repeated clicks never replace it', async () => {
   const f = fixture(); await Promise.all([f.host.start(), f.host.start()]); await f.host.start();
   assert.equal(f.counts().invites, 1); assert.equal(f.host.snapshot().phase, 'inviting');
