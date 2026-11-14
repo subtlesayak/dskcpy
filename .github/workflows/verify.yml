@@ -84,8 +84,11 @@ jobs:
       - name: Configure clean native test build
         run: meson setup .tmp/ci-native --buildtype=debug -Dcompile_server=false
       - name: Compile and run native tests
+        env:
+          MSYS2_PATH_TYPE: inherit
         run: |
           meson compile -C .tmp/ci-native
+          node tools/check-windows-clipboard-fixture.mjs .tmp/ci-native/app/test_reverse_windows_clipboard.exe
           meson test -C .tmp/ci-native --print-errorlogs
       - name: Verify live native log delivery to the dashboard
         env:

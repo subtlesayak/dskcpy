@@ -104,6 +104,18 @@ pasteboard. Do not treat these as physical Mac/Windows clipboard/shortcut,
 Safari/iOS browser permissions, secure-app, provider-hang or device qualification.
 The installed service is not upgraded by building this candidate.
 
+The Windows-only `test_reverse_windows_clipboard` target compiles the production
+adapter with in-memory clipboard and allocation/ownership calls. It exercises
+the real Windows UTF-8/UTF-16 conversions, invalid Unicode, rounded allocations,
+unterminated/oversized input, and failure paths before/after allocation, opening,
+emptying and ownership transfer. It links without the capture/SDL dependencies
+and never calls the OS clipboard APIs. This verifies conversion and adapter
+cleanup in a Windows process; real clipboard providers, target paste acceptance
+and physical failure recovery remain separate gates.
+Before execution, CI checks the fixture's normal and delay-import DLL tables:
+only kernel32 and the C runtime are allowed. Clipboard/UI, SDL/capture and
+arbitrary external DLL imports fail the gate before `meson test` runs.
+
 API references: [Windows OpenClipboard](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-openclipboard),
 [SetClipboardData ownership](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setclipboarddata),
 [Apple NSPasteboard](https://developer.apple.com/documentation/appkit/nspasteboard).

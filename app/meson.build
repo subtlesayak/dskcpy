@@ -252,6 +252,12 @@ endif
 # do not build tests in release (assertions would not be executed at all)
 if get_option('buildtype') == 'debug'
     # Driven by the Node pipe-telemetry regression; not a capture executable.
+    if host_machine.system() == 'windows'
+        # Standalone fixture: no capture/SDL initialization or real clipboard.
+        windows_clipboard_test = executable('test_reverse_windows_clipboard',
+            ['tests/test_reverse_windows_clipboard.c'], include_directories: src_dir)
+        test('test_reverse_windows_clipboard', windows_clipboard_test)
+    endif
     if reverse_macos
         mac_keyboard_test = executable('test_reverse_macos_keyboard',
             ['tests/test_reverse_macos_keyboard.m', 'src/reverse_macos_keyboard.m'],
