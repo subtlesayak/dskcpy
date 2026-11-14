@@ -21,6 +21,7 @@ const assets = new Map([
   ['/keyboard.mjs', ['keyboard.mjs', 'text/javascript; charset=utf-8']],
   ['/clipboard.mjs', ['clipboard.mjs', 'text/javascript; charset=utf-8']],
   ['/video-feedback.mjs', ['video-feedback.mjs', 'text/javascript; charset=utf-8']],
+  ['/video-preference.mjs', ['video-preference.mjs', 'text/javascript; charset=utf-8']],
   ['/protocol.mjs', ['protocol.mjs', 'text/javascript; charset=utf-8']],
   ['/remembered.mjs', ['remembered.mjs', 'text/javascript; charset=utf-8']],
   ['/lifecycle.mjs', ['lifecycle.mjs', 'text/javascript; charset=utf-8']],

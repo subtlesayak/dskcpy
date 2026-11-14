@@ -8,6 +8,7 @@ import { BROWSER_RESUME_MS, MEDIA_FALLBACK_PROTOCOL, avcCodec, avcParameters, to
 import { createRtcReceiver } from './rtc.mjs';
 import { createVideoReceiver } from './video.mjs';
 import { createVideoFeedback } from './video-feedback.mjs';
+import { createVideoPreference } from './video-preference.mjs';
 import { createBrowserKeyboard, keyboardUsage, keyPacket } from './keyboard.mjs';
 
 const $ = (id) => document.getElementById(id);
@@ -71,10 +72,32 @@ let ws, video, audio, audioContext, videoConfig, configBytes, audioConfig;
 let authenticated = false, header = false, closing = false, paused = false, muted = true, touchEnabled = true;
 let mediaSwitching = false;
 let qualityFeedback, qualitySupported = false, qualityAvailable = false, qualityAutomatic = true;
+let qualityResumeReady = false, qualityPreferencePending = null;
+const videoPreference = createVideoPreference({ storage: () => window.localStorage });
 const qualitySetting = $('video-quality-setting'), qualityToggle = $('video-automatic'), qualityStatus = $('video-quality-status');
+function canSetVideoQuality() {
+  return qualityResumeReady && qualitySupported && qualityAvailable && !viewOnly && authenticated && header
+    && !mediaSwitching && !paused && !away() && ws?.readyState === WebSocket.OPEN;
+}
+function requestVideoAutomatic(automatic) {
+  if (!canSetVideoQuality()) return false;
+  try {
+    ws.send(JSON.stringify({ type: 'video-automatic', enabled: automatic }));
+    qualityPreferencePending = automatic;
+    return true;
+  } catch { return false; }
+}
+function restoreVideoPreference() {
+  const preferred = videoPreference.automatic;
+  if (preferred !== null && preferred !== qualityAutomatic && preferred !== qualityPreferencePending)
+    requestVideoAutomatic(preferred);
+}
 qualityToggle?.addEventListener('change', () => {
-  if (!qualitySupported || !qualityAvailable || !authenticated || !header || mediaSwitching || paused || away() || ws?.readyState !== WebSocket.OPEN) { qualityToggle.checked = qualityAutomatic; return; }
-  ws.send(JSON.stringify({type:'video-automatic',enabled:qualityToggle.checked}));
+  if (!requestVideoAutomatic(qualityToggle.checked)) { qualityToggle.checked = qualityAutomatic; return; }
+  const saved = videoPreference.choose(qualityToggle.checked);
+  const status = $('video-preference-status');
+  if (status) status.textContent = saved ? 'Saved in this browser for this address.'
+    : 'Applies for this visit. Choose it again next time; browser storage is unavailable.';
 });
 let resumePendingMedia;
 let sameCaptureRecovery = false;
@@ -229,7 +252,7 @@ const clipboardTools = $('clipboard-tools') ? createBrowserClipboard({ section: 
   canUse: canSendKeys, send, control: value => { if (!authenticated || ws?.readyState !== WebSocket.OPEN) return false; ws.send(value); return true; }, localClipboard: navigator.clipboard,
 }) : null;
 function updateArrowAvailability() {
-  if (qualityToggle) qualityToggle.disabled = !qualityAvailable || !authenticated || !header || mediaSwitching || paused || away();
+  if (qualityToggle) qualityToggle.disabled = !canSetVideoQuality();
   $('keyboard').disabled = mediaSwitching || !authenticated || !header;
   paintTrackpad();
   paintShortcuts();
@@ -357,6 +380,7 @@ function releaseTouches(includeKeyboard = true) {
 function fail(message) { $('error').textContent = message; disconnect(); }
 function clearMedia() {
   qualityFeedback?.close(); qualityFeedback = null; qualitySupported = qualityAvailable = false;
+  qualityResumeReady = false; qualityPreferencePending = null;
   if (qualitySetting) qualitySetting.hidden = true;
   playbackAttempt++;
   rtcReceiver?.close(); rtcReceiver = null;
@@ -539,6 +563,7 @@ function connect(key = null, requestedMode = preferredMode) {
             && Number.isInteger(message.bitRate) && message.bitRate >= 500000 && message.bitRate <= 64000000;
           if (qualityStatus) qualityStatus.textContent = !qualityAvailable ? 'Automatic adjustment unavailable. Keeping the last working video settings.'
             : described ? `${qualityAutomatic ? 'Automatic' : 'Manual'} video · ${message.fps} FPS cap · ${(message.bitRate/1000000).toFixed(1)} Mbps target` : 'Waiting for video settings…';
+          restoreVideoPreference();
           return;
         }
         if (message.type === 'clipboard-result') { if (!authenticated) throw Error('Unexpected clipboard response.'); clipboardTools?.result(message); return; }
@@ -590,7 +615,7 @@ function connect(key = null, requestedMode = preferredMode) {
           socket.send('video-quality-subscribe');
           qualityFeedback?.close();
           qualityFeedback = createVideoFeedback({
-            active: () => mine === generation && authenticated && header && qualityAvailable && qualityAutomatic && !mediaSwitching && !paused && !away() && socket === ws && socket.readyState === WebSocket.OPEN,
+            active: () => mine === generation && canSetVideoQuality() && qualityAutomatic && qualityPreferencePending !== false && socket === ws,
             read: () => mediaMode === 'webrtc' ? rtcReceiver?.metrics?.() : video?.metrics?.(),
             send: sample => { if (mine === generation && socket === ws && socket.readyState === WebSocket.OPEN && !mediaSwitching) socket.send(JSON.stringify(sample)); },
           });
@@ -774,6 +799,7 @@ $('audio').addEventListener('click', async () => {
 
 });
 function updatePause() {
+  qualityResumeReady = false;
   qualityFeedback?.reset();
   updateArrowAvailability();
   if (mediaSwitching || !authenticated || !header || ws?.readyState !== WebSocket.OPEN) return;
@@ -807,6 +833,10 @@ function updatePause() {
     $('audio').setAttribute('aria-label', 'Audio off'); $('audio').setAttribute('aria-pressed', 'false');
   }
   if (!away() && !paused) configureAudio();
+  // Resume must reach the host before a saved setting: suspended sessions
+  // deliberately ignore quality changes. Never replay a saved input action.
+  qualityResumeReady = !away() && !paused;
+  restoreVideoPreference(); updateArrowAvailability();
   $('status').textContent = away() ? 'Paused while away' : paused ? 'Video paused' : 'Resuming…';
 }
 $('pause').addEventListener('click', () => {

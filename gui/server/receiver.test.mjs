@@ -11,6 +11,7 @@ import { receiverIsAway } from '../receiver/lifecycle.mjs';
 import * as protocol from '../receiver/protocol.mjs';
 import { createVideoReceiver } from '../receiver/video.mjs';
 import { createVideoFeedback } from '../receiver/video-feedback.mjs';
+import { createVideoPreference } from '../receiver/video-preference.mjs';
 import { createBrowserKeyboard, keyboardUsage, keyPacket } from '../receiver/keyboard.mjs';
 import { validBrowserInput } from './browser-protocol.mjs';
 
@@ -105,6 +106,7 @@ function receiver(t, { portrait = false, lockFails = false, webRtc = false, webC
   if (webRtc) window.RTCPeerConnection = true;
   window.history = { replaceState(_state, _title, url) { locationState.hash = ''; historyChanges.push(url); } };
   const context = vm.createContext({ ...protocol,
+    createVideoPreference,
     createVideoFeedback: options => createVideoFeedback({...options,setTimer:(fn,ms)=>{const timer=setInterval(fn,ms);timers.add(timer);return timer},clearTimer:clearInterval}),
     createKeyboardShortcuts, shortcutLabel, createDesktopView, createRelativeTrackpad, createBrowserKeyboard, keyboardUsage, keyPacket, receiverIsAway,
     createBrowserClipboard: options => createBrowserClipboard({ ...options, setTimer: (fn, ms) => { const timer = setTimeout(fn, ms); timers.add(timer); return timer; }, clearTimer: clearTimeout }),
