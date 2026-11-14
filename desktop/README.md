@@ -12,6 +12,7 @@ tray; Stop remains available there. Quit confirms ending an owned session.
 
 ## Implemented slice
 
+- Native Apple-silicon and Intel Mac packaging paths, with separate matching native/ADB architecture gates and CI evidence; see [Mac architectures](../doc/mac-host-architectures.md).
 - Electron shell for macOS menu-bar / Windows tray, with embedded Node and a
   bundled native host and pinned ADB platform-tools runtime. No user Node installation or Terminal launcher.
 - Separate React setup entry, permission guidance, component readiness, private

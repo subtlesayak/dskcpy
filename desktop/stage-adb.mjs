@@ -2,7 +2,7 @@ import path from 'node:path';
 import { cp, lstat, readdir, readFile, mkdir } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { inspectMachO } from '../release/package_macos_host.mjs';
+import { inspectMachO, macHostArchitecture } from '../release/package_macos_host.mjs';
 import { planRuntimeClosure, isWindowsSystemImport, isolatedWindowsEnvironment } from './collect-windows-runtime.mjs';
 import { readWindowsPeImports } from '../gui/server/windows-runtime.mjs';
 import { hashFile } from '../tools/build-identity.mjs';
@@ -39,12 +39,13 @@ export async function stageAdb(directory, host, platform = process.platform) {
   }
   let files = [{ name, file: source }], linkage;
   if (platform === 'darwin') {
+    const architecture = macHostArchitecture();
     const [commands, libraries, architectures] = await Promise.all([
-      execute('/usr/bin/otool', ['-arch', 'arm64', '-l', source], options),
-      execute('/usr/bin/otool', ['-arch', 'arm64', '-L', source], options),
+      execute('/usr/bin/otool', ['-arch', architecture, '-l', source], options),
+      execute('/usr/bin/otool', ['-arch', architecture, '-L', source], options),
       execute('/usr/bin/lipo', ['-archs', source], options),
     ]);
-    linkage = inspectMachO(commands.stdout, libraries.stdout, architectures.stdout);
+    linkage = inspectMachO(commands.stdout, libraries.stdout, architectures.stdout, 13, architecture);
   } else {
     const entries = await readdir(directory, { withFileTypes: true });
     const names = new Map();

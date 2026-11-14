@@ -5,7 +5,7 @@ import path from 'node:path';
 import { isolatedWindowsEnvironment } from './collect-windows-runtime.mjs';
 import { fileURLToPath } from 'node:url';
 import { inventory, hashFile } from '../tools/build-identity.mjs';
-import { inspectMachO } from '../release/package_macos_host.mjs';
+import { inspectMachO, macHostArchitecture } from '../release/package_macos_host.mjs';
 import { stageAdb } from './stage-adb.mjs';
 import { stageRuntimeNotices } from './runtime-notices.mjs';
 
@@ -16,18 +16,19 @@ export async function stageHost({ native, output = path.join(repository, 'deskto
   if (!['darwin', 'win32'].includes(process.platform)) throw new Error('Build on the target host platform.');
   const filename = process.platform === 'win32' ? 'scrcpy.exe' : 'scrcpy';
   if (!(await lstat(native)).isFile() || path.basename(native) !== filename) throw new Error('Choose a native host executable.');
-  const { stdout: help } = await execute(native, ['--help'], { timeout: 10000, killSignal: 'SIGKILL', maxBuffer: 1024 * 1024 });
-  if (!help.includes('--reverse-socket') || !help.includes('--reverse-display')) throw new Error('Native browser hosting unavailable');
   let linkage;
   if (process.platform === 'darwin') {
+    const architecture = macHostArchitecture();
     const options = { timeout: 10000, maxBuffer: 1024 * 1024 };
     const [commands, libraries, architectures] = await Promise.all([
-      execute('/usr/bin/otool', ['-l', native], options), execute('/usr/bin/otool', ['-L', native], options),
+      execute('/usr/bin/otool', ['-arch', architecture, '-l', native], options), execute('/usr/bin/otool', ['-arch', architecture, '-L', native], options),
       execute('/usr/bin/lipo', ['-archs', native], options),
     ]);
-    linkage = inspectMachO(commands.stdout, libraries.stdout, architectures.stdout);
-    if (!help.includes('ScreenCaptureKit/VideoToolbox') || !help.includes('--reverse-keyboard')) throw new Error('Mac browser capture/typing unavailable');
+    linkage = inspectMachO(commands.stdout, libraries.stdout, architectures.stdout, 13, architecture);
   }
+  const { stdout: help } = await execute(native, ['--help'], { timeout: 10000, killSignal: 'SIGKILL', maxBuffer: 1024 * 1024 });
+  if (!help.includes('--reverse-socket') || !help.includes('--reverse-display')) throw new Error('Native browser hosting unavailable');
+  if (process.platform === 'darwin' && (!help.includes('ScreenCaptureKit/VideoToolbox') || !help.includes('--reverse-keyboard'))) throw new Error('Mac browser capture/typing unavailable');
   // Refuse an existing output and copy only source/code + declared native files.
   // Never include a developer HOME, .git, environment, signing keys or live data.
   await mkdir(output);

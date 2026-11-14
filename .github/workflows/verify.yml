@@ -119,12 +119,27 @@ jobs:
           node desktop/test/run-electron-smoke.mjs desktop/out/win-unpacked/resources .tmp/desktop-smoke-fixture.exe
 
   native-macos:
-    runs-on: macos-15
+    name: ${{ matrix.arch == 'arm64' && 'native-macos' || 'native-macos-intel' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x64
+    runs-on: ${{ matrix.runner }}
+    env:
+      DSKCPY_MAC_HOST_OUTPUT: release/work/host-${{ matrix.arch }}
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
+      - name: Verify the native runner architecture
+        env:
+          DSKCPY_EXPECTED_NODE_ARCH: ${{ matrix.arch }}
+        run: node -e 'if (process.platform !== "darwin" || process.arch !== process.env.DSKCPY_EXPECTED_NODE_ARCH) process.exit(1)'
       - name: Install native build dependencies
         run: brew install ffmpeg sdl3 meson ninja pkgconf cmake nasm
       - name: Compile the experimental Mac host and run native tests
@@ -143,7 +158,7 @@ jobs:
           meson compile -C build-macos-sanitized -j 2
           meson test -C build-macos-sanitized --print-errorlogs
 
-      # One Mac runner verifies both paths; source dependencies/builds remain
+      # Each native architecture verifies both paths; source dependencies/builds remain
       # isolated from the ordinary Homebrew-backed developer test build.
       - name: Cache pinned dependency archives (always checksum before extraction)
         uses: actions/cache@v4
@@ -154,23 +169,24 @@ jobs:
             app/deps/work/sources/*.zip
           key: macos-host13-sources-${{ hashFiles('app/deps/*.sh', 'app/deps/_init') }}
       - name: Build and verify the separate unsigned Mac hosting candidate
-        run: bash release/build_macos_host.sh release/work/host-arm64
+        run: bash release/build_macos_host.sh "$DSKCPY_MAC_HOST_OUTPUT"
       - name: Check packaged browser/dashboard runtime without starting capture
-        run: release/work/host-arm64/Start-dskcpy-host.command --check
+        run: '"$DSKCPY_MAC_HOST_OUTPUT/Start-dskcpy-host.command" --check'
       - name: Build and smoke-test the unsigned Mac desktop shell without capture
         run: |
           npm ci --prefix desktop
           (cd gui && node node_modules/vite/bin/vite.js build --config vite.desktop.config.ts)
-          node desktop/stage.mjs release/work/host-arm64/bin/scrcpy release/work/host-arm64/licenses app/deps/work/install/adb-macos
+          node desktop/stage.mjs "$DSKCPY_MAC_HOST_OUTPUT/bin/scrcpy" "$DSKCPY_MAC_HOST_OUTPUT/licenses" app/deps/work/install/adb-macos
           npm run package:mac --prefix desktop
-          node desktop/verify-bundle.mjs "desktop/out/mac-arm64/dskcpy Host.app/Contents/Resources"
-          node desktop/test/run-electron-smoke.mjs
+          dskcpy_mac_resources="$(node --input-type=module -e 'console.log(`desktop/out/${process.arch === "arm64" ? "mac-arm64" : "mac"}/dskcpy Host.app/Contents/Resources`)')"
+          node desktop/verify-bundle.mjs "$dskcpy_mac_resources"
+          node desktop/test/run-electron-smoke.mjs "$dskcpy_mac_resources"
       - name: Preserve executable permissions in CI artifact
-        run: tar -C release/work -czf release/work/host-arm64.tar.gz host-arm64
+        run: tar -C release/work -czf "$DSKCPY_MAC_HOST_OUTPUT.tar.gz" "host-${{ matrix.arch }}"
       - uses: actions/upload-artifact@v7
         with:
-          name: unsigned-macos-host-arm64-candidate
-          path: release/work/host-arm64.tar.gz
+          name: unsigned-macos-host-${{ matrix.arch }}-candidate
+          path: release/work/host-${{ matrix.arch }}.tar.gz
           retention-days: 7
 
   android-packaging:
