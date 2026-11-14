@@ -18,6 +18,7 @@
 #include "reverse_macos_clipboard.h"
 #include "receiver.h"
 #include "options.h"
+#include "reverse_quality.h"
 #include "util/binary.h"
 #include "util/env.h"
 #include "util/log.h"
@@ -51,6 +52,10 @@ struct mac_state {
     bool config_sent;
     uint16_t width, height;
     unsigned fps;
+    unsigned manual_fps;
+    uint32_t manual_bit_rate;
+    _Atomic unsigned quality_level;
+    _Atomic bool adaptive_video;
     int64_t start_us, metrics_us;
     CGRect display_bounds;
     CGDirectDisplayID display_id;
@@ -104,6 +109,8 @@ static bool mac_session_ended(struct mac_state *s) {
         atomic_init(&state.audio_route_changed, false);
         atomic_init(&state.keyboard_release_pending, false);
         atomic_init(&state.focus_probe_pending, false);
+        atomic_init(&state.quality_level, 0);
+        atomic_init(&state.adaptive_video, false);
         atomic_init(&state.capture_change, SC_MACOS_CAPTURE_UNCHANGED);
         atomic_init(&state.audio_acked_pts, -1); atomic_init(&state.acked_pts, -1);
         atomic_init(&state.sent_pts, -1); atomic_init(&state.encoding_since, 0);
@@ -359,21 +366,50 @@ static bool mac_encoder(SCMacState *owner, const struct scrcpy_options *options)
     return true;
 }
 
+static bool mac_set_video_bit_rate(uint32_t rate, void *context) {
+    struct mac_state *s = context;
+    NSNumber *value = @(rate);
+    return VTSessionSetProperty(s->encoder, kVTCompressionPropertyKey_AverageBitRate,
+        (__bridge CFTypeRef)value) == noErr;
+}
 static int mac_video_thread(void *context) {
     @autoreleasepool {
         SCMacState *owner = (__bridge SCMacState *)context;
         struct mac_state *s = &owner->state;
         int64_t pending[2]; unsigned pending_count = 0;
         uint64_t generation = 0; int64_t last_encode = 0, last_key = 0;
+        unsigned quality_level = 0, fps = s->fps;
+        if (atomic_load(&s->adaptive_video)) {
+            printf("DSKCPY_VIDEO_QUALITY 0 %u %u\n", fps, s->manual_bit_rate); fflush(stdout);
+        }
         while (!atomic_load(&s->stopped) && !atomic_load(&s->failed)) {
             @autoreleasepool {
                 if (atomic_load(&s->paused)) { SDL_Delay(10); continue; }
+                unsigned requested = atomic_load(&s->quality_level);
+                if (atomic_load(&s->adaptive_video) && requested != quality_level) {
+                    struct sc_reverse_quality target;
+                    {
+                        atomic_store(&s->encoding_since, av_gettime_relative());
+                        bool changed = sc_reverse_quality_apply(s->manual_fps, s->manual_bit_rate, requested,
+                            mac_set_video_bit_rate, s, &target);
+                        atomic_store(&s->encoding_since, 0);
+                        if (changed) {
+                            fps = target.fps; quality_level = requested;
+                            printf("DSKCPY_VIDEO_QUALITY %u %u %u\n", quality_level, fps, target.bit_rate); fflush(stdout);
+                        } else {
+                            // Preserve the last working video settings and keep
+                            // capture/audio/input alive if dynamic control fails.
+                            atomic_store(&s->adaptive_video, false);
+                            printf("DSKCPY_VIDEO_QUALITY unsupported\n"); fflush(stdout);
+                        }
+                    }
+                }
                 int64_t acked = atomic_load(&s->acked_pts);
                 while (pending_count && pending[0] <= acked) {
                     if (--pending_count) pending[0] = pending[1];
                 }
                 int64_t now = av_gettime_relative();
-                if (pending_count == 2 || now - last_encode < 1000000 / s->fps) { SDL_Delay(2); continue; }
+                if (pending_count == 2 || now - last_encode < 1000000 / fps) { SDL_Delay(2); continue; }
                 bool refresh = atomic_load(&s->force_key);
                 sc_mutex_lock(&s->mutex);
                 CVPixelBufferRef pixels = s->latest;
@@ -387,7 +423,7 @@ static int mac_video_thread(void *context) {
                 int64_t pts = now - s->start_us;
                 atomic_store(&s->encoding_since, now);
                 OSStatus result = VTCompressionSessionEncodeFrame(s->encoder, pixels, CMTimeMake(pts, 1000000),
-                    CMTimeMake(1, s->fps), (__bridge CFDictionaryRef)properties, NULL, NULL);
+                    CMTimeMake(1, fps), (__bridge CFDictionaryRef)properties, NULL, NULL);
                 CVPixelBufferRelease(pixels);
                 // One local encoding operation at a time; the wire window permits
                 // at most two unacknowledged frames, with newest capture retained.
@@ -772,6 +808,11 @@ static void mac_action(struct sc_receiver *receiver, const struct sc_device_msg 
     struct mac_state *s = &owner->state;
     if (mac_session_ended(s)) { mac_cancel_input(s); mac_cancel_keyboard(s); return; }
     enum sc_reverse_system_action action = msg->reverse_system_action.action;
+    if (action >= SC_REVERSE_SYSTEM_ACTION_QUALITY_ORIGINAL && action <= SC_REVERSE_SYSTEM_ACTION_QUALITY_REDUCED) {
+        if (atomic_load(&s->adaptive_video) && !s->window_id && !atomic_load(&s->paused))
+            atomic_store(&s->quality_level, action - SC_REVERSE_SYSTEM_ACTION_QUALITY_ORIGINAL);
+        return;
+    }
     if (action == SC_REVERSE_SYSTEM_ACTION_STOP_SESSION) { mac_cancel_input(s); mac_cancel_keyboard(s); atomic_store(&s->quit, true); return; }
     if (action == SC_REVERSE_SYSTEM_ACTION_PAUSE_VIDEO || action == SC_REVERSE_SYSTEM_ACTION_RESUME_VIDEO) {
         bool paused = action == SC_REVERSE_SYSTEM_ACTION_PAUSE_VIDEO;
@@ -913,6 +954,8 @@ sc_reverse_display_macos_run(sc_socket video_socket, sc_socket control_socket, c
                     options->max_size, &s->width, &s->height)) { LOGE("Invalid Mac capture dimensions"); return SCRCPY_EXIT_FAILURE; }
             double fps = options->max_fps ? strtod(options->max_fps, NULL) : 60;
             s->fps = (unsigned)lrint(isfinite(fps) && fps > 0 ? fmax(1, fmin(240, fps)) : 60);
+            s->manual_fps = s->fps; s->manual_bit_rate = options->video_bit_rate;
+            atomic_store(&s->adaptive_video, options->reverse_adaptive_video && !window);
             if (!mac_encoder(owner, options)) return SCRCPY_EXIT_FAILURE;
             // macOS has no MSG_NOSIGNAL. A disconnected receiver must become a
             // normal send failure, not a SIGPIPE process termination.

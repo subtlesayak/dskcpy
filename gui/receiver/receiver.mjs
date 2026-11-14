@@ -7,6 +7,7 @@ import { receiverIsAway } from './lifecycle.mjs';
 import { BROWSER_RESUME_MS, MEDIA_FALLBACK_PROTOCOL, avcCodec, avcParameters, touchPacket, scrollPacket, takeDecodedTimestamps, fitDisplay, createMediaAcknowledger, needsControlsRow, parseJoinFragment } from './protocol.mjs';
 import { createRtcReceiver } from './rtc.mjs';
 import { createVideoReceiver } from './video.mjs';
+import { createVideoFeedback } from './video-feedback.mjs';
 import { createBrowserKeyboard, keyboardUsage, keyPacket } from './keyboard.mjs';
 
 const $ = (id) => document.getElementById(id);
@@ -69,6 +70,12 @@ const context = canvas.getContext('2d', { alpha: false, desynchronized: true });
 let ws, video, audio, audioContext, videoConfig, configBytes, audioConfig;
 let authenticated = false, header = false, closing = false, paused = false, muted = true, touchEnabled = true;
 let mediaSwitching = false;
+let qualityFeedback, qualitySupported = false, qualityAvailable = false, qualityAutomatic = true;
+const qualitySetting = $('video-quality-setting'), qualityToggle = $('video-automatic'), qualityStatus = $('video-quality-status');
+qualityToggle?.addEventListener('change', () => {
+  if (!qualitySupported || !qualityAvailable || !authenticated || !header || mediaSwitching || paused || away() || ws?.readyState !== WebSocket.OPEN) { qualityToggle.checked = qualityAutomatic; return; }
+  ws.send(JSON.stringify({type:'video-automatic',enabled:qualityToggle.checked}));
+});
 let resumePendingMedia;
 let sameCaptureRecovery = false;
 let frames = 0, statsAt = 0, nextAudio = 0, repeatTimer, repeatInterval;
@@ -222,6 +229,7 @@ const clipboardTools = $('clipboard-tools') ? createBrowserClipboard({ section: 
   canUse: canSendKeys, send, control: value => { if (!authenticated || ws?.readyState !== WebSocket.OPEN) return false; ws.send(value); return true; }, localClipboard: navigator.clipboard,
 }) : null;
 function updateArrowAvailability() {
+  if (qualityToggle) qualityToggle.disabled = !qualityAvailable || !authenticated || !header || mediaSwitching || paused || away();
   $('keyboard').disabled = mediaSwitching || !authenticated || !header;
   paintTrackpad();
   paintShortcuts();
@@ -348,6 +356,8 @@ function releaseTouches(includeKeyboard = true) {
 }
 function fail(message) { $('error').textContent = message; disconnect(); }
 function clearMedia() {
+  qualityFeedback?.close(); qualityFeedback = null; qualitySupported = qualityAvailable = false;
+  if (qualitySetting) qualitySetting.hidden = true;
   playbackAttempt++;
   rtcReceiver?.close(); rtcReceiver = null;
   rtcDisplay.hidden = true; document.body.classList.remove('rtc-stream');
@@ -520,6 +530,17 @@ function connect(key = null, requestedMode = preferredMode) {
           fallbackAcknowledged = true; sameCaptureRecovery = true; prepareMediaChange(); return;
         }
         if (mediaSwitching) return; // Only the negotiated acknowledgment belongs to this retiring socket.
+        if (message.type === 'video-quality') {
+          if (!authenticated || !qualitySupported || typeof message.available !== 'boolean' || typeof message.automatic !== 'boolean') throw Error('Unexpected video quality response.');
+          qualityAvailable = message.available; qualityAutomatic = message.automatic;
+          if (qualityToggle) qualityToggle.checked = qualityAutomatic;
+          updateArrowAvailability();
+          const described = [0,1,2].includes(message.level) && Number.isInteger(message.fps) && message.fps >= 1 && message.fps <= 240
+            && Number.isInteger(message.bitRate) && message.bitRate >= 500000 && message.bitRate <= 64000000;
+          if (qualityStatus) qualityStatus.textContent = !qualityAvailable ? 'Automatic adjustment unavailable. Keeping the last working video settings.'
+            : described ? `${qualityAutomatic ? 'Automatic' : 'Manual'} video · ${message.fps} FPS cap · ${(message.bitRate/1000000).toFixed(1)} Mbps target` : 'Waiting for video settings…';
+          return;
+        }
         if (message.type === 'clipboard-result') { if (!authenticated) throw Error('Unexpected clipboard response.'); clipboardTools?.result(message); return; }
         if (message.type === 'rtc-offer' && authenticated && mediaMode === 'webrtc') {
           if (rtcReceiver) throw new Error('Unexpected repeated media offer.');
@@ -561,6 +582,19 @@ function connect(key = null, requestedMode = preferredMode) {
         if (mediaMode === 'webcodecs' && !('VideoDecoder' in window)) throw new Error('This connection needs WebCodecs. Use the private VPN link for browser-native video.');
         const restoring = sessionExpected;
         authenticated = true; sessionExpected = true;
+        qualitySupported = message.adaptiveVideo === true && message.viewOnly !== true;
+        qualityAvailable = false;
+        if (qualitySetting) qualitySetting.hidden = !qualitySupported;
+        if (qualitySupported) {
+          if (qualityStatus) qualityStatus.textContent = 'Waiting for video settings…';
+          socket.send('video-quality-subscribe');
+          qualityFeedback?.close();
+          qualityFeedback = createVideoFeedback({
+            active: () => mine === generation && authenticated && header && qualityAvailable && qualityAutomatic && !mediaSwitching && !paused && !away() && socket === ws && socket.readyState === WebSocket.OPEN,
+            read: () => mediaMode === 'webrtc' ? rtcReceiver?.metrics?.() : video?.metrics?.(),
+            send: sample => { if (mine === generation && socket === ws && socket.readyState === WebSocket.OPEN && !mediaSwitching) socket.send(JSON.stringify(sample)); },
+          });
+        }
         sameCaptureRecovery = false;
         viewOnly = message.viewOnly === true;
         remembered.authenticated(viewOnly);
@@ -740,6 +774,7 @@ $('audio').addEventListener('click', async () => {
 
 });
 function updatePause() {
+  qualityFeedback?.reset();
   updateArrowAvailability();
   if (mediaSwitching || !authenticated || !header || ws?.readyState !== WebSocket.OPEN) return;
   if (!away() && !paused && resumePendingMedia?.()) return;

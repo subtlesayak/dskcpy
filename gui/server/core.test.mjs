@@ -11,6 +11,14 @@ import {
   validateHostEncoder,
 } from './core.mjs';
 
+test('adaptive video needs explicit browser configuration and excludes windows and Android transports',()=>{
+ const base=sanitizeStreamConfig({connection:'browser',browserAdaptiveVideo:true});
+ assert.equal(base.browserAdaptiveVideo,true);assert.ok(buildScrcpyArgs(base,1234).includes('--reverse-adaptive-video'));
+ for(const config of [{connection:'usb',browserAdaptiveVideo:true},{connection:'browser',browserAdaptiveVideo:'true'},{connection:'browser',windowId:1,windowOwnerPid:2,browserAdaptiveVideo:true}]) {
+  const c=sanitizeStreamConfig(config);assert.equal(c.browserAdaptiveVideo,undefined);assert.equal(buildScrcpyArgs(c,c.connection==='browser'?1234:undefined).includes('--reverse-adaptive-video'),false);
+ }
+});
+
 test('VideoToolbox configuration preserves the native argument and respects host boundaries', () => {
   const config = sanitizeStreamConfig({ connection: 'usb', encoder: 'h264_videotoolbox' });
   assert.equal(config.encoder, 'h264_videotoolbox');

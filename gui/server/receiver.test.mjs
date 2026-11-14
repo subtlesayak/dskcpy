@@ -10,6 +10,7 @@ import { rememberedBrowser } from '../receiver/remembered.mjs';
 import { receiverIsAway } from '../receiver/lifecycle.mjs';
 import * as protocol from '../receiver/protocol.mjs';
 import { createVideoReceiver } from '../receiver/video.mjs';
+import { createVideoFeedback } from '../receiver/video-feedback.mjs';
 import { createBrowserKeyboard, keyboardUsage, keyPacket } from '../receiver/keyboard.mjs';
 import { validBrowserInput } from './browser-protocol.mjs';
 
@@ -18,7 +19,7 @@ const parameters = new Uint8Array([0, 0, 1, 0x67, 0x64, 0, 0x28, 0, 0, 1, 0x68, 
 
 // Deterministic lifecycle tests against the actual receiver script. These model
 // delayed browser callbacks; rendered/device QA is separate from this harness.
-function receiver(t, { portrait = false, lockFails = false, webRtc = false, webCodecs = true, qrKey = '', keyboard = false, viewOnly = false, visualHeight = 0, webAudio = false, textFocus = false, keyboardStatus = false, clipboard = false, clipboardAPI = undefined, virtualKeyboard = null, now = () => Date.now(), resumable = false, mediaFallback = false, rtcOffer = async () => {} } = {}) {
+function receiver(t, { portrait = false, lockFails = false, webRtc = false, webCodecs = true, qrKey = '', keyboard = false, viewOnly = false, visualHeight = 0, webAudio = false, textFocus = false, keyboardStatus = false, clipboard = false, clipboardAPI = undefined, virtualKeyboard = null, now = () => Date.now(), resumable = false, mediaFallback = false, adaptiveVideo = false, rtcOffer = async () => {} } = {}) {
   const timers = new Set(), sockets = [], decoders = [], orientation = [], rtcReceivers = [];
   let resize;
   const locationState = { protocol: 'https:', host: 'receiver.test', pathname: qrKey ? '/join' : '/', search: '', hash: qrKey ? `#connect=${qrKey}` : '' };
@@ -104,6 +105,7 @@ function receiver(t, { portrait = false, lockFails = false, webRtc = false, webC
   if (webRtc) window.RTCPeerConnection = true;
   window.history = { replaceState(_state, _title, url) { locationState.hash = ''; historyChanges.push(url); } };
   const context = vm.createContext({ ...protocol,
+    createVideoFeedback: options => createVideoFeedback({...options,setTimer:(fn,ms)=>{const timer=setInterval(fn,ms);timers.add(timer);return timer},clearTimer:clearInterval}),
     createKeyboardShortcuts, shortcutLabel, createDesktopView, createRelativeTrackpad, createBrowserKeyboard, keyboardUsage, keyPacket, receiverIsAway,
     createBrowserClipboard: options => createBrowserClipboard({ ...options, setTimer: (fn, ms) => { const timer = setTimeout(fn, ms); timers.add(timer); return timer; }, clearTimer: clearTimeout }),
     rememberedBrowser: options => rememberedBrowser({ ...options, document, location: locationState,
@@ -127,7 +129,7 @@ function receiver(t, { portrait = false, lockFails = false, webRtc = false, webC
   t.after(() => { for (const timer of timers) clearTimeout(timer); });
   if (!qrKey) { $('session-key').value = 'x'.repeat(32); $('join-form').emit('submit'); }
   const socket = sockets[0]; socket.emit('open');
-  socket.emit('message', { data: JSON.stringify({ type: 'authenticated', keyboard, viewOnly, textFocus, keyboardStatus, clipboard, mediaFallback, mediaMode: webRtc ? 'webrtc' : 'webcodecs' }) });
+  socket.emit('message', { data: JSON.stringify({ type: 'authenticated', keyboard, viewOnly, textFocus, keyboardStatus, clipboard, mediaFallback, adaptiveVideo, mediaMode: webRtc ? 'webrtc' : 'webcodecs' }) });
   const header = new ArrayBuffer(16), view = new DataView(header);
   view.setUint32(0, 0x53524431); view.setUint32(4, 1); view.setUint32(8, 640); view.setUint32(12, 480);
   socket.emit('message', { data: header });
@@ -1120,4 +1122,20 @@ test('Disconnect cancels the retained capture even before the retiring socket cl
   await new Promise(setImmediate);
   assert.equal(requests.filter(r => r.url === '/stream/session' && r.options.method === 'POST' && r.options.credentials === 'same-origin').length, 1);
   assert.equal(h.sockets.length, 1); assert.equal(h.$('join-panel').hidden, false);
+});
+
+test('automatic-video controls stay capability gated and report actual native settings',t=>{
+ for(const opts of [{},{adaptiveVideo:true,viewOnly:true}]) {
+  const h=receiver(t,opts);assert.equal(h.$('video-quality-setting').hidden,true);assert.equal(h.socket.sent.includes('video-quality-subscribe'),false);
+ }
+ const h=receiver(t,{adaptiveVideo:true});assert.ok(h.socket.sent.includes('video-quality-subscribe'));
+ assert.equal(h.$('video-quality-setting').hidden,false);
+ h.socket.emit('message',{data:JSON.stringify({type:'video-quality',available:true,automatic:true,level:1,fps:30,bitRate:7200000})});
+ assert.match(h.$('video-quality-status').textContent,/30 FPS cap.*7.2 Mbps target/);
+ assert.equal(h.$('video-automatic').checked,true);h.$('video-automatic').checked=false;h.$('video-automatic').emit('change');
+ assert.ok(h.socket.sent.includes(JSON.stringify({type:'video-automatic',enabled:false})));
+ h.$('pause').emit('click');assert.equal(h.$('video-automatic').disabled,true);
+ h.socket.emit('message',{data:JSON.stringify({type:'video-quality',available:false,automatic:false})});
+ assert.match(h.$('video-quality-status').textContent,/last working/);assert.equal(h.$('video-automatic').disabled,true);
+ h.$('disconnect').emit('click');assert.equal(h.$('video-quality-setting').hidden,true);
 });

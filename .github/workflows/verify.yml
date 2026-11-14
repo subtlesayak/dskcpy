@@ -91,6 +91,7 @@ jobs:
           node desktop/test/browser-media-ui.mjs chromium connected-fallback
           node desktop/test/browser-media-ui.mjs chromium native-only
           node desktop/test/browser-media-ui.mjs webkit auto
+          node desktop/test/browser-media-ui.mjs chromium adaptive
       - name: Preserve sanitized synthetic-media results
         if: always()
         uses: actions/upload-artifact@v7

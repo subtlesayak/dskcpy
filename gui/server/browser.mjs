@@ -20,6 +20,7 @@ const assets = new Map([
   ['/trackpad.mjs', ['trackpad.mjs', 'text/javascript; charset=utf-8']],
   ['/keyboard.mjs', ['keyboard.mjs', 'text/javascript; charset=utf-8']],
   ['/clipboard.mjs', ['clipboard.mjs', 'text/javascript; charset=utf-8']],
+  ['/video-feedback.mjs', ['video-feedback.mjs', 'text/javascript; charset=utf-8']],
   ['/protocol.mjs', ['protocol.mjs', 'text/javascript; charset=utf-8']],
   ['/remembered.mjs', ['remembered.mjs', 'text/javascript; charset=utf-8']],
   ['/lifecycle.mjs', ['lifecycle.mjs', 'text/javascript; charset=utf-8']],
@@ -314,6 +315,7 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
       clipboard: !grant && policy.clipboard === true && policy.keyboard === true && policy.viewOnly !== true,
       textFocus: policy.textFocus === true && policy.keyboard === true && policy.viewOnly !== true,
       captureRecovery: policy.captureRecovery === true && policy.viewOnly !== true };
+    inputPolicy.adaptiveVideo = policy.adaptiveVideo === true && policy.viewOnly !== true;
     invitation = randomBytes(24);
     failures = 0;
     const duration = grant ? 15000 : invitationMs;

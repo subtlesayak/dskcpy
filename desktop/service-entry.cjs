@@ -55,7 +55,7 @@ parent.on('message', async ({ data }) => {
           browserSerial = usbDevices.resolve(data.args?.device, result.devices);
         }
         value = await api('/api/browser/invite', { browserTransport: mode, ...(browserSerial ? { browserSerial } : {}),
-          browserClipboard: data.args?.clipboard === true, maxSize: 1600, maxFps: 30, bitRateMbps: 8 }); break;
+          browserClipboard: data.args?.clipboard === true, browserAdaptiveVideo: true, maxSize: 1600, maxFps: 30, bitRateMbps: 8 }); break;
       }
       case 'stop': value = await api('/api/stream/stop', {}); break;
       case 'shutdown': {

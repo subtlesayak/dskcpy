@@ -56,6 +56,7 @@ enum {
     OPT_LIST_REVERSE_WINDOWS,
     OPT_REVERSE_KEYBOARD,
     OPT_REVERSE_TEXT_FOCUS,
+    OPT_REVERSE_ADAPTIVE_VIDEO,
     OPT_REVERSE_CLIPBOARD,
     OPT_REVERSE_SOCKET,
     OPT_NO_CLIPBOARD_AUTOSYNC,
@@ -1002,6 +1003,11 @@ static const struct sc_option options[] = {
         .longopt_id = OPT_REVERSE_TEXT_FOCUS,
         .longopt = "reverse-text-focus",
         .text = "Report only editable-focus metadata to the browser controller. Requires --reverse-keyboard.",
+    },
+    {
+        .longopt_id = OPT_REVERSE_ADAPTIVE_VIDEO,
+        .longopt = "reverse-adaptive-video",
+        .text = "Enable browser-adaptive-video-v1 fixed video levels within manual bitrate/FPS limits on the experimental Mac full-desktop reverse socket. Does not change audio or input state.",
     },
     {
         .longopt_id = OPT_REVERSE_CLIPBOARD,
@@ -3097,6 +3103,9 @@ parse_args_with_getopt(struct scrcpy_cli_args *args, int argc, char *argv[],
             case OPT_REVERSE_TEXT_FOCUS:
                 opts->reverse_text_focus = true;
                 break;
+            case OPT_REVERSE_ADAPTIVE_VIDEO:
+                opts->reverse_adaptive_video = true;
+                break;
             case OPT_REVERSE_KEYBOARD:
                 opts->reverse_keyboard = true;
                 break;
@@ -3123,6 +3132,10 @@ parse_args_with_getopt(struct scrcpy_cli_args *args, int argc, char *argv[],
     if (opts->reverse_clipboard && !opts->reverse_keyboard) {
         LOGE("--reverse-clipboard requires --reverse-keyboard"); return false;
     }
+    if (opts->reverse_adaptive_video && (!opts->reverse_display || !opts->reverse_socket
+            || opts->reverse_window || opts->video_bit_rate < 500000 || opts->video_bit_rate > 64000000)) {
+        LOGE("Adaptive video requires a Mac full-desktop reverse socket and 0.5..64 Mbps manual cap"); return false;
+    }
     if (opts->reverse_text_focus && !opts->reverse_keyboard) {
         LOGE("--reverse-text-focus requires --reverse-keyboard"); return false;
     }
@@ -3132,7 +3145,7 @@ parse_args_with_getopt(struct scrcpy_cli_args *args, int argc, char *argv[],
         return false;
     }
 #ifndef HAVE_REVERSE_MACOS
-    if (opts->reverse_window || opts->list_reverse_windows || opts->reverse_text_focus) {
+    if (opts->reverse_window || opts->list_reverse_windows || opts->reverse_text_focus || opts->reverse_adaptive_video) {
         LOGE("These capture/input options require the experimental Mac host");
         return false;
     }
