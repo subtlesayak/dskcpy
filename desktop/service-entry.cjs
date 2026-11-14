@@ -14,7 +14,14 @@ async function api(endpoint, body) {
   const response = await fetch(origin + endpoint, { method: body ? 'POST' : 'GET',
     headers: body ? { Origin: origin, 'Content-Type': 'application/json' } : {},
     ...(body ? { body: JSON.stringify(body) } : {}), signal: AbortSignal.timeout(15000) });
-  if (!response.ok) throw new Error('Service request failed');
+  if (!response.ok) {
+    let code;
+    if (['/api/browser/prepare','/api/browser/invite'].includes(endpoint)) {
+      try { if ((await response.json()).code === 'receiver-port-in-use') code = 'receiver-port-in-use'; }
+      catch { /* Unknown or non-JSON failures keep fixed generic guidance. */ }
+    }
+    throw Object.assign(new Error('Service request failed'), code ? { code } : {});
+  }
   return response.json();
 }
 // Register immediately so messages arriving during module loading are retained.
@@ -75,5 +82,6 @@ parent.on('message', async ({ data }) => {
         browser: { waiting: value.status.browser.waiting, connected: value.status.browser.connected } } };
     if (data.action === 'stop') value = true;
     parent.postMessage({ id: data.id, ok: true, value });
-  } catch { parent.postMessage({ id: data.id, ok: false }); }
+  } catch (error) { parent.postMessage({ id: data.id, ok: false,
+    ...(['prepare-receiver','invite'].includes(data.action) && error.code === 'receiver-port-in-use' ? {code:'receiver-port-in-use'} : {}) }); }
 });

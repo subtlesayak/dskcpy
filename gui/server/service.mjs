@@ -912,7 +912,9 @@ export function createControlService({
       }
       await serveStatic(request, response, url.pathname);
     } catch (error) {
-      writeJson(response, 400, { error: error.message });
+      writeJson(response, 400, error.code === 'EADDRINUSE'
+        ? { error: 'The receiver connection is already in use.', code: 'receiver-port-in-use' }
+        : { error: error.message });
     }
   });
 

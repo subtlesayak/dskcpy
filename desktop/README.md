@@ -10,6 +10,10 @@ existing private connection setup. Each step explains what it allows and has
 one primary action. Closing the window keeps the app in the menu bar or system
 tray; Stop remains available there. Quit confirms ending an owned session.
 
+If another session or app already uses the receiver connection, Start explains
+the conflict. Keep using the existing session, or finish it before trying again
+in this app. The app does not discover, attach to or stop the other process.
+
 ## Implemented slice
 
 - Native Apple-silicon and Intel Mac packaging paths, with separate matching native/ADB architecture gates and CI evidence; see [Mac architectures](../doc/mac-host-architectures.md).

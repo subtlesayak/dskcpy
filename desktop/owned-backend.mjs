@@ -25,7 +25,9 @@ export class OwnedBackend {
         const waiting = this.pending.get(message?.id);
         if (!waiting || waiting.child !== child) return;
         clearTimeout(waiting.timer); this.pending.delete(message.id);
-        if (message.ok) waiting.resolve(message.value); else waiting.reject(new Error('The sharing service could not finish this action.'));
+        if (message.ok) waiting.resolve(message.value);
+        else waiting.reject(Object.assign(new Error('The sharing service could not finish this action.'),
+          message.code === 'receiver-port-in-use' ? {code:'receiver-port-in-use'} : {}));
       });
       child.once('exit', () => {
         for (const [id, waiting] of this.pending) if (waiting.child === child) {

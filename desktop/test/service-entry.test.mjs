@@ -14,6 +14,10 @@ test('service IPC runs the existing backend on its own ephemeral controller with
   await writeFile(adb, '#!/bin/sh\ncase "$1" in\nversion) printf "%s\\n" "Android Debug Bridge version 1.0.41";;\ndevices) cat "$DSKCPY_USB_FIXTURE";;\n*) exit 7;;\nesac\n', { mode: 0o755 });
   const worker = new Worker(`const { parentPort, workerData } = require('node:worker_threads');
     process.parentPort = { on: (_event, fn) => parentPort.on('message', data => fn({ data })), postMessage: data => parentPort.postMessage(data) };
+    const originalFetch=globalThis.fetch;let preparation=0;
+    globalThis.fetch=(url,options)=>url.endsWith('/api/browser/prepare')
+      ? Promise.resolve(new Response(JSON.stringify({code:++preparation===1?'receiver-port-in-use':'private diagnostic',error:'private diagnostic'}),{status:400}))
+      : originalFetch(url,options);
     require(workerData);`, { eval: true,
     workerData: path.resolve('desktop/service-entry.cjs'), env: { ...process.env,
       SCRCPY_GUI_BINARY: native, ADB: adb, DSKCPY_USB_FIXTURE: devices, DSKCPY_VIEWER_ORIGIN: '',
@@ -43,6 +47,9 @@ test('service IPC runs the existing backend on its own ephemeral controller with
     assert.equal((await request('invite', { mode: 'usb', device: usb.value.devices[0].id })).ok, false, 'authorization must still exist at Start');
     assert.equal((await request('invite', { mode: 'invalid' })).ok, false);
     assert.deepEqual((await request('status')).value, { running: false, browser: { waiting: false, connected: false } });
+    const conflict=await request('prepare-receiver');assert.equal(conflict.ok,false);assert.equal(conflict.code,'receiver-port-in-use');
+    assert.ok(!JSON.stringify(conflict).includes('private diagnostic'));
+    const unknown=await request('prepare-receiver');assert.equal(unknown.ok,false);assert.equal(unknown.code,undefined);
     assert.equal((await request('shutdown')).ok, true);
   } finally { await worker.terminate(); await rm(directory, { recursive: true, force: true }); }
 });

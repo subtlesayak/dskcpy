@@ -912,6 +912,18 @@ test('owner clipboard consent reaches native only for a capable full desktop pri
   }
 });
 
+test('occupied receiver port returns a fixed category and preserves the existing listener', async t => {
+  const existing=net.createServer();existing.listen(0,'127.0.0.1');await once(existing,'listening');
+  t.after(()=>new Promise(resolve=>existing.close(resolve)));
+  const f=await fixture(t,{browserPort:existing.address().port,
+    environment:{...process.env,SCRCPY_GUI_BINARY:process.execPath,DSKCPY_VIEWER_ORIGIN:'https://owned.test.ts.net:8443'}});
+  const result=await f.request('/api/browser/prepare',{mode:'internet'});
+  assert.equal(result.code,400);
+  assert.deepEqual(result.body,{error:'The receiver connection is already in use.',code:'receiver-port-in-use'});
+  assert.equal(existing.listening,true);assert.equal(f.children.length,0);
+  assert.equal(f.publicState().browser.waiting,false);
+});
+
 test('controller prepares an owned HTTPS receiver without granting access or launching native capture', async t => {
   const f = await fixture(t, { environment: { ...process.env, SCRCPY_GUI_BINARY: process.execPath, DSKCPY_VIEWER_ORIGIN: 'https://owned.test.ts.net:8443' } });
   const result = await f.request('/api/browser/prepare', { mode: 'internet' });
