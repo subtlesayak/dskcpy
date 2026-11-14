@@ -34,7 +34,12 @@
           <section id="keyboard-controls" hidden aria-label="Remote keyboard">
             <label class="sr-only" for="keyboard-input">Type here on the computer</label>
             <textarea id="keyboard-input" rows="1" maxlength="512" autocomplete="off" autocapitalize="off" spellcheck="false" aria-describedby="keyboard-help" placeholder="Type here"></textarea>
+            <button id="typing-zoom" type="button" aria-label="Zoom while typing" title="Zoom while typing" aria-pressed="true" aria-describedby="typing-view-help"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="10" cy="10" r="6"/><path d="m15 15 6 6M10 7v6m-3-3h6"/></svg></button>
+            <button id="typing-layout" type="button" aria-label="Floating keyboard layout" title="Floating keyboard layout" aria-pressed="false" aria-describedby="typing-view-help"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M14 4v16M17 9h2m-2 4h2m-2 3h2"/></svg></button>
             <button id="close-keyboard" type="button" aria-label="Close keyboard" title="Close keyboard"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="m6 6 12 12M6 18 18 6"/></svg></button>
+            <p id="typing-view-help" class="sr-only">Zoom follows your last tap on the desktop. Floating keyboard layout reserves space beside the desktop; move your phone keyboard there using its own Floating control. Closing Keyboard restores your previous view.</p>
+            <p id="typing-layout-help" class="subtle" role="status" hidden>Use your phone keyboard’s Floating mode to place it beside the desktop.</p>
+            <div id="floating-keyboard-slot" hidden><p>Move your floating keyboard here</p><p class="subtle">If your keyboard offers Floating, turn it on and drag it into this space. Otherwise, turn off this layout.</p></div>
             <p id="keyboard-status" class="subtle" role="status" hidden></p>
             <p id="auto-keyboard-feedback" class="subtle" role="status" hidden></p>
             <p id="keyboard-help" class="sr-only">Text goes to the active computer window. Browser and system shortcuts may stay on this device.</p>

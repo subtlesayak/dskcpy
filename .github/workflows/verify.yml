@@ -96,6 +96,8 @@ jobs:
           node desktop/test/browser-media-ui.mjs chromium adaptive
           node desktop/test/browser-media-ui.mjs chromium codec-update
           node desktop/test/video-preference-ui.mjs webkit
+          node desktop/test/typing-view-ui.mjs chromium
+          node desktop/test/typing-view-ui.mjs webkit
           node desktop/test/window-switch-ui.mjs chromium
           node desktop/test/window-switch-ui.mjs webkit
       - name: Preserve sanitized synthetic-media results
@@ -107,6 +109,7 @@ jobs:
             desktop/out/browser-media-*/
             desktop/out/video-preference-ui-*/
             desktop/out/window-switch-*/
+            desktop/out/typing-view-*/
           if-no-files-found: ignore
 
   native-windows:

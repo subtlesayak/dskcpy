@@ -2,6 +2,7 @@ import { rememberedBrowser } from './remembered.mjs';
 import { createBrowserClipboard } from './clipboard.mjs';
 import { createKeyboardShortcuts, shortcutLabel } from './shortcuts.mjs';
 import { createDesktopView } from './view.mjs';
+import { createTypingView } from './typing-view.mjs';
 import { createRelativeTrackpad } from './trackpad.mjs';
 import { receiverIsAway } from './lifecycle.mjs';
 import { BROWSER_RESUME_MS, MEDIA_FALLBACK_PROTOCOL, avcCodec, avcParameters, touchPacket, scrollPacket, takeDecodedTimestamps, fitDisplay, createMediaAcknowledger, needsControlsRow, parseJoinFragment } from './protocol.mjs';
@@ -164,7 +165,9 @@ function trackpadPacket(p) {
   }
   if (p.type === 'cancel') { clearTimeout(trackMoveTimer); trackMoveTimer = null; pendingTrackMove = null; }
   else flushTrackMove();
-  return send(packet);
+  const accepted = send(packet);
+  if (accepted && p.type === 'up') rememberTypingPoint(p);
+  return accepted;
 }
 const trackpad = createRelativeTrackpad({ geometry: () => {
   const rect = canvas.getBoundingClientRect();
@@ -192,6 +195,15 @@ function paintTrackpad() {
   }
 }
 const desktopView = createDesktopView({ changed: paintView });
+const typingView = createTypingView(desktopView);
+const typingViewPresent = ['typing-zoom', 'typing-layout', 'floating-keyboard-slot', 'typing-view-help', 'typing-layout-help'].every(id => $(id));
+let typingBeside = false, keyboardStartHeight = 0;
+function rememberTypingPoint(point) {
+  typingView.remember(point);
+  if (!typingViewPresent) return;
+  $('typing-zoom').disabled = !typingView.hasTarget();
+  if (keyboardOpen) requestAnimationFrame(() => { if (keyboardOpen) fitCanvas(); });
+}
 let viewImageSize = '';
 function paintView() {
   const v = desktopView.state();
@@ -342,6 +354,7 @@ if (arrowPadPresent) {
   });
 }
 function hideKeyboard() {
+  if (typingViewPresent) typingView.end();
   keyboardOpen = false; keyboardInput.setEnabled(false);
   if (autoFeedback) autoFeedback.hidden = true;
   document.body.classList.remove('keyboard-open');
@@ -350,7 +363,10 @@ function hideKeyboard() {
 function showKeyboard(retry = false) {
   if (!keyboardSupported || viewOnly || paused || away() || !touchEnabled || keyboardOpen || (keyboardBlocked && !retry)) return;
   keyboardBlocked = false; updateArrowAvailability();
-  setControlTray(); keyboardOpen = true; $('keyboard-controls').hidden = false;
+  setControlTray();
+  if (typingViewPresent) typingView.begin();
+  keyboardStartHeight = window.visualViewport?.height || window.innerHeight;
+  keyboardOpen = true; $('keyboard-controls').hidden = false;
   document.body.classList.add('keyboard-open'); $('keyboard').setAttribute('aria-expanded', 'true');
   fitCanvas(); send(keyPacket(2)); keyboardInput.setEnabled(true);
 }
@@ -360,6 +376,12 @@ $('keyboard').addEventListener('click', () => {
   showKeyboard(true);
 });
 $('close-keyboard').addEventListener('click', () => { hideKeyboard(); fitCanvas(); $('keyboard').focus(); });
+if (typingViewPresent) {
+  for (const id of ['typing-zoom', 'typing-layout']) $(id).addEventListener('pointerdown', event => event.preventDefault());
+  $('typing-zoom').addEventListener('click', () => { typingView.setZoom(!typingView.zoomEnabled()); fitCanvas(); });
+  $('typing-layout').addEventListener('click', () => { typingBeside = !typingBeside; fitCanvas(); });
+  $('keyboard-input').addEventListener('input', () => { if (autoFeedback && !autoFeedback.hidden) { autoFeedback.hidden = true; fitCanvas(); } });
+}
 $('close-options').addEventListener('click', () => setControlTray(null, true));
 for (const id of ['volume', 'window']) $(id).addEventListener('toggle', () => releaseTouches());
 
@@ -396,6 +418,7 @@ function releaseTouches(includeKeyboard = true) {
 }
 function fail(message) { $('error').textContent = message; disconnect(); }
 function clearMedia() {
+  typingView.reset();
   windowFrames = 0; windowChooser?.supported(false);
   qualityFeedback?.close(); qualityFeedback = null; qualitySupported = qualityAvailable = false;
   qualityResumeReady = false; qualityPreferencePending = null;
@@ -958,7 +981,9 @@ for (const [name, actionCode] of [['pointerup', 1], ['pointercancel', 3], ['lost
   });
 }
 function sendContact(point, action) {
-  send(touchPacket(action, point.id, point.x, point.y, canvas.width, canvas.height));
+  const accepted = send(touchPacket(action, point.id, point.x, point.y, canvas.width, canvas.height));
+  if (accepted && action === 1 && !touchGesture?.multiple && !touchGesture?.scrolling)
+    rememberTypingPoint({ ...point, width: canvas.width, height: canvas.height });
   point.sent = ![1, 3, 6].includes(action);
 }
 function cancelSentTouches() {
@@ -1073,6 +1098,20 @@ function fitCanvas() {
   const panel = $('stream-panel'), viewport = $('receiver-viewport'), padding = getComputedStyle(viewport);
   const fullHeight = viewport.clientHeight - parseFloat(padding.paddingTop) - parseFloat(padding.paddingBottom);
   const fullWidth = viewport.clientWidth - parseFloat(padding.paddingLeft) - parseFloat(padding.paddingRight);
+  const besideChoice = typingViewPresent && keyboardOpen && fullWidth >= 640 && fullWidth > fullHeight * 1.15;
+  const besideActive = besideChoice && typingBeside && fullHeight >= 240;
+  document.body.classList.toggle('typing-side-available', besideChoice);
+  document.body.classList.toggle('typing-beside', besideActive);
+  if (typingViewPresent) {
+    $('typing-layout').hidden = !besideChoice;
+    $('typing-layout').setAttribute('aria-pressed', String(typingBeside));
+    $('typing-zoom').setAttribute('aria-pressed', String(typingView.zoomEnabled()));
+    $('typing-zoom').disabled = !typingView.hasTarget();
+    $('floating-keyboard-slot').hidden = !besideActive;
+    $('typing-layout-help').hidden = !(besideChoice && typingBeside && !besideActive);
+    if (keyboardOpen && autoFeedback && keyboardStartHeight - (window.visualViewport?.height || window.innerHeight) > 80)
+      autoFeedback.hidden = true;
+  }
   panel.classList.toggle('controls-reserved', document.body.classList.contains('controls-hidden')
     && needsControlsRow(canvas.width, canvas.height, fullWidth, fullHeight));
   const stage = $('stage');
@@ -1087,8 +1126,10 @@ function fitCanvas() {
   canvas.style.width = `${size.width}px`; canvas.style.height = `${size.height}px`;
   rtcDisplay.style.width = `${size.width}px`; rtcDisplay.style.height = `${size.height}px`;
   const imageSize = `${canvas.width}x${canvas.height}`;
-  if (viewImageSize !== imageSize) { desktopView.reset(); viewImageSize = imageSize; }
-  desktopView.setGeometry({ width: stage.clientWidth, height: stage.clientHeight, contentWidth: size.width, contentHeight: size.height });
+  if (viewImageSize !== imageSize) { typingView.reset({ restoreView: false }); desktopView.reset(); viewImageSize = imageSize; }
+  const viewGeometry = { width: stage.clientWidth, height: stage.clientHeight, contentWidth: size.width, contentHeight: size.height };
+  desktopView.setGeometry(viewGeometry);
+  if (typingViewPresent) typingView.layout(viewGeometry);
   updateArrowAvailability();
   if ($('view-scroll-hint')) $('view-scroll-hint').hidden = true;
   if ($('view-scroll-hint')) $('view-scroll-hint').hidden = !viewNavigationActive() || $('control-panels').scrollHeight <= $('control-panels').clientHeight + 1;

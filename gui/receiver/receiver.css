@@ -62,8 +62,18 @@ canvas { display: block; grid-area: 1 / 1; z-index: 1; max-width: 100%; max-heig
 #disconnect { margin-block-start: auto; }
 #control-panels { flex-shrink: 0; min-height: 0; min-width: 0; max-height: min(60%, 24rem); overflow-y: auto; overscroll-behavior: contain; scroll-padding-block: 8px; }
 #keyboard-controls, #more-controls { margin-block-start: 8px; padding: 12px; background: #101b22; border: 1px solid #405461; border-radius: 12px; }
-#keyboard-controls { display: grid; grid-template-columns: minmax(0, 1fr) 44px; align-items: center; gap: 6px; padding: 6px; }
-#close-keyboard { grid-column: 2; grid-row: 1; display: grid; place-items: center; min-height: 44px; padding: 0; }
+#keyboard-controls { display: grid; grid-template-columns: minmax(0, 1fr) repeat(2, 44px); align-items: center; gap: 6px; padding: 6px; }
+#typing-zoom, #typing-layout, #close-keyboard { grid-row: 1; display: grid; place-items: center; min-width: 44px; min-height: 44px; padding: 0; }
+#typing-zoom { grid-column: 2; }
+#typing-layout { grid-column: 3; }
+#close-keyboard { grid-column: 3; }
+.typing-side-available #keyboard-controls { grid-template-columns: minmax(0, 1fr) repeat(3, 44px); }
+.typing-side-available #close-keyboard { grid-column: 4; }
+#floating-keyboard-slot { grid-column: 1 / -1; min-width: 0; min-height: 0; padding: 10px; border: 1px dashed #405461; border-radius: 8px; color: #9eafb9; }
+#floating-keyboard-slot p { margin: 0; overflow-wrap: anywhere; }
+#floating-keyboard-slot p + p { margin-block-start: 8px; }
+#floating-keyboard-slot svg, #typing-zoom svg, #typing-layout svg { pointer-events: none; }
+#typing-layout-help { grid-column: 1 / -1; margin: 2px 0 0; font-size: .75rem; line-height: 1.3; }
 .keyboard-open header { display: none; }
 .keyboard-open main { grid-template-rows: auto minmax(0, 1fr); gap: 4px; }
 .keyboard-open #error { grid-row: 1; }
@@ -71,6 +81,15 @@ canvas { display: block; grid-area: 1 / 1; z-index: 1; max-width: 100%; max-heig
 .keyboard-open #workspace { flex-direction: column; }
 .keyboard-open #control-panels { flex-shrink: 0; width: auto; max-width: none; max-height: none; margin-inline-start: 0; overflow: visible; }
 .keyboard-open #keyboard-controls { margin-block-start: 6px; }
+.keyboard-open.typing-beside #workspace { flex-direction: row; gap: 8px; }
+.keyboard-open.typing-beside #control-panels { flex: 0 0 42%; width: 42%; max-width: 22rem; height: 100%; overflow-y: auto; }
+.keyboard-open.typing-beside #keyboard-controls { height: 100%; margin: 0; grid-template-columns: minmax(0, 1fr) 44px 44px; grid-template-rows: 44px minmax(44px, auto) minmax(0, 1fr); align-items: stretch; }
+.typing-beside #keyboard-input { grid-column: 1 / 3; }
+.typing-beside #close-keyboard { grid-column: 3; }
+.typing-beside #typing-zoom { grid-column: 2; grid-row: 2; }
+.typing-beside #typing-layout { grid-column: 3; grid-row: 2; }
+.typing-beside #floating-keyboard-slot { grid-row: 3; display: flex; flex-direction: column; justify-content: center; font-size: .8rem; }
+.typing-beside #auto-keyboard-feedback, .typing-beside #keyboard-status { grid-column: 1; grid-row: 2; align-self: center; margin: 0; font-size: .75rem; line-height: 1.3; }
 .panel-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-block-end: 8px; }
 .panel-heading h2 { margin: 0; min-width: 0; font-size: 1rem; line-height: 1.4; overflow-wrap: anywhere; }
 .panel-heading button { min-height: 44px; padding: 6px 10px; font-size: .875rem; }
