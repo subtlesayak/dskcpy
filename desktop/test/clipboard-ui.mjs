@@ -48,7 +48,11 @@ try { for(const variant of [{width:390,height:844,rtl:false},{width:844,height:3
     await page.screenshot({path:path.join(output,`clipboard-${variant.width}-${variant.rtl}.png`),fullPage:true});
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
     assert.ok(!JSON.stringify(receiver.status()).includes('paste fixture'));
-    await page.setViewportSize({width:844,height:220});await field.scrollIntoViewIfNeeded();await field.focus();const bounds=await field.boundingBox();assert.ok(bounds && bounds.y>=0 && bounds.y+bounds.height<=220,'clipboard input must remain reachable in a keyboard-sized viewport');
+    await page.setViewportSize({width:844,height:220});
+    await page.evaluate(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))));
+    await field.scrollIntoViewIfNeeded();await field.focus();const bounds=await field.boundingBox(),heading=await page.locator('#options-heading').boundingBox();
+    assert.ok(bounds && bounds.y>=0 && bounds.y+bounds.height<=220,JSON.stringify({variant,bounds,heading,reason:'clipboard input must remain reachable in a keyboard-sized viewport'}));
+    assert.ok(bounds.y>=heading.y+heading.height-1,'clipboard input stays below sticky Options heading');
     await page.setViewportSize({width:variant.width,height:variant.height});
     holdRead=true;await page.getByRole('button',{name:'Read computer clipboard',exact:true}).click();await until(()=>Boolean(held));
     await page.getByRole('button',{name:'Pause video',exact:true}).click();assert.equal(await field.inputValue(),'');assert.equal(await toggle.isChecked(),false);

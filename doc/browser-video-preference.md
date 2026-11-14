@@ -32,3 +32,22 @@ narrow/RTL/200% CSS-zoom layouts. Generated media regressions are separate from
 these control/UI checks. Neither qualifies physical phone keyboards, Safari/iOS
 hardware, real encoders, audible playback or input latency. Deployment still
 requires a controlled update; an active installed session is left untouched.
+
+The expanded WebKit CSS-zoom flow exposed a synchronous ResizeObserver delivery
+loop. Stage notifications now coalesce into the next animation frame; fitting
+reads the latest geometry outside observer delivery. The tests require settled
+geometry, no repeated resize loop and preserved paired keyboard input. The
+initial candidate failure remains recorded separately from the corrected source.
+Visual review also caught fragmented labels at 200% CSS zoom despite passing
+bounding-box checks. Receiver container queries now use the available layout
+width instead of the outer viewport breakpoint. Options retain a sticky close
+control, matching scroll clearance and a visible overflow cue. A compact header
+in short containers leaves room for the clipboard field above a soft keyboard.
+The container's width and height are both explicit. Real-browser
+checks additionally require whole-word label wrapping and reachable focus under
+the heading with long German labels and RTL; CSS zoom is not physical browser
+zoom or phone qualification.
+Chromium checks actual Shift+Tab order. This WebKit test engine skips checkboxes
+under its default Tab policy, so it checks explicit focus scrolling and Space
+activation without changing OS settings. Physical Safari keyboard-navigation
+policy remains a separate qualification gate.

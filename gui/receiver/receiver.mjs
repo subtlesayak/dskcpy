@@ -1042,6 +1042,7 @@ function fitCanvas() {
   const stage = $('stage');
   document.body.classList.toggle('view-navigation', viewNavigationActive());
   document.body.classList.toggle('shortcuts-open', openControlTray === 'shortcuts');
+  document.body.classList.toggle('options-open', openControlTray === 'more');
   stage.tabIndex = viewNavigationActive() ? 0 : -1;
   if (viewNavigationActive()) { stage.setAttribute('role', 'group'); stage.setAttribute('aria-label', 'Move the local view'); stage.setAttribute('aria-describedby', 'view-help'); }
   else { stage.removeAttribute('role'); stage.removeAttribute('aria-label'); stage.removeAttribute('aria-describedby'); }
@@ -1060,10 +1061,23 @@ function fitCanvas() {
     document.documentElement.style.setProperty('--shortcut-heading-clearance', `${($('shortcut-heading')?.offsetHeight || 48) + 12}px`);
   }
   const controls = $('primary-controls'), hint = $('rail-scroll-hint');
+  if ($('options-scroll-hint')) {
+    const cue = $('options-scroll-hint'), scroller = $('control-panels');
+    cue.hidden = true; cue.hidden = openControlTray !== 'more' || scroller.scrollHeight <= scroller.clientHeight + 1;
+    document.documentElement.style.setProperty('--options-heading-clearance', `${($('options-heading')?.offsetHeight || 48) + 12}px`);
+  }
   hint.hidden = true;
   hint.hidden = !(controls.scrollHeight > controls.clientHeight + 1);
 }
-new ResizeObserver(fitVisualViewport).observe($('stage'));
+// Fitting writes the observed stage's layout. Schedule it outside observer
+// delivery so WebKit can finish the current resize without a delivery loop.
+// Coalesce notifications and read the latest geometry in the next frame.
+let stageFitQueued = false;
+new ResizeObserver(() => {
+  if (stageFitQueued) return;
+  stageFitQueued = true;
+  requestAnimationFrame(() => { stageFitQueued = false; fitVisualViewport(); });
+}).observe($('stage'));
 // Mobile browsers can resize only the visual viewport when the soft keyboard
 // opens. Fit the receiver to the visible area without releasing paired keys.
 const visualViewport = window.visualViewport;

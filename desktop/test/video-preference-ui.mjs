@@ -40,6 +40,7 @@ function broker({unavailable=false}={}) {
 try { for(const variant of [
   {name:'portrait',width:390,height:844},
   {name:'landscape',width:844,height:390},
+  {name:'short-landscape',width:844,height:220},
   {name:'narrow-rtl',width:320,height:700,rtl:true},
   {name:'zoom',width:640,height:900,zoom:2},
   {name:'storage-denied',width:390,height:844,storageDenied:true},
@@ -52,9 +53,17 @@ try { for(const variant of [
   const policy={keyboard:true,adaptiveVideo:!variant.oldHost,viewOnly:!!variant.viewOnly};
   await page.addInitScript(({seed,denied,key})=>{
     delete window.RTCPeerConnection;
+    window.__stageResizes=0;
+    window.ResizeObserver=new Proxy(window.ResizeObserver,{construct(Target,[callback]){
+      return new Target((...args)=>{window.__stageResizes++;callback(...args)});
+    }});
     if(denied)Object.defineProperty(window,'localStorage',{get(){throw new DOMException('Disabled','SecurityError')}});
     else if(seed&&localStorage.getItem(key)===null)localStorage.setItem(key,JSON.stringify({version:1,automatic:false}));
   },{seed:!!variant.seed,denied:!!variant.storageDenied,key});
+  if(variant.rtl||variant.zoom)await page.addInitScript(()=>document.addEventListener('DOMContentLoaded',()=>{
+    document.querySelector('#video-quality-setting label').lastChild.textContent=' Videoqualität automatisch anpassen';
+    document.querySelector('#options-heading h2').textContent='Übertragungsoptionen';
+  }));
   const ready=async()=>{await page.locator('#stream-panel').waitFor({state:'visible'});await until(()=>page.locator('#display').evaluate(c=>c.width===640),'stream header');};
   async function connect(defer=false) {
     const n=b.sessions.length, invitation=await b.receiver.invite('local',policy);
@@ -63,7 +72,7 @@ try { for(const variant of [
   }
   const stop=async s=>{await page.getByRole('button',{name:'Disconnect',exact:true}).click();await until(()=>s.socket.destroyed&&!b.receiver.status().connected,'Stop');};
   try {
-    let s=await connect();const automatic=page.getByRole('checkbox',{name:'Adjust video automatically',exact:true});
+    let s=await connect();const automatic=page.locator('#video-automatic');
     if(variant.oldHost||variant.viewOnly||variant.unavailable){
       if(variant.unavailable){
         await page.getByRole('button',{name:'Options',exact:true}).click();
@@ -78,6 +87,7 @@ try { for(const variant of [
     assert.equal(await automatic.isChecked(),true);assert.deepEqual(s.quality,[]);
     if(variant.rtl)await page.locator('html').evaluate(e=>e.dir='rtl');
     if(variant.zoom)await page.locator('html').evaluate((e,z)=>e.style.zoom=z,variant.zoom);
+    assert.equal(await page.getByRole('checkbox',{name:variant.rtl||variant.zoom?'Videoqualität automatisch anpassen':'Adjust video automatically',exact:true}).count(),1);
     await automatic.focus();await page.keyboard.press('Space');await until(()=>s.quality.length===1,'manual target');
     await until(()=>page.locator('#video-quality-status').textContent().then(t=>t.startsWith('Manual video')),'confirmed manual state');
     const message=await page.locator('#video-preference-status').textContent();
@@ -87,7 +97,30 @@ try { for(const variant of [
     assert.ok((await page.locator('#video-quality-setting label').boundingBox()).height>=44);
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
     const close=await page.locator('#close-options').boundingBox();assert.ok(close.y>=0&&close.y+close.height<=variant.height);
+    await new Promise(r=>setTimeout(r,250));
+    const layout=await page.locator('#stage').evaluate(e=>[e.clientWidth,e.clientHeight,window.__stageResizes]);
+    await new Promise(r=>setTimeout(r,150));
+    const settled=await page.locator('#stage').evaluate(e=>[e.clientWidth,e.clientHeight,window.__stageResizes]);
+    assert.deepEqual(settled.slice(0,2),layout.slice(0,2));assert.ok(settled[2]-layout[2]<=1,'stage resize must settle, not loop each frame');
+    assert.equal(await page.locator('#video-quality-setting label').evaluate(e=>{
+      const text=e.lastChild;
+      return [...text.textContent.matchAll(/\p{L}+/gu)].every(m=>{
+        const range=document.createRange();range.setStart(text,m.index);range.setEnd(text,m.index+m[0].length);
+        return new Set([...range.getClientRects()].filter(r=>r.width>0).map(r=>Math.round(r.top))).size===1;
+      });
+    }),true,'setting words must remain readable without fragmenting across lines');
+    const overflow=await page.locator('#control-panels').evaluate(e=>e.scrollHeight>e.clientHeight+1);
+    if(overflow)assert.equal(await page.locator('#options-scroll-hint').isVisible(),true);
     await page.screenshot({path:path.join(output,variant.name+'.png')});
+    await page.locator('#volume summary').focus();
+    const pinned=await page.locator('#close-options').boundingBox();assert.ok(pinned.y>=0&&pinned.y+pinned.height<=variant.height);
+    // This WebKit engine's default Tab policy skips checkboxes. Space activation
+    // is tested above; test focus scrolling directly without changing OS policy.
+    if(engine==='webkit')await automatic.focus();else await page.keyboard.press('Shift+Tab');
+    assert.equal(await automatic.evaluate(e=>document.activeElement===e),true);
+    await page.evaluate(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))));
+    const focused=await automatic.boundingBox(),heading=await page.locator('#options-heading').boundingBox();
+    assert.ok(focused.y>=heading.y+heading.height-1,JSON.stringify({variant:variant.name,focused,heading,reason:'focused setting stays below sticky heading'}));
     await page.getByRole('button',{name:'Pause video',exact:true}).click();const before=s.quality.length;
     assert.equal(await automatic.isDisabled(),true);
     await page.locator('#video-automatic').evaluate(e=>{e.checked=true;e.dispatchEvent(new Event('change',{bubbles:true}))});
@@ -125,7 +158,7 @@ try { for(const variant of [
       }finally{for(const s of other.sessions)s.socket.destroy();await other.receiver.shutdown();}
     }else await stop(s);
     assert.deepEqual(errors,[]);
-    results.push({...variant,explicitChoice:true,pauseGate:true,authenticationGate:true,freshSessionRestore:!variant.storageDenied,storageDenialHandled:!!variant.storageDenied,reloadWithoutDuplicateCommand:!variant.storageDenied,originIsolated,actualMediaQualified:false});
+    results.push({...variant,explicitChoice:true,pauseGate:true,authenticationGate:true,freshSessionRestore:!variant.storageDenied,storageDenialHandled:!!variant.storageDenied,reloadWithoutDuplicateCommand:!variant.storageDenied,originIsolated,focusTraversal:engine==='webkit'?'direct focus and Space; default Tab skips checkbox':'Shift+Tab and Space',actualMediaQualified:false});
   }finally{await context.close();for(const s of b.sessions)s.socket.destroy();await b.receiver.shutdown();}
 }
   await writeFile(path.join(output,'results.json'),JSON.stringify({engine,realCapture:false,realInput:false,results},null,2)+'\n');
