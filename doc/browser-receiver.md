@@ -216,8 +216,8 @@ available, use USB, private Tailscale HTTPS, or the native Android receiver.
   or disconnected session cannot change the current audio controls or show a
   stale error. A current playback denial restores mute and offers a retry.
 - Close and Lock are deliberately not exposed in this experimental browser
-  receiver. Full-desktop Mac sessions can advertise the optional keyboard
-  capability described below; Windows keyboard forwarding remains unavailable.
+  receiver. Matching full-desktop Mac and Windows hosts can advertise the
+  optional keyboard capability described below.
 - Disconnect and Stop end capture. USB cleanup removes only the tunnel created
   by this session; it refuses to overwrite existing ADB mappings.
 
@@ -226,8 +226,9 @@ available, use USB, private Tailscale HTTPS, or the native Android receiver.
 Build the native host and dashboard from this revision. The local dashboard
 shows **Choose what to share** when the Mac binary advertises the new options.
 **Refresh windows** reads the current local catalog without starting capture.
-Select the exact window before creating an invitation. Titles remain in the
-picker; they are not stored in status, logs or performance exports. Selection
+Select the exact window before creating an invitation. The local window catalog
+is not sent to receivers; an optional switching list sends only the labels you
+explicitly approve. Titles are not stored in logs or performance exports. Selection
 also binds the current owning process, and native capture revalidates it. A missing
 selection never silently falls back to the desktop.
 
@@ -237,14 +238,19 @@ window covers it. Resizing letterboxes into the original output canvas.
 Minimizing, hiding or closing the window ends the session; create a fresh
 invitation after selecting an available window. Touch, keyboard, host volume
 and desktop-window actions are rejected at both bridge and native boundaries.
-Target-relative window control and live target switching remain future work.
+The owner can instead approve two to eight windows before creating the grant;
+the receiver may switch only within that list. See [approved window switching](browser-window-switching.md)
+for capture retirement, Stop/permission vetoes and memory-only last-viewed previews.
+Target-relative window control and window audio remain unavailable.
 
-For a full-desktop Mac session on a receiving device, select **Keyboard** and keep **Type on the
+For a full-desktop Mac or matching Windows session on a receiving device, select **Keyboard** and keep **Type on the
 computer** focused. Physical navigation/function keys and shortcuts use paired
 key events; ordinary text and completed IME composition use bounded Unicode
 messages. The typing field supports up to 512 UTF-16 code units per commit,
-split into UTF-8 packets of at most 512 bytes. Nothing reads the clipboard or
-saves typed text. Explicit browser paste goes through the same input limits.
+split into UTF-8 packets of at most 512 bytes. Keyboard input does not read the
+clipboard or save typed text. The separate [clipboard feature](browser-clipboard.md)
+requires its own invitation permission and current-viewer opt-in. Explicit browser
+paste goes through the same input limits.
 Browser/OS-reserved shortcuts may remain local; protected Mac input fields may
 reject synthetic input. These restrictions are not bypassed.
 The **This computer** preview omits keyboard forwarding to prevent injected keys
@@ -252,10 +258,12 @@ from feeding back into its own focused typing field. Use a separate receiver
 for keyboard tests; avoid opening its typing field on the host computer.
 
 Blur, Touch off, pause, page hiding, connection replacement and Stop release
-held keys. The native host also checks Accessibility and session/display state.
+held keys. The Mac native host also checks Accessibility and session/display state.
 If permission is revoked, input is blocked; pending releases are attempted after
 permission returns. Actual held-key/permission recovery still requires hardware
-verification. Windows and older hosts do not advertise this keyboard capability.
+verification. Windows additionally enforces input-desktop/integrity and owned-key
+cleanup gates; see [Windows keyboard limits and qualification](windows-browser-keyboard.md).
+Older native hosts without the required capability retain their previous behavior.
 
 The optional native input extension keeps existing message IDs and media framing
 unchanged: ID 8 is five bytes (type, down/up/cancel action, big-endian USB keyboard

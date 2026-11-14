@@ -38,10 +38,16 @@ Mac hosting candidate, see [Build identity and compatible upgrades](doc/artifact
   the session; stopping ends it.
 - **Browser receiving:** authenticated WebRTC H.264/Opus and one-use QR
   invitations, plus a WebCodecs path for Android USB browser tunnels.
-- **Mac window sharing:** select one window; view-only with audio off, a fixed
-  canvas on resize, and session end when the target is hidden, minimized or closed.
-- **Mac browser typing:** opt-in full-desktop keyboard and Unicode/IME input,
-  gated by native support and Accessibility permission.
+- **Mac window sharing:** select one window, or explicitly approve a small
+  [window-switching list](doc/browser-window-switching.md). Sharing stays view-only
+  with audio off; hiding, minimizing or closing the current target ends capture.
+- **Browser typing:** opt-in full-desktop keyboard and committed Unicode/IME input
+  on matching Mac and [Windows hosts](doc/windows-browser-keyboard.md), gated by
+  native capability and OS input permissions.
+- **Receiver tools:** trackpad control, local pinch zoom, shortcut buttons and
+  separately authorized [text clipboard transfer](doc/browser-clipboard.md).
+- **Desktop app prototype:** guided private-network and account-free Android USB
+  setup; see [implemented features and release gates](desktop/README.md).
 - **Local dashboard:** connection setup, wireless discovery, performance settings,
   activity logs, and optional bounded USB/LAN reconnect attempts.
 
@@ -53,8 +59,8 @@ operation uses an external VPN such as Tailscale and its access controls.
 | Host → receiver | Status and limits |
 | --- | --- |
 | Windows → Android | Video, native touch and system audio implemented; physical USB/VPN results are recorded in the validation notes. |
-| Mac → Android | Experimental Apple-silicon source build. Earlier snapshots have physical video/input/recovery results; sustained audio and final-candidate qualification remain open. |
-| Windows/Mac → browser | Experimental private WebRTC and WebCodecs paths. Mac window sharing and desktop typing are implemented; Windows browser typing is unavailable. |
+| Mac → Android | Experimental Apple-silicon and Intel source builds. Earlier snapshots have physical video/input/recovery results; sustained audio and final-candidate qualification remain open. |
+| Windows/Mac → browser | Experimental private WebRTC and WebCodecs paths, desktop typing, bounded adaptive video and media recovery. Mac window sharing stays view-only with audio off. Physical device/driver qualification remains open. |
 | Desktop → iPhone/iPad browser | Safari/iOS compatibility needs physical qualification; no native iOS receiver or iPhone USB tunnel is provided. |
 | Linux desktop hosting | Not implemented. Linux can still use the inherited Android-to-computer mode. |
 
@@ -65,10 +71,11 @@ A source implementation or automated pass is not a physical-device pass. See
 ## Prerequisites
 
 - **Windows host:** Windows 10+, an interactive desktop, and an H.264 encoder.
-- **Mac host:** Apple silicon, macOS 13+, Apple's Command Line Tools, and
+- **Mac host:** Apple silicon or Intel, macOS 13+, Apple's Command Line Tools, and
   Screen Recording permission. Input additionally needs Accessibility.
   Local dependency builds can require a newer OS; the source minimum is not
   a guarantee that a Homebrew-linked binary runs on every macOS 13+ machine.
+  Use the [matching native architecture](doc/mac-host-architectures.md).
 - **Dashboard:** Node.js 22.12+ and npm, with this fork's compiled native host.
 - **Android app receiver:** Android 5.0+ with H.264 decoding; Android 6+ for
   retained background sessions. A matching companion APK is required.
