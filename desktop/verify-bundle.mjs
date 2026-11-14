@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { verifyRuntimePayload } from './payload-integrity.mjs';
 import { isolatedWindowsEnvironment } from './collect-windows-runtime.mjs';
-import { readFile, stat } from 'node:fs/promises';
+import { readFile, stat, lstat } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { execFile } from 'node:child_process';
@@ -18,7 +18,7 @@ export async function verifyBundle(resources) {
   const packageJson = JSON.parse(await readFile(path.join(app, 'package.json'), 'utf8'));
   if (packageJson.main !== 'desktop/main.cjs') throw Error('Wrong desktop entry');
   const required = ['desktop/main.cjs', 'desktop/preload.cjs', 'desktop/service-entry.cjs',
-    'desktop/host-controller.mjs', 'desktop/owned-backend.mjs', 'desktop/private-route.mjs', 'desktop/startup-preference.mjs',
+    'desktop/host-controller.mjs', 'desktop/owned-backend.mjs', 'desktop/private-route.mjs', 'desktop/startup-preference.mjs', 'desktop/usb-devices.mjs',
     'gui/server/service.mjs', 'gui/server/trusted-devices.mjs', 'gui/receiver/remembered.mjs', 'gui/receiver/lifecycle.mjs', 'gui/receiver/receiver.mjs', 'gui/dist-desktop/desktop/index.html', 'gui/dist/index.html'];
   for (const relative of required) {
     const file = path.join(app, relative);
@@ -42,8 +42,17 @@ export async function verifyBundle(resources) {
   const { stdout } = await execute(native, ['--help'], { timeout: 10000, killSignal: 'SIGKILL', maxBuffer: 1024 * 1024,
     cwd: host, env: process.platform === 'win32' ? isolatedWindowsEnvironment(process.env, path.join(host, 'bin')) : { ...process.env, PATH: '/usr/bin:/bin' } });
   if (!stdout.includes('--reverse-socket')) throw Error('Packaged native cannot load');
+  const adb = path.join(host, 'bin', manifest.platform === 'win32' ? 'adb.exe' : 'adb');
+  if (!manifest.usbRuntime?.sha256 || await hashFile(adb) !== manifest.usbRuntime.sha256) throw Error('USB runtime hash changed');
+  const notice = manifest.files.find(entry => entry.path === 'host/licenses/adb-NOTICE.txt');
+  const noticeInfo = await lstat(path.join(host, 'licenses/adb-NOTICE.txt'));
+  if (!noticeInfo.isFile() || noticeInfo.isSymbolicLink()) throw Error('USB notice must be a regular file');
+  if (!notice || notice.sha256 !== await hashFile(path.join(host, 'licenses/adb-NOTICE.txt'))) throw Error('USB runtime notice missing or changed');
+  const { stdout: adbVersion } = await execute(adb, ['version'], { timeout: 10000, killSignal: 'SIGKILL', maxBuffer: 1024 * 1024,
+    cwd: host, env: process.platform === 'win32' ? isolatedWindowsEnvironment(process.env, path.join(host, 'bin')) : { ...process.env, PATH: '/usr/bin:/bin' } });
+  if (!/^Android Debug Bridge version /m.test(adbVersion)) throw Error('USB runtime cannot load');
   return { ...payload, requiredSourceFiles: required.length, backendDependenciesBundled: true, backendModuleLoad: true,
-    nativeHashMatches: true, nativeHelp: true, desktopLaunched: false, captureStarted: false, hardwareQualified: false };
+    nativeHashMatches: true, nativeHelp: true, bundledAdbVersion: true, usbNotice: true, desktopLaunched: false, captureStarted: false, hardwareQualified: false };
 }
 if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) {
   verifyBundle(process.argv[2]).then(result => console.log(JSON.stringify(result)))

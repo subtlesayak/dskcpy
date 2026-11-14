@@ -4,7 +4,7 @@ The product target is a beginner completing setup without Terminal commands,
 port numbers, installing Node, choosing native artifacts, or asking another
 person to restart the host after every connection.
 
-The everyday flow is **Open dskcpy → Start sharing → Send the link or scan QR**.
+The everyday flow is **Open dskcpy → Choose USB cable or Private network → Start sharing**. USB opens the receiver on the authorized Android phone; private connections use a link or QR.
 First launch walks through the next required screen/control permission and the
 existing private connection setup. Each step explains what it allows and has
 one primary action. Closing the window keeps the app in the menu bar or system
@@ -13,7 +13,7 @@ tray; Stop remains available there. Quit confirms ending an owned session.
 ## Implemented slice
 
 - Electron shell for macOS menu-bar / Windows tray, with embedded Node and a
-  bundled native host. No user Node installation or Terminal launcher.
+  bundled native host and pinned ADB platform-tools runtime. No user Node installation or Terminal launcher.
 - Separate React setup entry, permission guidance, component readiness, private
   route detection, one Start sharing action, QR and Copy private link, cancel
   and Stop actions. Keyboard capability is reported by the native backend.
@@ -28,9 +28,25 @@ tray; Stop remains available there. Quit confirms ending an owned session.
 - Sandboxed renderer, context isolation, main-frame checked IPC and fixed
   commands. No arbitrary shell, URL, filesystem or IPC API is exposed.
 
-This first app slice guides private browser connections. The existing account-
-free USB/LAN launchers and dashboard are preserved unchanged in the project.
-They are not yet integrated into this simplified shell. The optional Startup
+The shell now guides account-free Android USB browser connections alongside
+private browser connections. Choose USB cable, connect and unlock an Android
+phone with a data cable, enable USB debugging and accept its authorization
+prompt. Check again; one authorized phone is selected automatically, while
+multiple phones require an explicit choice. Start sharing creates the existing
+owned, non-rebinding USB tunnel and opens the one-use invitation in the phone
+browser. There is no QR step. If Android cannot open a browser, Copy USB link
+provides a manual fallback on that same connected phone. The link alone does
+not work on an unrelated device. Unlock/authorization, cable/port and Windows
+phone-driver guidance is shown in the relevant state. USB setup does not call
+Tailscale checks or configure a network route. Physical app/cable and fresh
+Windows driver qualification remain open; fake fixtures are not hardware proof.
+
+Device serials stay inside the utility process. The renderer receives temporary
+selection handles and bounded model labels. Start rechecks authorization and
+presence; removed handles expire. Emulators and wireless peers are excluded.
+Connection changes are refused while the app owns an invitation or stream.
+LAN still uses the existing dashboard/launchers and is not yet integrated into
+this simplified shell. The existing account-free USB/LAN paths are preserved. The optional Startup
 setting is unavailable in unpackaged builds and outside Applications on Mac;
 OS registration and clean login behavior still require physical qualification. Tailscale is a separate
 dependency and its first enrollment/access grant is still required. A ready
@@ -47,7 +63,7 @@ npm run build --prefix gui
 cd gui
 node node_modules/vite/bin/vite.js build --config vite.desktop.config.ts
 cd ..
-node desktop/stage.mjs PATH_TO_NATIVE_HOST NATIVE_LICENSES_DIRECTORY
+node desktop/stage.mjs PATH_TO_NATIVE_HOST NATIVE_LICENSES_DIRECTORY PINNED_PLATFORM_TOOLS_DIRECTORY
 npm run package:mac --prefix desktop
 # Or, on Windows with scrcpy.exe and its complete DLL set together:
 npm run package:windows --prefix desktop
@@ -61,6 +77,13 @@ installs production dependencies from the GUI lockfile, checks native `--help`
 from the staged location and writes a hashed inventory. The Mac check requires
 arm64, deployment targets no newer than 13.0 and system-only dynamic linkage.
 Windows checks staged DLL loading without relying on an external MSYS PATH.
+ADB is required at staging: use the existing checksum-pinned `adb_macos.sh` or
+`adb_windows.sh` input. Staging verifies Mac linkage/target or the bounded
+Windows DLL closure, includes its NOTICE, and executes only `adb version` from
+the bundled directory. Bundle verification hashes the USB runtime and notice
+and repeats version-only loading; it does not enumerate devices or start ADB.
+Use `-` for the native-license directory in a development Windows build when
+notices are not yet assembled; the manifest records that release gate as open.
 Before any bundled backend import or native `--help`, verification now compares
 all shipped first-party files under `app/desktop` and `app/gui`, root application
 metadata, and the entire native `host/bin` payload with the staged hashes. It
@@ -115,6 +138,7 @@ node node_modules/typescript/bin/tsc --noEmit
 cd ..
 PLAYWRIGHT_BROWSERS_PATH=desktop/.browsers node desktop/node_modules/playwright/cli.js install chromium
 PLAYWRIGHT_BROWSERS_PATH=desktop/.browsers node desktop/test/beginner-ui.mjs
+PLAYWRIGHT_BROWSERS_PATH=desktop/.browsers node desktop/test/usb-ui.mjs
 PLAYWRIGHT_BROWSERS_PATH=desktop/.browsers node desktop/test/remembered-ui.mjs
 PLAYWRIGHT_BROWSERS_PATH=desktop/.browsers node desktop/test/remembered-cookie.mjs
 ```
@@ -148,8 +172,9 @@ claim a physical first-pairing, TLS, media, or Android browser result.
    revocation and long reconnect implemented in this source candidate. See
    [remembered browsers](../doc/remembered-browsers.md). Temporary invitation
    access is never silently promoted to remembered access.
-5. Integrate account-free USB/LAN into the same guided flow, automatic Android
-   USB opening, and actionable peer/reachability checks for private networks.
+5. Physically qualify the implemented account-free USB app flow and automatic
+   Android browser opening; integrate LAN and actionable peer/reachability
+   checks for private networks.
 6. Complete Windows keyboard/IME, relevant browser/device matrix, failure and
    recovery tests; collect observed beginner completion time/error rates.
 
@@ -176,3 +201,14 @@ user-session VPN alive before login, or authorize a permanent receiver. Do not
 promise phone-only recovery across cold boot. Qualify signed app startup,
 private-route availability, explicit remembered-device authentication and owner
 revocation/pause behavior before calling unattended reconnection complete.
+
+USB authorization reference: [Android ADB setup](https://developer.android.com/tools/adb#Enabling). No driver, account, security-setting or permission changes are performed by the source/build checks.
+
+The pinned Windows ADB files are x86 PE32 on the x64 host target. They are
+validated independently of scrcpy’s x64 runtime; both AdbWinApi and the
+runtime-loaded AdbWinUsbApi are required. Known x86 OS dependencies must exist
+in SysWOW64, while API-set names remain virtual imports. No Windows system DLL
+is copied. References: [WOW64 file redirection](https://learn.microsoft.com/en-us/windows/win32/winprog64/file-system-redirector),
+[DbgHelp](https://learn.microsoft.com/en-us/windows/win32/debug/dbghelp-functions),
+[WLAN](https://learn.microsoft.com/en-us/windows/win32/api/wlanapi/nf-wlanapi-wlanopenhandle),
+[WinUSB](https://learn.microsoft.com/en-us/windows/win32/api/winusb/nf-winusb-winusb_initialize).

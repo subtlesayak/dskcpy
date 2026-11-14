@@ -55,7 +55,8 @@ export class OwnedBackend {
   }
   status() { return this.request('status'); }
   readiness() { return this.request('readiness'); }
-  invite() { return this.request('invite'); }
+  usbDevices() { return this.request('usb-devices'); }
+  invite(args) { return this.request('invite', args); }
   stop() { return this.child ? this.request('stop') : Promise.resolve(); }
   async retire() {
     const child = this.child;

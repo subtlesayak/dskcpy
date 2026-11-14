@@ -50,6 +50,7 @@ jobs:
           node desktop/test/remembered-ui.mjs
           node desktop/test/remembered-cookie.mjs
           node desktop/test/capture-recovery-ui.mjs
+          node desktop/test/usb-ui.mjs
       - name: Artifact identity and upgrade preflight regressions
         run: node --test tools/*.test.mjs
 
@@ -97,10 +98,11 @@ jobs:
         run: |
           dskcpy_runtime_dir="$(cygpath -w /ucrt64/bin)"
           node desktop/collect-windows-runtime.mjs .tmp/ci-native/app/scrcpy.exe "$dskcpy_runtime_dir" .tmp/ci-desktop-runtime
+          bash app/deps/adb_windows.sh
           npm ci --prefix desktop --ignore-scripts
           npm run build --prefix gui
           (cd gui && node node_modules/vite/bin/vite.js build --config vite.desktop.config.ts)
-          node desktop/stage.mjs .tmp/ci-desktop-runtime/scrcpy.exe
+          node desktop/stage.mjs .tmp/ci-desktop-runtime/scrcpy.exe - app/deps/work/install/adb-windows
           npm run package:windows --prefix desktop
           node desktop/verify-bundle.mjs desktop/out/win-unpacked/resources
           gcc -O2 desktop/test/fake-host.c -o .tmp/desktop-smoke-fixture.exe
@@ -149,7 +151,7 @@ jobs:
         run: |
           npm ci --prefix desktop
           (cd gui && node node_modules/vite/bin/vite.js build --config vite.desktop.config.ts)
-          node desktop/stage.mjs release/work/host-arm64/bin/scrcpy release/work/host-arm64/licenses
+          node desktop/stage.mjs release/work/host-arm64/bin/scrcpy release/work/host-arm64/licenses app/deps/work/install/adb-macos
           npm run package:mac --prefix desktop
           node desktop/verify-bundle.mjs "desktop/out/mac-arm64/dskcpy Host.app/Contents/Resources"
           node desktop/test/run-electron-smoke.mjs

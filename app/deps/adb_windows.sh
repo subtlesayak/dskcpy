@@ -22,9 +22,17 @@ else
     unzip "../$FILENAME" \
         "$ZIP_PREFIX"/AdbWinApi.dll \
         "$ZIP_PREFIX"/AdbWinUsbApi.dll \
-        "$ZIP_PREFIX"/adb.exe
+        "$ZIP_PREFIX"/adb.exe \
+        "$ZIP_PREFIX"/NOTICE.txt
     mv "$ZIP_PREFIX"/* .
     rmdir "$ZIP_PREFIX"
+fi
+
+# Retain cached binaries while adding the notice from the verified archive.
+if [[ ! -f "$SOURCES_DIR/$PROJECT_DIR/NOTICE.txt" ]]; then
+    cd "$SOURCES_DIR"
+    get_file "$URL" "$FILENAME" "$SHA256SUM"
+    unzip -p "$FILENAME" platform-tools/NOTICE.txt > "$PROJECT_DIR/NOTICE.txt"
 fi
 
 mkdir -p "$INSTALL_DIR/adb-windows"

@@ -5,6 +5,8 @@ contextBridge.exposeInMainWorld('dskcpyHost', Object.freeze({
   trustedAction: (action, id) => ipcRenderer.invoke('host:trusted-action', action, id),
   snapshot: () => ipcRenderer.invoke('host:snapshot'),
   start: () => ipcRenderer.invoke('host:start'),
+  setConnection: connection => ipcRenderer.invoke('host:connection', connection),
+  selectUsbDevice: id => ipcRenderer.invoke('host:usb-device', id),
   stop: () => ipcRenderer.invoke('host:stop'),
   refresh: () => ipcRenderer.invoke('host:refresh'),
   screenPermission: () => ipcRenderer.invoke('host:screen-permission'),
