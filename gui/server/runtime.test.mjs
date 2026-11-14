@@ -116,19 +116,25 @@ test('window and keyboard features require the real Mac backend and explicit nat
   const runtime = resolveRuntime(dir, { SCRCPY_GUI_BINARY: binary }, 'darwin');
   const probe = (extra) => async () => ({ stdout: `--reverse-display --reverse-socket ScreenCaptureKit/VideoToolbox ${extra}` });
   let status = await inspectReadiness(runtime, probe(''));
-  assert.deepEqual(status.features, { browserClipboard: false, browserTextFocus: false, browserCaptureRecovery: false, browserKeyboard: false, macWindowCapture: false });
+  assert.deepEqual(status.features, { browserAdaptiveVideo: false, browserClipboard: false, browserTextFocus: false, browserCaptureRecovery: false, browserKeyboard: false, macWindowCapture: false });
   status = await inspectReadiness(runtime, probe('--reverse-keyboard --reverse-window --reverse-window-owner --list-reverse-windows'));
-  assert.deepEqual(status.features, { browserClipboard: false, browserTextFocus: false, browserCaptureRecovery: false, browserKeyboard: true, macWindowCapture: true });
+  assert.deepEqual(status.features, { browserAdaptiveVideo: false, browserClipboard: false, browserTextFocus: false, browserCaptureRecovery: false, browserKeyboard: true, macWindowCapture: true });
   status = await inspectReadiness(runtime, probe('--reverse-keyboard --reverse-text-focus'));
   assert.equal(status.features.browserTextFocus,true);
   status = await inspectReadiness(runtime, probe('browser-capture-recovery-v1'));
   assert.equal(status.features.browserCaptureRecovery,true);
+  status = await inspectReadiness(runtime, probe('--reverse-adaptive-video browser-adaptive-video-v1'));
+  assert.equal(status.features.browserAdaptiveVideo,true);
+  status = await inspectReadiness(runtime, probe('--reverse-adaptive-video'));
+  assert.equal(status.features.browserAdaptiveVideo,false);
   runtime.platform = 'win32'; status = await inspectReadiness(runtime, probe('--reverse-keyboard --reverse-window --reverse-window-owner --list-reverse-windows'));
-  assert.deepEqual(status.features, { browserClipboard: false, browserTextFocus: false, browserCaptureRecovery: false, browserKeyboard: false, macWindowCapture: false });
+  assert.deepEqual(status.features, { browserAdaptiveVideo: false, browserClipboard: false, browserTextFocus: false, browserCaptureRecovery: false, browserKeyboard: false, macWindowCapture: false });
   status = await inspectReadiness(runtime, probe('--reverse-keyboard browser-keyboard-v1'));
-  assert.deepEqual(status.features,{browserClipboard:false,browserTextFocus:false,browserCaptureRecovery:false,browserKeyboard:true,macWindowCapture:false});
+  assert.deepEqual(status.features,{browserAdaptiveVideo:false,browserClipboard:false,browserTextFocus:false,browserCaptureRecovery:false,browserKeyboard:true,macWindowCapture:false});
   status = await inspectReadiness(runtime, probe('browser-capture-recovery-v1'));
   assert.equal(status.features.browserCaptureRecovery,false);
+  status = await inspectReadiness(runtime, probe('--reverse-adaptive-video browser-adaptive-video-v1'));
+  assert.equal(status.features.browserAdaptiveVideo,false);
 });
 
 test('clipboard requires the separate current native marker and platform keyboard support', async t => {

@@ -44,5 +44,17 @@ export function createRtcReceiver({ element, signal, onPlaying, onError, onFailu
     pc?.close(); for (const track of stream.getTracks()) track.stop();
     element.pause(); element.srcObject = null;
   }
-  return { offer, close };
+  async function metrics() {
+    if (closed || pc?.connectionState !== 'connected') return null;
+    const mine = generation, stats = await pc.getStats();
+    if (closed || mine !== generation) return null;
+    let video, rttMs = null;
+    stats.forEach(s => {
+      if (s.type === 'inbound-rtp' && s.kind === 'video') video = s;
+      if (s.type === 'candidate-pair' && s.state === 'succeeded' && s.nominated && Number.isFinite(s.currentRoundTripTime)) rttMs = s.currentRoundTripTime * 1000;
+    });
+    return video && { epoch:mine,frames:video.framesDecoded || 0,dropped:video.framesDropped || 0,totalDecodeMs:(video.totalDecodeTime || 0)*1000,
+      packets:video.packetsReceived,lost:video.packetsLost,queue:0,rttMs };
+  }
+  return { offer, close, metrics };
 }

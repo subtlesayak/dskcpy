@@ -43,6 +43,11 @@ enum sc_reverse_system_action {
     SC_REVERSE_SYSTEM_ACTION_STOP_SESSION,
     SC_REVERSE_SYSTEM_ACTION_AUDIO_ENABLE,
     SC_REVERSE_SYSTEM_ACTION_AUDIO_DISABLE,
+    // Controller-only adaptive-video-v1; native opt-in required. Existing
+    // packet framing and Android actions 0..11 remain unchanged.
+    SC_REVERSE_SYSTEM_ACTION_QUALITY_ORIGINAL,
+    SC_REVERSE_SYSTEM_ACTION_QUALITY_BALANCED,
+    SC_REVERSE_SYSTEM_ACTION_QUALITY_REDUCED,
 };
 
 struct sc_device_msg {

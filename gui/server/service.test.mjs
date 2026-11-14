@@ -922,3 +922,28 @@ test('controller prepares an owned HTTPS receiver without granting access or lau
   await f.request('/api/browser/invite', { browserTransport: 'local' });
   assert.equal((await f.request('/api/browser/prepare', { mode: 'internet' })).code, 400);
 });
+
+test('adaptive video flag and native status require owner choice, Mac capability and the current child',async t=>{
+ for(const [choice,capable,platform,expected] of [[true,true,'darwin',true],[false,true,'darwin',false],[true,false,'darwin',false],[true,true,'win32',false]]) {
+  const reservation=net.createServer();reservation.listen(0,'127.0.0.1');await once(reservation,'listening');const browserPort=reservation.address().port;await new Promise(r=>reservation.close(r));
+  const origin='https://quality.example.test';
+  let binary=process.execPath;
+  if(platform==='win32') {
+   const directory=await mkdtemp(path.join(os.tmpdir(),'dskcpy-adaptive-win-'));t.after(()=>rm(directory,{recursive:true,force:true}));
+   binary=path.join(directory,'fixture.exe');await writeFile(binary,'fake executable, never launched',{mode:0o755});
+  }
+  const f=await fixture(t,{platform,browserPort,environment:{...process.env,SCRCPY_GUI_BINARY:binary,DSKCPY_VIEWER_ORIGIN:origin},readinessProbe:async()=>({...ready,features:{browserAdaptiveVideo:capable}})});
+  const {body}=await f.request('/api/browser/invite',{browserTransport:'wifi',browserAdaptiveVideo:choice});
+  const ws=new WebSocket(`ws://127.0.0.1:${browserPort}/stream`,{origin,headers:{Host:'quality.example.test'}});ws.on('error',()=>{});t.after(()=>ws.terminate());const messages=[];ws.on('message',(d,b)=>{if(!b)messages.push(JSON.parse(d.toString()))});
+  await once(ws,'open');ws.send(body.key);await waitFor(()=>f.children.length===1);
+  const child=f.children[0];assert.equal(child.args.includes('--reverse-adaptive-video'),expected);
+  await waitFor(()=>messages.some(m=>m.type==='authenticated'));assert.equal(messages.find(m=>m.type==='authenticated').adaptiveVideo,expected);
+  if(expected) {
+   const port=Number(child.args.find(x=>x.startsWith('--reverse-socket=')).split('=')[1]);const native=net.connect(port,'127.0.0.1');native.on('error',()=>{});native.resume();t.after(()=>native.destroy());await once(native,'connect');native.write(Buffer.from('535244310000000100000280000001e0','hex'));
+   ws.send('video-quality-subscribe');child.child.stdout.write('DSKCPY_VIDEO_QU');child.child.stdout.write('ALITY 1 30 7200000\n');
+   await waitFor(()=>messages.some(m=>m.type==='video-quality'));assert.deepEqual(messages.find(m=>m.type==='video-quality'),{type:'video-quality',available:true,automatic:true,level:1,fps:30,bitRate:7200000});
+   child.child.stdout.write('DSKCPY_VIDEO_QUALITY PRIVATE_DIAGNOSTIC\n');assert.equal(f.publicState().logs.some(x=>x.message.includes('PRIVATE_DIAGNOSTIC')||x.message.includes('DSKCPY_VIDEO_QUALITY')),false);
+  }
+  await f.request('/api/stream/stop',{});const before=messages.length;child.child.stdout.write('DSKCPY_VIDEO_QUALITY 0 60 12000000\n');await new Promise(setImmediate);assert.equal(messages.length,before);ws.terminate();
+ }
+});

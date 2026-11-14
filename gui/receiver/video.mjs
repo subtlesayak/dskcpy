@@ -2,11 +2,13 @@
 // for replay: recovery discards pending input and asks the host for a fresh IDR.
 export function createVideoReceiver({
   Decoder = globalThis.VideoDecoder, onFrame, onAck, onKeyframe, onError, onRecovery = () => {},
-  suspended = false, setTimer = setTimeout, clearTimer = clearTimeout,
+  suspended = false, setTimer = setTimeout, clearTimer = clearTimeout, now = () => performance.now(),
 }) {
   let decoder, configuration, timer, drainTimer, epoch = 0, closed = false, flushing = false;
   let waitingKey = true, software = false, recoveries = 0;
   const pending = new Set();
+  const submitted = new Map();
+  let decoded = 0, discarded = 0, totalDecodeMs = 0;
   const timeoutMs = 5000, maximumRecoveries = 3;
 
   function retire() {
@@ -17,6 +19,7 @@ export function createVideoReceiver({
     if (previous && previous.state !== 'closed') previous.close();
     for (const timestamp of pending) onAck(timestamp);
     pending.clear(); waitingKey = true;
+    discarded += submitted.size; submitted.clear();
   }
   function close() {
     if (closed) return;
@@ -94,6 +97,8 @@ export function createVideoReceiver({
         output: (frame) => {
           try {
             if (!active(mine) || !pending.delete(frame.timestamp)) return;
+            const at = submitted.get(frame.timestamp); submitted.delete(frame.timestamp);
+            if (Number.isFinite(at)) { decoded++; totalDecodeMs += Math.max(0,now()-at); }
             if (!flushing) { clearTimer(timer); timer = undefined; }
             onFrame(frame); onAck(frame.timestamp);
             scheduleDrain(mine);
@@ -125,6 +130,7 @@ export function createVideoReceiver({
     }
     const mine = epoch;
     pending.add(chunk.timestamp);
+    submitted.set(chunk.timestamp, now());
     try {
       decoder.decode(chunk);
       if (active(mine)) { waitingKey = false; scheduleDrain(mine); }
@@ -138,5 +144,5 @@ export function createVideoReceiver({
     if (closed || !suspended) return;
     suspended = false; void start();
   }
-  return { configure, decode, suspend, resume, close };
+  return { configure, decode, suspend, resume, close, metrics: () => ({epoch,frames:decoded,dropped:discarded,totalDecodeMs,queue:pending.size}) };
 }

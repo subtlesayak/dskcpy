@@ -408,6 +408,7 @@ export function createControlService({
       }
       if (attempt.signal.aborted) throw new Error('Connection cancelled.');
       const invitation = await browserReceiver.invite(mode, { viewOnly: Boolean(config.windowId),
+        adaptiveVideo: platform === 'darwin' && !config.windowId && config.browserAdaptiveVideo === true && readiness.features?.browserAdaptiveVideo === true,
         captureRecovery: platform === 'darwin' && !config.windowId && readiness.features?.browserCaptureRecovery === true,
         // Typing into a receiver focused on the host itself would feed the
         // injected events back into its own typing field. Local preview omits it.
@@ -513,7 +514,7 @@ export function createControlService({
       if (config.windowId && (platform !== 'darwin' || !state.readiness?.features?.macWindowCapture))
         throw new Error('This native host cannot capture a selected Mac window.');
       const args = buildScrcpyArgs({ ...config, browserKeyboard: browserBridge?.keyboard === true, browserTextFocus: browserBridge?.textFocus === true,
-        browserClipboard: browserBridge?.clipboard === true }, internetBridge?.port);
+        browserClipboard: browserBridge?.clipboard === true, browserAdaptiveVideo: browserBridge?.adaptiveVideo === true }, internetBridge?.port);
       state.command = formatCommand(path.basename(runtime.executable), args);
       appendLog('gui', 'Starting ' + state.command);
       const child = spawnProcess(runtime.executable, args, {
@@ -529,6 +530,12 @@ export function createControlService({
       child.stdin.on('error', () => {}); // Child may exit before reading q.
       child.stdout.on('data', (chunk) => consumeOutput('stdout', chunk, line => {
         if (streamProcess === child) startupAttempt?.observe(line);
+        if (line.startsWith('DSKCPY_VIDEO_QUALITY ')) {
+          const match = /^DSKCPY_VIDEO_QUALITY (unsupported|[012] ([1-9][0-9]{0,2}) ([1-9][0-9]{0,7}))$/.exec(line);
+          if (match && streamProcess === child && browserBridge?.adaptiveVideo)
+            browserBridge.videoQuality(match[1] === 'unsupported' ? null : { level: Number(match[1][0]), fps: Number(match[2]), bitRate: Number(match[3]) });
+          return true;
+        }
         if (line.startsWith('DSKCPY_CAPTURE_END ')) {
           const match = /^DSKCPY_CAPTURE_END (display-change|sleep|permission-lost|user-stop)$/.exec(line);
           if (match && platform === 'darwin' && streamProcess === child && browserBridge && readiness.features?.browserCaptureRecovery) captureEndReason = match[1];

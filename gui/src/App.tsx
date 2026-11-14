@@ -201,6 +201,7 @@ export default function App() {
     maxSize: 1920,
     maxFps: 60,
     bitRateMbps: 12,
+    browserAdaptiveVideo: true,
     encoder: 'auto',
     autoReconnect: false,
   });
@@ -709,6 +710,10 @@ export default function App() {
             <p className="action-note" role="status">{preset ? (preset === 'latency' ? 'Low latency' : preset[0].toUpperCase() + preset.slice(1)) : 'Custom'} settings · {config.maxSize}px cap · {config.maxFps} FPS · {config.bitRateMbps} Mbps</p>
 
             <div className="settings-grid">
+              {status.readiness?.features?.browserAdaptiveVideo && <div className="adaptive-setting">
+                <label><input type="checkbox" checked={config.browserAdaptiveVideo === true} aria-describedby="adaptive-video-help" onChange={(event) => setConfig(current => ({...current,browserAdaptiveVideo:event.target.checked}))} /> Adjust browser video automatically</label>
+                <p id="adaptive-video-help">Bitrate and frame rate stay within the limits below. Applies to the next stream.</p>
+              </div>}
               <label>Resolution cap
                 <select value={config.maxSize} onChange={(event) => setConfig((current) => ({ ...current, maxSize: Number(event.target.value) }))}>
                   <option value={1280}>1280</option>

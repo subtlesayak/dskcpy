@@ -54,6 +54,12 @@ The root cause remains unresolved. The `webkit auto` lane now records whether
 the actual RTC attempt works or recovers to WebCodecs; recovered receiving must
 not be counted as a passing WebKit RTC lane.
 
+On macOS 15 CI, the same WebKit 27.2 automatic lane received native RTC video
+and Opus without fallback at source adcfe531. This environment-specific result
+does not explain the local development-machine failure or qualify Safari/iOS.
+The [adaptive-video candidate](adaptive-browser-video.md) adds a generated-media
+lane with injected congestion and a fake native sink, preserving this distinction.
+
 Playwright's WebKit engine is not branded Safari. Engine versions and platform
 codec availability differ, so these checks do not qualify Safari, iOS, Android,
 real software keyboards, private-VPN reachability, permissions or hardware audio.

@@ -14,7 +14,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 const engine = process.argv[2] || 'webkit';
 assert.ok(['webkit', 'chromium'].includes(engine), 'Choose webkit or chromium');
 const transport = process.argv[3] || 'webrtc';
-assert.ok(['webrtc', 'webcodecs', 'fallback', 'auto', 'native-only', 'connected-fallback'].includes(transport), 'Choose webrtc, webcodecs, fallback, auto, native-only or connected-fallback');
+assert.ok(['webrtc', 'webcodecs', 'fallback', 'auto', 'native-only', 'connected-fallback', 'adaptive'].includes(transport), 'Choose webrtc, webcodecs, fallback, auto, native-only, connected-fallback or adaptive');
 const output = path.resolve(`desktop/out/browser-media-${engine}-${transport}`); await mkdir(output, { recursive: true });
 const fixture = await generateMediaFixture();
 const browser = await ({ chromium, webkit })[engine].launch(engine === 'chromium'
@@ -31,6 +31,7 @@ const sourcePendingVideo = new Set(), sourcePendingAudio = new Set();
 const counts = { videoAcks: 0, audioAcks: 0, pointer: 0, scroll: 0, keyboard: 0, text: 0, answers: 0, answerErrors: 0, rtcConnected: 0, sentFrames: 0, nativeConnections: 0 };
 const brokerModes = [];
 let injectRtcFailure;
+const adaptiveCommands = [];
 const stopSource = () => { clearInterval(videoTimer); clearInterval(audioTimer); };
 const receiver = createBrowserReceiver({ configuredPort: 0, onChange: () => brokerModes.push(receiver.status().mediaMode), rtcMediaFactory: options => {
   const m = createRtcMedia({ ...options, ...(process.env.DSKCPY_TEST_MEDIA_BIND ? {bind: process.env.DSKCPY_TEST_MEDIA_BIND} : {}), onConnected: () => { counts.rtcConnected++; options.onConnected?.(); } });
@@ -52,7 +53,12 @@ const receiver = createBrowserReceiver({ configuredPort: 0, onChange: () => brok
       if (type === 9 && pending.length < 3) return;
       assert.ok(size, 'Unexpected fake-native packet'); if (pending.length < size) return;
       const packet = Buffer.from(pending.subarray(0, size)); pending = pending.subarray(size);
-      assert.ok(validBrowserInput(packet, fixture.width, fixture.height, { keyboard: true }));
+      const quality = transport === 'adaptive' && type === 5 && [12,13,14].includes(packet[1]);
+      assert.ok(quality || validBrowserInput(packet, fixture.width, fixture.height, { keyboard: true }));
+      if (quality) {
+        adaptiveCommands.push(packet[1]);
+        bridge.videoQuality({level:packet[1]-12,fps:packet[1]===14?15:packet[1]===13?30:60,bitRate:packet[1]===14?3600000:packet[1]===13?7200000:12000000});
+      }
       if ([3, 7, 8, 9].includes(type)) { inputs.push(packet); assert.ok(inputs.length <= 1000); }
       if (type === 4) { counts.videoAcks++; const ack = Number(packet.readBigUInt64BE(1)); for (const pts of sourcePendingVideo) if (pts <= ack) sourcePendingVideo.delete(pts); }
       if (type === 6) { counts.audioAcks++; const ack = Number(packet.readBigUInt64BE(1)); for (const pts of sourcePendingAudio) if (pts <= ack) sourcePendingAudio.delete(pts); }
@@ -73,6 +79,7 @@ const receiver = createBrowserReceiver({ configuredPort: 0, onChange: () => brok
   });
   const header = Buffer.from('53524431000000010000028000000168', 'hex');
   native.write(header); native.write(mediaPacket(fixture.configuration, 0, 1));
+  if (transport === 'adaptive') bridge.videoQuality({level:0,fps:60,bitRate:12000000});
   native.write(mediaPacket(fixture.sound.configuration, 0, 4));
   videoTimer = setInterval(() => {
     const pts = videoTick++ * 100000;
@@ -90,7 +97,7 @@ const currentMode = () => receiver.status().mediaMode;
 const report = { engine, transport, forcedRtcFailure: ['fallback', 'connected-fallback'].includes(transport), faultKind: transport === 'connected-fallback' ? 'sender-failure-after-native-rtc' : transport === 'fallback' ? 'answer-rejection' : null, browserVersion: browser.version(), syntheticMedia: true, fakeNativeInput: true, physicalDevice: false,
   actualScreenCapture: false, audiblePlaybackQualified: false, encoder: fixture.encoder };
 try {
-  const invitation = await receiver.invite('local', { keyboard: true });
+  const invitation = await receiver.invite('local', { keyboard: true, adaptiveVideo: transport === 'adaptive' });
   context = await browser.newContext({ viewport: { width: 844, height: 600 }, hasTouch: true });
   page = await context.newPage(); page.setDefaultTimeout(10000); page.on('pageerror', e => errors.push(e.message));
   await page.addInitScript(({ transport }) => {
@@ -100,6 +107,7 @@ try {
     const NativeSocket = window.WebSocket;
     window.WebSocket = new Proxy(NativeSocket, { construct(Target, args) {
       const socket = new Target(...args), record = {route: new URL(args[0]).pathname, fallbackRequests: 0, codeMessages: 0};
+      window.__sendOwnedFeedback = value => socket.send(JSON.stringify(value));
       window.__testSockets.push(record);
       const send = socket.send.bind(socket); socket.send = value => { if (value === 'media-fallback') record.fallbackRequests++; if (typeof value === 'string' && /^[A-Za-z0-9_-]{32}$/.test(value)) record.codeMessages++; return send(value); };
       socket.addEventListener('message', e => { if (typeof e.data !== 'string') return; try { const value = JSON.parse(e.data); if (value.type === 'media-fallback') record.recoveryAcknowledged = value.mediaMode === 'webcodecs'; if (value.type === 'authenticated') Object.assign(record, {authenticated: true, mediaMode: value.mediaMode, mediaFallback: value.mediaFallback, negotiatedProtocol: socket.protocol}); } catch {} });
@@ -107,7 +115,7 @@ try {
       return socket;
     } });
     if (!['webrtc', 'native-only'].includes(transport)) {
-      if (transport === 'webcodecs') delete window.RTCPeerConnection;
+      if (['webcodecs','adaptive'].includes(transport)) delete window.RTCPeerConnection;
       for (const [name, kind] of [['VideoDecoder', 'video'], ['AudioDecoder', 'audio']]) {
         const Real = window[name];
         if (Real) window[name] = new Proxy(Real, { construct(Target, [options]) { return new Target({ ...options, output(frame) { window.__decoded[kind]++; options.output(frame); } }); } });
@@ -119,7 +127,7 @@ try {
         ac.createBufferSource = () => { const source = create(), connect = source.connect.bind(source); source.connect = (destination, ...rest) => connect(destination === ac.destination ? silent : destination, ...rest); return source; };
         return ac;
       } });
-      if (transport === 'webcodecs') return;
+      if (['webcodecs','adaptive'].includes(transport)) return;
     }
     const Real = window.RTCPeerConnection; window.__testPeers = [];
     window.RTCPeerConnection = new Proxy(Real, { construct(Target, args) { const pc = new Target(...args); if (transport === 'fallback') pc.createAnswer = async () => { throw new DOMException('Owned synthetic RTC failure', 'OperationError'); }; pc.__iceCounts = { candidates: 0, errors: [], protocols: [], states: [] }; pc.addEventListener('iceconnectionstatechange', () => pc.__iceCounts.states.push(pc.iceConnectionState)); pc.addEventListener('icecandidate', e => { if (e.candidate) { pc.__iceCounts.candidates++; pc.__iceCounts.protocols.push(e.candidate.protocol); pc.__iceCounts.candidateClass = {type: e.candidate.type, component: e.candidate.component, addressKind: e.candidate.address?.endsWith('.local') ? 'mdns' : e.candidate.address === '0.0.0.0' ? 'unspecified-v4' : e.candidate.address?.startsWith('127.') ? 'loopback-v4' : e.candidate.address?.includes(':') ? 'ipv6' : 'other-v4', portValid: e.candidate.port > 0 && e.candidate.port < 65536, standardPort: e.candidate.port === 9}; } }); pc.addEventListener('icecandidateerror', e => pc.__iceCounts.errors.push(e.errorCode)); window.__testPeers.push(pc); return pc; } });
@@ -148,7 +156,7 @@ try {
   report.finalMediaMode = currentMode();
   report.initialSocketStates = await page.evaluate(() => window.__testSockets);
   report.initialRtcStates = await page.evaluate(() => window.__testPeers?.map(p => ({connection: p.connectionState, ice: p.iceConnectionState})) || []);
-  report.fallbackObserved = transport !== 'webcodecs' && currentMode() === 'webcodecs';
+  report.fallbackObserved = !['webcodecs','adaptive'].includes(transport) && currentMode() === 'webcodecs';
   if (transport === 'fallback') assert.equal(report.fallbackObserved, true);
   if (['webrtc', 'native-only'].includes(transport)) assert.equal(currentMode(), 'webrtc');
   if (transport === 'native-only') { assert.equal(report.initialSocketStates[0].mediaFallback, false); assert.equal(report.initialSocketStates[0].negotiatedProtocol, ''); }
@@ -183,6 +191,36 @@ try {
   if (currentMode() === 'webrtc') assert.equal(await page.locator('#rtc-display').evaluate(v => v.muted), true);
   await page.getByRole('button', { name: 'Audio off', exact: true }).click(); await until(() => audioSent > beforeMute + 3, 'audio resume');
   report.opusTransportAndMuteResume = true;
+  if (transport === 'adaptive') {
+    await page.getByRole('button',{name:'Keyboard',exact:true}).click();
+    await page.keyboard.down('Control'); await until(()=>heldKeys.size>0,'held input during quality adjustment');
+    const sentBefore = audioSent;
+    const sample = sequence=>({type:'video-feedback',sequence,durationMs:2000,frames:60,dropped:0,decodeMs:5,queue:0,lossPct:8,rttMs:50});
+    await page.evaluate(s=>window.__sendOwnedFeedback(s),sample(100));
+    await new Promise(r=>setTimeout(r,850));await page.evaluate(s=>window.__sendOwnedFeedback(s),sample(101));
+    await until(()=>adaptiveCommands.includes(13),'fixed quality reduction');
+    assert.equal(heldKeys.size,1);assert.equal(audioEnabled,true);assert.ok(audioSent>sentBefore);assert.equal(counts.nativeConnections,1);
+    await page.keyboard.up('Control');await page.locator('#close-keyboard').click();
+    await page.getByRole('button',{name:'Options',exact:true}).click();
+    const automatic = page.getByRole('checkbox',{name:'Adjust video automatically',exact:true});await automatic.focus();
+    assert.equal(await automatic.evaluate(e=>document.activeElement===e),true);await page.keyboard.press('Space');
+    await until(()=>adaptiveCommands.includes(12),'manual owner limits restored');
+    await until(async()=>/Manual video.*60 FPS cap.*12.0 Mbps target/.test(await page.locator('#video-quality-status').textContent()),'actual native status');
+    await page.screenshot({path:path.join(output,'automatic-video.png')});
+    for (const [width,height,rtl] of [[320,640,false],[844,390,true]]) {
+      await page.setViewportSize({width,height});await page.evaluate(rtl=>{document.documentElement.dir=rtl?'rtl':'ltr'},rtl);
+      await automatic.focus();const box=await automatic.boundingBox();assert.ok(box.x>=0&&box.x+box.width<=width);
+      await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+      await new Promise(r=>setTimeout(r,150));
+      assert.equal(await page.locator('#receiver-viewport').count(),1);
+      assert.ok(box.height>=20&&box.width>=20);assert.equal(await automatic.evaluate(e=>getComputedStyle(e).outlineStyle),'solid');
+      const label=await page.locator('#video-quality-setting label').boundingBox();assert.ok(label.height>=44);
+      await page.screenshot({path:path.join(output,`automatic-video-${width}-${rtl?'rtl':'ltr'}.png`)});
+    }
+    await page.setViewportSize({width:844,height:600});await page.evaluate(()=>document.documentElement.dir='ltr');
+    await page.locator('#close-options').click();
+    report.adaptiveVideo={injectedAdvisory:true,actualNativeBitrateQualified:false,fixedCommands:adaptiveCommands,retainedAudioAndHeldInput:true,manualRestore:true,keyboardToggle:true};
+  }
   const canvas = page.locator('#display'), bounds = await canvas.boundingBox();
   const beforeTap = counts.pointer, tapStart = inputs.length;
   await page.touchscreen.tap(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);

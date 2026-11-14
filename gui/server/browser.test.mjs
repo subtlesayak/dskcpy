@@ -774,3 +774,23 @@ test('viewer Disconnect revokes the retained capture during media handoff', asyn
   assert.equal(await resumable(f, cookie), false); assert.equal(f.calls(), 1);
   await assert.rejects(f.open(undefined, cookie), /403/);
 });
+
+test('adaptive feedback requires a current subscription and never forwards arbitrary video commands', async t=>{
+ for(const policy of [{},{adaptiveVideo:true,viewOnly:true}]) {
+  const f=await fixture(t,{inputPolicy:policy});const ws=await login(f);
+  assert.equal(authentication(ws).adaptiveVideo,false);
+  const closed=once(ws,'close');ws.send('video-quality-subscribe');assert.equal((await closed)[0],1008);
+ }
+ const f=await fixture(t,{inputPolicy:{adaptiveVideo:true}});const ws=await login(f);const input=[];f.native().on('data',c=>input.push(c));
+ assert.equal(authentication(ws).adaptiveVideo,true);f.bridge().videoQuality({level:0,fps:60,bitRate:12000000});
+ assert.equal(ws.received.some(m=>!m.binary&&JSON.parse(m.data).type==='video-quality'),false);
+ ws.send('video-quality-subscribe');await until(()=>ws.received.some(m=>!m.binary&&JSON.parse(m.data).type==='video-quality'));
+ const measurement=i=>({type:'video-feedback',sequence:i,durationMs:2000,frames:100,dropped:0,decodeMs:5,queue:0,lossPct:8,rttMs:50});
+ ws.send(JSON.stringify(measurement(1)));await new Promise(r=>setTimeout(r,800));ws.send(JSON.stringify(measurement(2)));
+ await until(()=>Buffer.concat(input).includes(Buffer.from([5,13])));
+ assert.equal(f.calls(),1);assert.equal(Buffer.concat(input).includes(Buffer.from([5,7])),false);assert.equal(Buffer.concat(input).includes(Buffer.from([5,11])),false);
+ ws.send(JSON.stringify({type:'video-automatic',enabled:false}));await until(()=>Buffer.concat(input).includes(Buffer.from([5,12])));
+ const count=Buffer.concat(input).length;f.bridge().videoQuality(null);ws.send(JSON.stringify(measurement(3)));
+ ws.ping();await once(ws,'pong');assert.equal(ws.readyState,WebSocket.OPEN);assert.equal(Buffer.concat(input).length,count);
+ const closed=once(ws,'close');ws.send(Buffer.from([5,14]));assert.equal((await closed)[0],1008);
+});

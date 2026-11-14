@@ -4,12 +4,13 @@ import { SrdParser, validBrowserInput, MAX_PACKET } from './browser-protocol.mjs
 import { ack, avcParameters, touchPacket, MEDIA_FALLBACK_PROTOCOL } from '../receiver/protocol.mjs';
 import { createRtcMedia } from './browser-rtc.mjs';
 import { createClipboardBroker } from './browser-clipboard.mjs';
+import { createAdaptiveVideo, validVideoFeedback } from './adaptive-video.mjs';
 
 // Keep the native transport alive across a bounded browser suspension. Never
 // retain video frames: only the wire header and codec parameter sets are replayed.
 export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lifetimeMs,
   mediaMode = 'webcodecs', rtcBind, keyboard = false, viewOnly = false, textFocus = false, clipboard = false,
-  captureRecovery = false, nativeEndGraceMs = 15000, rtcMediaFactory = createRtcMedia, onChange = () => {} }) {
+  captureRecovery = false, adaptiveVideo = false, nativeEndGraceMs = 15000, rtcMediaFactory = createRtcMedia, onChange = () => {} }) {
   let native, peer, closed = false, ready = false, nativeTimer, awayTimer;
   let listener, nativeEndTimer, recovering = false, restarting = false;
   let restartTimes = [];
@@ -43,6 +44,22 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
   const rtcVideo = new Set(), rtcAudio = new Set();
   let rtcCleanup = Promise.resolve();
   const nativeAcks = new Map();
+  const adaptiveSupported = adaptiveVideo && !viewOnly;
+  const adaptive = createAdaptiveVideo();
+  let qualitySubscribed = false, qualityEnabled = true, qualityAvailable = false, qualityFailed = false, lastQuality = null;
+  function publishQuality() {
+    if (!ready || closed || suspended || !qualitySubscribed || peer?.readyState !== WebSocket.OPEN || peer.bufferedAmount > 65536) return;
+    if (!lastQuality && !qualityFailed) return; // Native startup has not reported settings yet.
+    peer.send(JSON.stringify({type:'video-quality',available:qualityAvailable,automatic:qualityEnabled,...lastQuality}));
+  }
+  function videoQuality(value) {
+    if (!adaptiveSupported || closed) return;
+    if (value === null) { qualityFailed = true; qualityAvailable = false; publishQuality(); return; }
+    if (qualityFailed) return;
+    if (!value || ![0,1,2].includes(value.level) || !Number.isInteger(value.fps) || value.fps < 1 || value.fps > 240
+        || !Number.isInteger(value.bitRate) || value.bitRate < 500000 || value.bitRate > 64000000) return;
+    qualityAvailable = true; lastQuality = value; publishQuality();
+  }
   const command = (value) => native?.write(Buffer.from([5, value]));
   function acknowledgeNative(type, pts) {
     if (closed || !native || BigInt(pts) <= (nativeAcks.get(type) ?? -1n)) return;
@@ -99,6 +116,7 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
     if (keyboard) native?.write(Buffer.from([8, 2, 0, 0, 0]));
   }
   function suspend() {
+    adaptive.reset();
     command(7); releaseTouches();
     if (!suspended) { suspended = true; awayTimer = setTimeout(close, resumeMs); }
   }
@@ -130,6 +148,7 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
   function announce() {
     if (!ready || !peer) return;
     peer.send(JSON.stringify({ type: 'authenticated', mediaMode, keyboard, viewOnly, textFocus: focusSupported, keyboardStatus: keyboard && !viewOnly, clipboard: clipboardSupported,
+      adaptiveVideo: adaptiveSupported,
       mediaFallback: mediaMode === 'webrtc' && !fallbackUsed && peer.protocol === MEDIA_FALLBACK_PROTOCOL }));
     if (wireHeader) forward(wireHeader);
     if (videoConfig && mediaMode === 'webcodecs') forward(videoConfig);
@@ -147,6 +166,7 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
     // Optional messages require this viewer's explicit acknowledgement. A
     // restored/older cached page must not inherit another socket's subscription.
     focusSubscribed = false; focusAt = -Infinity;
+    qualitySubscribed = false; adaptive.reset();
     ws.on('pong', () => { if (peer === ws) alive = true; });
     ws.on('close', (code) => {
       if (peer !== ws || closed) return;
@@ -158,6 +178,29 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
       if (Date.now() - rateAt >= 1000) { rateAt = Date.now(); events = 0; }
       if (++events > 1000 || native?.writableLength > 65536) { close(); return; }
       if (!binary) {
+        if (message.toString() === 'video-quality-subscribe') {
+          if (!adaptiveSupported || !ready) { close(); return; }
+          qualitySubscribed = true; publishQuality(); return;
+        }
+        if (message.length <= 512 && message[0] === 123) {
+          let feedback; try { feedback = JSON.parse(message.toString()); } catch { close(); return; }
+          if (['video-feedback','video-automatic'].includes(feedback.type)) {
+            if (!qualitySubscribed || !adaptiveSupported) { close(); return; }
+            if (feedback.type === 'video-automatic') {
+              if (Object.keys(feedback).length !== 2 || typeof feedback.enabled !== 'boolean') { close(); return; }
+              if (!qualityAvailable || suspended || capturePaused || recovering || !native) return;
+              qualityEnabled = feedback.enabled; adaptive.reset();
+              if (!qualityEnabled) { adaptive.manual(); command(12); }
+              publishQuality(); return;
+            }
+            if (!validVideoFeedback(feedback)) { close(); return; }
+            if (qualityAvailable && qualityEnabled && !suspended && !capturePaused && !recovering && native) {
+              const level = adaptive.sample(feedback, ws.bufferedAmount);
+              if (level !== null) command(12 + level);
+            }
+            return;
+          }
+        }
         if (message.toString() === 'media-fallback') { if (!fallbackMedia()) close(); return; }
         if (message.toString() === 'clipboard-enable') { if (!clipboardBroker.enable(ws)) close(); return; }
         if (message.toString() === 'clipboard-disable') { clipboardBroker.disable(); return; }
@@ -174,6 +217,7 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
         if (message.toString() === 'resume') {
           suspended = false; clearTimeout(awayTimer);
           if (keyboardStatusSubscribed && lastKeyboardStatus) keyboardStatus(lastKeyboardStatus);
+          publishQuality();
           return;
         }
         if (mediaMode === 'webrtc' && rtc && message.length <= 32768) {
@@ -204,7 +248,7 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
       }
       if (capturePaused && ![4,6,5].includes(message[0])) return;
       if (message[0] === 10) { if (!clipboardBroker.request(ws, message)) close(); return; }
-      if (message[0] === 5 && [7,8].includes(message[1])) capturePaused = message[1] === 7;
+      if (message[0] === 5 && [7,8].includes(message[1])) { capturePaused = message[1] === 7; if (capturePaused) adaptive.reset(); }
       if (capturePaused) clipboardBroker.disable();
       if (message[0] === 3) {
         const id = message.readBigUInt64BE(2).toString();
@@ -220,6 +264,7 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
     if (closed || !canRecover) return false;
     if (recovering && !native) return true;
     recovering = true; ready = false;
+    adaptive.manual(); qualityAvailable = false; qualityFailed = false; lastQuality = null;
     clearTimeout(nativeTimer); clearTimeout(awayTimer);
     listener?.close();
     releaseTouches(); stopRtc(); video.clear(); audio.clear(); nativeAcks.clear();
@@ -343,6 +388,7 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
       if (closed) { listener.close(); return; }
       ready = true; nativeTimer = setTimeout(close, 10000); announce();
       await onConnect({ port: listener.address().port, keyboard, viewOnly, textFocus: focusSupported, focusHint, keyboardStatus, clipboard: clipboardSupported,
+        adaptiveVideo: adaptiveSupported, videoQuality,
         captureRecovery: canRecover, restartNative, close, get closed() { return closed; } });
     } catch { close(); }
   }
