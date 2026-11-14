@@ -40,6 +40,7 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
   tls, rtcBind = '127.0.0.1', onConnect, onChange = () => {}, invitationMs = 300000, authMs = 5000,
   resumeMs = BROWSER_RESUME_MS, lifetimeMs = 12 * 60 * 60 * 1000, nativeEndGraceMs = 15000, rtcMediaFactory, trustedDevices, onTrustedConnect } = {}) {
   const remoteOrigin = receiverOrigin(origin);
+  const healthInstance = randomBytes(16).toString('hex'); // launch marker, never an access credential
   let port, closed = false;
   let listening;
   let secureServer;
@@ -184,6 +185,10 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
     const asset = assets.get(req.url)
       || (/^\/join\/[a-f0-9]{32}$/.test(req.url) ? assets.get('/join') : undefined);
     if (!allowedHost(req.headers.host)) { res.writeHead(403).end(); return; }
+    if (req.url === '/health' && req.method === 'GET') {
+      res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ service: 'dskcpy-browser-receiver', instance: healthInstance }));
+      return;
+    }
     if (['/stream/remember', '/stream/remember/status', '/stream/trusted/connect'].includes(req.url)) { await trustedRequest(req, res); return; }
     if (req.url === '/stream/session' && req.method === 'GET') {
       const resumable = mayResume(req);
@@ -324,6 +329,12 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
     if (secureServer) await new Promise((resolve) => { secureServer.close(resolve); secureServer.closeAllConnections(); });
   }
   return { invite, status, cancel, shutdown, trustedStatus, trustAction,
+    async prepare() {
+      if (invitation || session) throw Error('An invitation or receiver is already open.');
+      await ensureListening('internet');
+      if (invitation || session) throw Error('An invitation or receiver is already open.');
+      return { url: `${remoteOrigin}/`, instance: healthInstance };
+    },
     async standby() { await trustedDevices?.ready; if (remoteOrigin && trustedDevices?.snapshot().devices.length) { await ensureListening('internet'); mode = 'internet'; } },
     get port() { return port; } };
 }

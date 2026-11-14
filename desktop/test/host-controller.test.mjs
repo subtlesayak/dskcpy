@@ -8,11 +8,11 @@ function fixture() {
   let status = blank(), invites = 0, stops = 0, closed = 0, ready = true;
   const setup = { permissions: { screen: true, control: true }, runtimeReady: true,
     route: { connected: true, ready: true, origin: 'https://host.test.ts.net:8443' } };
-  const backend = { status: async () => status,
+  const backend = { prepareReceiver: async () => ({ url: setup.route.origin + '/', instance: 'c'.repeat(32) }), status: async () => status,
     invite: async () => { invites++; status = { running: false, browser: { waiting: true, connected: false } };
       return { mode: 'internet', url: setup.route.origin + '/', key: 'a'.repeat(32), expiresAt: 301000, status }; },
     stop: async () => { stops++; status = blank(); }, shutdown: async () => { closed++; } };
-  const host = new HostController({ backend, checkSetup: async () => ({ ...setup, runtimeReady: ready }), now: () => 1000 });
+  const host = new HostController({ backend, probeReceiver: async () => ({ ready: true }), checkSetup: async () => ({ ...setup, runtimeReady: ready }), now: () => 1000 });
   return { host, backend, setup, setStatus: next => { status = next; }, counts: () => ({ invites, stops, closed }), setReady: next => { ready = next; } };
 }
 const tick = () => new Promise(resolve => setImmediate(resolve));
@@ -152,4 +152,56 @@ test('clipboard is off by default, explicit per invitation and cleared by Stop o
 });
 test('an old native host cannot be opted into clipboard by the desktop IPC', async () => {
   const f=fixture();await f.host.refresh({setup:true});f.host.setClipboardAllowed(true);assert.equal(f.host.snapshot().clipboardAllowed,false);
+});
+
+test('private link is checked against the owned backend before any invitation is created', async () => {
+  const f = fixture(); let release; f.host.probeReceiver = (descriptor, origin, options) => {
+    assert.equal(descriptor.instance, 'c'.repeat(32)); assert.equal(origin, f.setup.route.origin); assert.ok(options.signal);
+    return new Promise(resolve => { release = resolve; });
+  };
+  const start = f.host.start(); await tick();
+  assert.equal(f.host.snapshot().phase, 'checking-link'); assert.equal(f.host.snapshot().canStop, true);
+  assert.equal(f.host.snapshot().invitation, null); assert.equal(f.counts().invites, 0);
+  assert.ok(!JSON.stringify(f.host.snapshot()).includes('c'.repeat(32)));
+  release({ ready: true }); await start; assert.equal(f.counts().invites, 1); assert.equal(f.host.snapshot().phase, 'inviting');
+});
+test('failed private probes create no invitation, expose actionable fixed guidance and never stop an existing service', async () => {
+  for (const reason of ['certificate', 'name', 'response', 'timeout', 'PRIVATE RAW ERROR']) {
+    const f = fixture(); f.host.probeReceiver = async () => ({ ready: false, reason }); await f.host.start();
+    assert.equal(f.counts().invites, 0); assert.equal(f.counts().stops, 0); assert.equal(f.host.snapshot().phase, 'error'); assert.equal(f.host.snapshot().route.verified, false);
+    assert.match(f.host.snapshot().error, /try again/); assert.ok(!f.host.snapshot().error.includes('PRIVATE')); assert.equal(f.host.snapshot().canStop, false);
+  }
+});
+test('Cancel or Quit during a pending private-link check prevents a late invitation', async () => {
+  for (const action of ['stop', 'close']) {
+    const f = fixture(); let finish, signal; f.host.probeReceiver = (_descriptor, _origin, options) => {
+      signal = options.signal; return new Promise(resolve => { finish = resolve; });
+    };
+    const start = f.host.start(); await tick(); await f.host[action](); assert.equal(signal.aborted, true);
+    finish({ ready: true }); await start; assert.equal(f.counts().invites, 0); assert.equal(f.host.invitation, null);
+  }
+});
+test('remembered receiver connecting during a probe is preserved even when the local check fails', async () => {
+  const f = fixture(); f.host.probeReceiver = async () => {
+    f.setStatus({ running: true, browser: { waiting: false, connected: true } }); return { ready: false, reason: 'timeout' };
+  };
+  await f.host.start(); assert.equal(f.host.snapshot().phase, 'sharing'); assert.equal(f.counts().stops, 0); assert.equal(f.counts().invites, 0); assert.equal(f.host.snapshot().error, null);
+});
+test('USB never prepares or probes a private receiver address', async () => {
+  const f = usbFixture(); f.backend.prepareReceiver = () => { throw Error('unexpected network preparation'); };
+  f.host.probeReceiver = () => { throw Error('unexpected network access'); };
+  await f.host.setConnection('usb'); await f.host.start(); assert.equal(f.host.snapshot().phase, 'inviting');
+});
+
+test('a remembered receiver winning the final invitation race is not stopped by Start failure', async () => {
+  const f = fixture(); f.backend.invite = async () => {
+    f.setStatus({ running: true, browser: { waiting: false, connected: true } }); throw Error('already connected');
+  };
+  await f.host.start(); assert.equal(f.host.snapshot().phase, 'sharing'); assert.equal(f.counts().stops, 0); assert.equal(f.host.snapshot().error, null);
+});
+test('a pending remembered connection found during preparation is preserved without inventing a QR', async () => {
+  const f = fixture(); f.backend.prepareReceiver = async () => {
+    f.setStatus({ running: false, browser: { waiting: true, connected: false } }); throw Error('already waiting');
+  };
+  await f.host.start(); assert.equal(f.host.snapshot().phase, 'inviting'); assert.equal(f.host.snapshot().invitation, null); assert.equal(f.counts().stops, 0); assert.equal(f.counts().invites, 0);
 });

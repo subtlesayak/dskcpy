@@ -44,6 +44,7 @@ parent.on('message', async ({ data }) => {
         if (!data.args || !['approve','reject','revoke','pause','resume'].includes(data.args.action)) throw new Error('Invalid device action');
         value = await api('/api/browser/trusted', data.args); break;
       }
+      case 'prepare-receiver': value = await api('/api/browser/prepare', { mode: 'internet' }); break;
       case 'invite': {
         const mode = data.args?.mode || 'internet';
         if (!['internet', 'usb'].includes(mode)) throw Error('Invalid connection mode');

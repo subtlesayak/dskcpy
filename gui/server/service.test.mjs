@@ -911,3 +911,14 @@ test('owner clipboard consent reaches native only for a capable full desktop pri
     await f.request('/api/stream/stop',{});ws.terminate();
   }
 });
+
+test('controller prepares an owned HTTPS receiver without granting access or launching native capture', async t => {
+  const f = await fixture(t, { environment: { ...process.env, SCRCPY_GUI_BINARY: process.execPath, DSKCPY_VIEWER_ORIGIN: 'https://owned.test.ts.net:8443' } });
+  const result = await f.request('/api/browser/prepare', { mode: 'internet' });
+  assert.equal(result.code, 200); assert.equal(result.body.url, 'https://owned.test.ts.net:8443/'); assert.match(result.body.instance, /^[a-f0-9]{32}$/);
+  assert.equal(f.children.length, 0); assert.equal(f.publicState().running, false); assert.equal(f.publicState().browser.waiting, false);
+  assert.ok(!JSON.stringify(f.publicState()).includes(result.body.instance));
+  const invalid = await f.request('/api/browser/prepare', { mode: 'usb' }); assert.equal(invalid.code, 400);
+  await f.request('/api/browser/invite', { browserTransport: 'local' });
+  assert.equal((await f.request('/api/browser/prepare', { mode: 'internet' })).code, 400);
+});

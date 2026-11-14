@@ -34,7 +34,7 @@ export async function stageHost({ native, output = path.join(repository, 'deskto
   const appDir = path.join(output, 'app'), hostDir = path.join(output, 'host');
   await mkdir(path.join(appDir, 'desktop'), { recursive: true });
   await mkdir(path.join(appDir, 'gui')); await mkdir(path.join(hostDir, 'bin'), { recursive: true });
-  for (const file of ['main.cjs', 'preload.cjs', 'service-entry.cjs', 'host-controller.mjs', 'owned-backend.mjs', 'private-route.mjs', 'startup-preference.mjs', 'usb-devices.mjs'])
+  for (const file of ['main.cjs', 'preload.cjs', 'service-entry.cjs', 'host-controller.mjs', 'owned-backend.mjs', 'receiver-probe.mjs', 'private-route.mjs', 'startup-preference.mjs', 'usb-devices.mjs'])
     await cp(path.join(repository, 'desktop', file), path.join(appDir, 'desktop', file));
   for (const file of ['server', 'receiver', 'dist', 'dist-desktop', 'package.json', 'package-lock.json'])
     await cp(path.join(repository, 'gui', file), path.join(appDir, 'gui', file), { recursive: true });

@@ -621,3 +621,21 @@ test('native keyboard denial cancels clipboard and suppresses its queued private
   const bytes=Buffer.from('not delivered'),p=Buffer.alloc(8+bytes.length);p.writeUInt32BE(1,2);p.writeUInt16BE(bytes.length,6);bytes.copy(p,8);f.native().write(packet(0,32,p));
   await new Promise(r=>setTimeout(r,15));assert.ok(!ws.received.some(m=>!m.binary&&m.data.includes('clipboard-result')));assert.equal(ws.readyState,WebSocket.OPEN);
 });
+
+test('owned receiver health preparation grants no session and exposes only a fresh launch marker', async t => {
+  let starts = 0;
+  const receiver = createBrowserReceiver({ configuredPort: 0, origin: 'https://owned.test.ts.net:8443', onConnect: async () => { starts++; } });
+  t.after(() => receiver.shutdown());
+  const descriptor = await receiver.prepare();
+  assert.equal(descriptor.url, 'https://owned.test.ts.net:8443/'); assert.match(descriptor.instance, /^[a-f0-9]{32}$/);
+  const local = `http://127.0.0.1:${receiver.port}`;
+  const response = await fetch(local + '/health'); assert.equal(response.status, 200); assert.equal(response.headers.get('cache-control'), 'no-store');
+  assert.deepEqual(await response.json(), { service: 'dskcpy-browser-receiver', instance: descriptor.instance });
+  assert.equal(receiver.status().waiting, false); assert.equal(receiver.status().connected, false); assert.equal(starts, 0);
+  assert.ok(!JSON.stringify(receiver.status()).includes(descriptor.instance));
+  assert.equal((await fetch(local + '/health', { method: 'POST' })).status, 404);
+  assert.equal((await fetch(local + '/health?key=unrelated')).status, 404);
+  assert.equal(await new Promise((resolve, reject) => { const req = http.get(local + '/health', { headers: { Host: 'unrelated.invalid' } }, res => { res.resume(); resolve(res.statusCode); }); req.on('error', reject); }), 403);
+  assert.deepEqual(await (await fetch(local + '/stream/session')).json(), { resumable: false });
+  await receiver.invite('local'); await assert.rejects(receiver.prepare(), /already open/); assert.equal(starts, 0);
+});
