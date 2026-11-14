@@ -14,6 +14,20 @@ export function rtpTimestamp(pts, frequency) {
   return Number((BigInt(pts) * BigInt(frequency) / 1000000n) & 0xffffffffn);
 }
 
+// werift 0.27 emits the ICE-lite flag in each media section. RFC 8839 §5.3
+// defines it only at session scope. Move only this known host-generated flag;
+// preserve candidates, credentials, fingerprints, codecs and their ordering.
+export function sessionScopedIceLite(sdp) {
+  if (typeof sdp !== 'string' || sdp.length > 32768 || !sdp.startsWith('v=0\r\n'))
+    throw new Error('Invalid private media offer.');
+  const lines = sdp.split('\r\n');
+  if (!lines.includes('a=ice-lite') || !lines.some(line => line.startsWith('m=')))
+    throw new Error('Private media offer is missing its ICE-lite session.');
+  const scoped = lines.filter(line => line !== 'a=ice-lite');
+  scoped.splice(scoped.findIndex(line => line.startsWith('m=')), 0, 'a=ice-lite');
+  return scoped.join('\r\n');
+}
+
 // Existing authenticated WebSocket carries signaling and control. Media uses
 // DTLS-SRTP on ONE explicitly selected private interface. No public STUN/TURN,
 // interface discovery, recording, or unbounded frame queue is installed.
@@ -57,7 +71,7 @@ export function createRtcMedia({ bind = '127.0.0.1', configuration,
   async function offer() {
     await pc.setLocalDescription(await pc.createOffer());
     if (closed) return null;
-    return { type: 'offer', sdp: pc.localDescription.sdp };
+    return { type: 'offer', sdp: sessionScopedIceLite(pc.localDescription.sdp) };
   }
   async function answer(description) {
     if (closed || answering || pc.signalingState !== 'have-local-offer'
