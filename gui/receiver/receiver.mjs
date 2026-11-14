@@ -698,8 +698,12 @@ function updatePause() {
   action(paused || away() ? 7 : 8);
   if (away()) resumeDeadline ||= Date.now() + BROWSER_RESUME_MS;
   else resumeDeadline = 0;
+  // A resumed socket can receive its cached header while the host session is
+  // still suspended. Its initial mute command is then deliberately ignored.
+  // Reapply audio intent after resume for both transports; a WebCodecs page
+  // may enable capture only with prior consent and a running audio context.
+  if (!away()) action(muted || paused || (mediaMode !== 'webrtc' && audioContext?.state !== 'running') ? 11 : 10);
   if (mediaMode === 'webrtc') {
-    if (!away()) action(muted || paused ? 11 : 10);
     const mine = generation, attempt = ++playbackAttempt;
     if (away() || paused) { rtcDisplay.muted = true; rtcDisplay.pause?.(); }
     else { rtcDisplay.muted = muted; void rtcDisplay.play?.().catch(() => {

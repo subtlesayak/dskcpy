@@ -63,6 +63,38 @@ jobs:
       - name: Artifact identity and upgrade preflight regressions
         run: node --test tools/*.test.mjs
 
+  browser-media-macos:
+    runs-on: macos-15
+    timeout-minutes: 20
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+      PLAYWRIGHT_BROWSERS_PATH: desktop/.browsers
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm ci --prefix gui --ignore-scripts
+      - run: npm ci --prefix desktop --ignore-scripts
+      - name: Install synthetic-media test tools
+        run: |
+          brew install ffmpeg
+          node desktop/node_modules/playwright/cli.js install chromium webkit
+      - name: Decode generated media with real browser engines
+        # No real capture, permission requests or desktop input. WebKit RTC
+        # remains a separate known failure, not covered by WebCodecs success.
+        run: |
+          node desktop/test/browser-media-ui.mjs chromium webrtc
+          node desktop/test/browser-media-ui.mjs chromium webcodecs
+          node desktop/test/browser-media-ui.mjs webkit webcodecs
+      - name: Preserve sanitized synthetic-media results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: synthetic-browser-media
+          path: desktop/out/browser-media-*/
+          if-no-files-found: ignore
+
   native-windows:
     runs-on: windows-latest
     defaults:
