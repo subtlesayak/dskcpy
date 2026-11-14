@@ -29,6 +29,7 @@ struct sc_receiver_callbacks {
     void (*on_reverse_keyboard)(struct sc_receiver *receiver,
                                 const struct sc_device_msg *msg, void *userdata);
     void (*on_ended)(struct sc_receiver *receiver, bool error, void *userdata);
+    void (*on_reverse_clipboard)(struct sc_receiver *receiver, const struct sc_device_msg *msg, void *userdata);
     void (*on_reverse_touch)(struct sc_receiver *receiver,
                              const struct sc_device_msg *msg,
                              void *userdata);

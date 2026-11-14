@@ -55,3 +55,8 @@ footer svg { flex-shrink: 0; margin-block-start: 2px; }
 .connection-choice svg { flex-shrink: 0; }
 .connection-choice small, .usb-phones small { display: block; color: #b7c9d2; font-size: .8125rem; }
 .connection-choice:disabled label, .usb-phones label:has(input:disabled) { cursor: default; }
+
+.clipboard-permission { margin-block: 0 24px; }
+.clipboard-permission label { display: flex; align-items: center; gap: 12px; min-block-size: 46px; cursor: pointer; }
+.clipboard-permission input { inline-size: 20px; block-size: 20px; flex-shrink: 0; accent-color: #67dbf6; }
+.clipboard-permission input:focus-visible { outline: 3px solid #67dbf6; outline-offset: 4px; }

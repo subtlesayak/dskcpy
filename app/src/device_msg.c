@@ -113,6 +113,22 @@ sc_device_msg_deserialize(const uint8_t *buf, size_t len,
             msg->reverse_text.text[length] = 0;
             return length + 3;
         }
+        case DEVICE_MSG_TYPE_REVERSE_CLIPBOARD: {
+            if (len < 8) return 0;
+            uint8_t op = buf[1]; uint16_t length = sc_read16be(buf + 6);
+            uint32_t id = sc_read32be(buf + 2);
+            if (op == SC_CLIPBOARD_CANCEL) {
+                if (id || length) return -1;
+                memset(&msg->reverse_clipboard, 0, sizeof(msg->reverse_clipboard)); msg->reverse_clipboard.op = op; return 8;
+            }
+            if (!id || op > SC_CLIPBOARD_PASTE || length > SC_REVERSE_CLIPBOARD_MAX
+                    || (op == SC_CLIPBOARD_READ ? length != 0 : length == 0)) return -1;
+            if (len < (size_t)length + 8) return 0;
+            if (length && !sc_reverse_text_valid(buf + 8, length, SC_REVERSE_CLIPBOARD_MAX)) return -1;
+            msg->reverse_clipboard.id = id; msg->reverse_clipboard.op = op; msg->reverse_clipboard.length = length;
+            memcpy(msg->reverse_clipboard.text, buf + 8, length); msg->reverse_clipboard.text[length] = 0;
+            return 8 + length;
+        }
         case DEVICE_MSG_TYPE_REVERSE_SCROLL:
             if (len < 21) {
                 return 0;

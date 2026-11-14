@@ -16,6 +16,7 @@ const assets = new Map([
   ['/rtc.mjs', ['rtc.mjs', 'text/javascript; charset=utf-8']],
   ['/video.mjs', ['video.mjs', 'text/javascript; charset=utf-8']],
   ['/keyboard.mjs', ['keyboard.mjs', 'text/javascript; charset=utf-8']],
+  ['/clipboard.mjs', ['clipboard.mjs', 'text/javascript; charset=utf-8']],
   ['/protocol.mjs', ['protocol.mjs', 'text/javascript; charset=utf-8']],
   ['/remembered.mjs', ['remembered.mjs', 'text/javascript; charset=utf-8']],
   ['/lifecycle.mjs', ['lifecycle.mjs', 'text/javascript; charset=utf-8']],
@@ -155,7 +156,7 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
     } catch (error) { json(400, { error: error.message }); }
   }
   function status() {
-    return { waiting: Boolean(invitation), connected: Boolean(session),
+    return { waiting: Boolean(invitation), connected: Boolean(session), clipboardAllowed: Boolean((invitation || session) && inputPolicy.clipboard),
       url: port ? viewerUrl() : null, remote: !['local', 'usb'].includes(mode),
       remoteAvailable: Boolean(remoteOrigin), mode, expiresAt, mediaMode: session?.mediaMode ?? null, recovering: Boolean(session?.recovering) };
   }
@@ -302,6 +303,7 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
     rememberProfile = policy.rememberProfile || null;
     mode = connection;
     inputPolicy = { keyboard: policy.keyboard === true && policy.viewOnly !== true, viewOnly: policy.viewOnly === true,
+      clipboard: !grant && policy.clipboard === true && policy.keyboard === true && policy.viewOnly !== true,
       textFocus: policy.textFocus === true && policy.keyboard === true && policy.viewOnly !== true,
       captureRecovery: policy.captureRecovery === true && policy.viewOnly !== true };
     invitation = randomBytes(24);

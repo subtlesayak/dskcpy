@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
+import { createBrowserClipboard } from '../receiver/clipboard.mjs';
 import { rememberedBrowser } from '../receiver/remembered.mjs';
 import { receiverIsAway } from '../receiver/lifecycle.mjs';
 import * as protocol from '../receiver/protocol.mjs';
@@ -14,7 +15,7 @@ const parameters = new Uint8Array([0, 0, 1, 0x67, 0x64, 0, 0x28, 0, 0, 1, 0x68, 
 
 // Deterministic lifecycle tests against the actual receiver script. These model
 // delayed browser callbacks; rendered/device QA is separate from this harness.
-function receiver(t, { portrait = false, lockFails = false, webRtc = false, webCodecs = true, qrKey = '', keyboard = false, viewOnly = false, visualHeight = 0, webAudio = false, textFocus = false, keyboardStatus = false, virtualKeyboard = null, now = () => Date.now(), resumable = false } = {}) {
+function receiver(t, { portrait = false, lockFails = false, webRtc = false, webCodecs = true, qrKey = '', keyboard = false, viewOnly = false, visualHeight = 0, webAudio = false, textFocus = false, keyboardStatus = false, clipboard = false, clipboardAPI = undefined, virtualKeyboard = null, now = () => Date.now(), resumable = false } = {}) {
   const timers = new Set(), sockets = [], decoders = [], orientation = [];
   let resize;
   const locationState = { protocol: 'https:', host: 'receiver.test', pathname: qrKey ? '/join' : '/', search: '', hash: qrKey ? `#connect=${qrKey}` : '' };
@@ -101,11 +102,12 @@ function receiver(t, { portrait = false, lockFails = false, webRtc = false, webC
   window.history = { replaceState(_state, _title, url) { locationState.hash = ''; historyChanges.push(url); } };
   const context = vm.createContext({ ...protocol,
     createBrowserKeyboard, keyboardUsage, keyPacket, receiverIsAway,
+    createBrowserClipboard: options => createBrowserClipboard({ ...options, setTimer: (fn, ms) => { const timer = setTimeout(fn, ms); timers.add(timer); return timer; }, clearTimer: clearTimeout }),
     rememberedBrowser: options => rememberedBrowser({ ...options, document, location: locationState,
       fetch: (...args) => context.fetch(...args),
       setTimeout: (fn, ms) => { const timer = setTimeout(fn, ms); timers.add(timer); return timer; }, clearTimeout }),
     createVideoReceiver: (options) => createVideoReceiver({ ...options, Decoder }),
-    navigator: { virtualKeyboard }, window, document, WebSocket: Socket, VideoDecoder: Decoder, AudioDecoder: SoundDecoder, AudioContext,
+    navigator: { virtualKeyboard, clipboard: clipboardAPI }, window, document, WebSocket: Socket, VideoDecoder: Decoder, AudioDecoder: SoundDecoder, AudioContext,
     EncodedAudioChunk: class { constructor(value) { Object.assign(this, value); } },
     EncodedVideoChunk: class { constructor(value) { Object.assign(this, value); } },
     ResizeObserver: class { constructor(callback) { resize = callback; } observe() {} }, getComputedStyle: () => ({ paddingTop: '0', paddingRight: '0', paddingBottom: '0', paddingLeft: '0' }),
@@ -121,7 +123,7 @@ function receiver(t, { portrait = false, lockFails = false, webRtc = false, webC
   t.after(() => { for (const timer of timers) clearTimeout(timer); });
   if (!qrKey) { $('session-key').value = 'x'.repeat(32); $('join-form').emit('submit'); }
   const socket = sockets[0]; socket.emit('open');
-  socket.emit('message', { data: JSON.stringify({ type: 'authenticated', keyboard, viewOnly, textFocus, keyboardStatus, mediaMode: webRtc ? 'webrtc' : 'webcodecs' }) });
+  socket.emit('message', { data: JSON.stringify({ type: 'authenticated', keyboard, viewOnly, textFocus, keyboardStatus, clipboard, mediaMode: webRtc ? 'webrtc' : 'webcodecs' }) });
   const header = new ArrayBuffer(16), view = new DataView(header);
   view.setUint32(0, 0x53524431); view.setUint32(4, 1); view.setUint32(8, 640); view.setUint32(12, 480);
   socket.emit('message', { data: header });
@@ -804,4 +806,42 @@ test('fresh WebRTC capture reapplies the explicit audio choice and respects vide
  h.$('pause').emit('click');assert.equal(commands().at(-1),11);
  h.$('pause').emit('click');assert.equal(commands().at(-1),10);
  h.$('disconnect').emit('click');
+});
+
+test('clipboard is explicit, local preview only, and reset on touch-off and interruption', async t => {
+  let reads=0,writes=[];const f=receiver(t,{keyboard:true,clipboard:true,clipboardAPI:{readText:async()=>{reads++;return 'local fixture';},writeText:async text=>{writes.push(text);}}});
+  assert.equal(reads,0);assert.equal(f.$('clipboard-tools').hidden,false);assert.equal(f.$('clipboard-enable').checked,false);
+  f.$('more').emit('click');f.$('clipboard-tools').open=true;f.$('clipboard-tools').emit('toggle');
+  f.$('clipboard-enable').checked=true;f.$('clipboard-enable').emit('change');
+  assert.ok(f.socket.sent.includes('clipboard-enable'));assert.equal(reads,0);
+  await f.$('clipboard-read-local').emit('click');assert.equal(reads,1);assert.equal(f.$('clipboard-text').value,'local fixture');
+  assert.equal(f.socket.sent.filter(x=>Buffer.isBuffer(x)&&x[0]===10).length,0);
+  f.$('clipboard-copy-host').emit('click');let packets=f.socket.sent.filter(x=>Buffer.isBuffer(x)&&x[0]===10);
+  assert.equal(packets.length,1);assert.equal(packets[0][1],1);assert.equal(packets[0].subarray(8).toString(),'local fixture');
+  f.socket.emit('message',{data:JSON.stringify({type:'clipboard-result',op:1,id:1,status:0})});
+  assert.match(f.$('clipboard-status').textContent,/copied to the computer/);assert.deepEqual(writes,[]);
+  await f.$('clipboard-copy-local').emit('click');assert.deepEqual(writes,['local fixture']);
+  f.$('touch').emit('click');assert.equal(f.$('clipboard-text').value,'');assert.equal(f.$('clipboard-enable').checked,false);assert.ok(f.socket.sent.includes('clipboard-disable'));
+  f.socket.emit('message',{data:JSON.stringify({type:'clipboard-result',op:0,id:1,status:0,text:'stale fixture'})});assert.equal(f.$('clipboard-text').value,'');
+});
+test('clipboard preview and opt-in never survive a restored capture, and unadvertised tools stay hidden',t=>{
+  const f=receiver(t,{keyboard:true,clipboard:true});f.$('clipboard-enable').checked=true;f.$('clipboard-enable').emit('change');f.$('clipboard-text').value='private fixture';
+  f.window.emit('blur');assert.equal(f.$('clipboard-text').value,'');assert.equal(f.$('clipboard-enable').checked,false);
+  const older=receiver(t,{keyboard:true});assert.equal(older.$('clipboard-tools').hidden,true);
+});
+
+test('browser clipboard denial has a manual fallback and late local reads cannot revive a cleared preview', async t => {
+  let release;const f=receiver(t,{keyboard:true,clipboard:true,clipboardAPI:{readText:()=>new Promise(resolve=>{release=resolve;}),writeText:async()=>{throw Error('fixture denial');}}});
+  f.$('clipboard-enable').checked=true;f.$('clipboard-enable').emit('change');f.$('clipboard-text').value='manual fixture';
+  await f.$('clipboard-copy-local').emit('click');assert.match(f.$('clipboard-status').textContent,/copy manually/);
+  const pending=f.$('clipboard-read-local').emit('click');assert.equal(f.$('clipboard-text').disabled,true);
+  f.window.emit('blur');release('stale local fixture');await pending;
+  assert.equal(f.$('clipboard-text').value,'');assert.equal(f.$('clipboard-enable').checked,false);assert.equal(f.socket.sent.filter(x=>Buffer.isBuffer(x)&&x[0]===10).length,0);
+});
+
+test('soft-keyboard viewport changes preserve clipboard preparation without weakening blur cleanup',t=>{
+  const f=receiver(t,{keyboard:true,clipboard:true,visualHeight:600});f.$('clipboard-enable').checked=true;f.$('clipboard-enable').emit('change');f.$('clipboard-text').value='prepared fixture';
+  f.reflow();f.window.visualViewport.height=220;f.window.visualViewport.emit('resize');
+  assert.equal(f.$('clipboard-text').value,'prepared fixture');assert.equal(f.$('clipboard-enable').checked,true);
+  f.window.emit('blur');assert.equal(f.$('clipboard-text').value,'');assert.equal(f.$('clipboard-enable').checked,false);
 });

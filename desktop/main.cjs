@@ -82,7 +82,7 @@ else {
       await backend.ensure(route);
       const readiness = await backend.readiness();
       const usb = connection === 'usb' ? { available: readiness.adb, ...(readiness.adb ? await backend.usbDevices() : { devices: [], error: false }) } : undefined;
-      return { route, usb, permissions: permissions(), runtimeReady: readiness.ready, features: { keyboard: readiness.keyboard } };
+      return { route, usb, permissions: permissions(), runtimeReady: readiness.ready, features: { keyboard: readiness.keyboard, clipboard: readiness.clipboard } };
     } });
     window = new BrowserWindow({ width: 620, height: 740, minWidth: 360, minHeight: 420,
       title: 'dskcpy Host', backgroundColor: '#0a1419', show: false,
@@ -108,6 +108,7 @@ else {
     handle('start', () => host.start());
     handle('connection', connection => host.setConnection(connection));
     handle('usb-device', id => host.selectUsbDevice(id));
+    handle('clipboard-allowed', allowed => host.setClipboardAllowed(allowed));
     handle('stop', () => host.stop());
     handle('refresh', () => refresh());
     handle('screen-permission', async () => {

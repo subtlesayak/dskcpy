@@ -1,4 +1,6 @@
-// The native SRD1 stream is unchanged. One WebSocket message carries the
+import { readClipboardRequest, CLIPBOARD_MAX } from '../receiver/clipboard.mjs';
+// Existing SRD1 packets are unchanged. Clipboard-v1 adds an opt-in flag32 reply.
+// One WebSocket message carries the
 // 16-byte stream header, then one complete 16-byte-header media packet each.
 export const MAX_PACKET = 16 * 1024 * 1024;
 
@@ -27,7 +29,8 @@ export class SrdParser {
       } else if (this.buffer.length === 16) {
         const size = this.buffer.readUInt32BE(0);
         const flags = this.buffer.readUInt32BE(12);
-        if (size > MAX_PACKET || ![0, 1, 2, 3, 4, 8, 16].includes(flags)) {
+        if (size > MAX_PACKET || ![0, 1, 2, 3, 4, 8, 16, 32].includes(flags)
+            || (flags === 32 && (size < 8 || size > CLIPBOARD_MAX + 8))) {
           throw new Error('Invalid native packet.');
         }
         if (size) {
@@ -46,7 +49,8 @@ export class SrdParser {
   }
 }
 
-export function validBrowserInput(data, width, height, { keyboard = false } = {}) {
+export function validBrowserInput(data, width, height, { keyboard = false, clipboard = false } = {}) {
+  if (data[0] === 10) { try { if (!clipboard || !keyboard) return false; readClipboardRequest(data); return true; } catch { return false; } }
   if (data[0] === 8) {
     if (!keyboard || data.length !== 5 || data[1] > 2) return false;
     const usage = data.readUInt16BE(2);

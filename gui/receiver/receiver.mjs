@@ -1,4 +1,5 @@
 import { rememberedBrowser } from './remembered.mjs';
+import { createBrowserClipboard } from './clipboard.mjs';
 import { receiverIsAway } from './lifecycle.mjs';
 import { BROWSER_RESUME_MS, avcCodec, avcParameters, touchPacket, scrollPacket, takeDecodedTimestamps, fitDisplay, createMediaAcknowledger, needsControlsRow, parseJoinFragment } from './protocol.mjs';
 import { createRtcReceiver } from './rtc.mjs';
@@ -38,6 +39,7 @@ function clearFocusCapability(clearPreference = true) {
 }
 function autoFocusKeyboard(focused) {
   if (focused !== true || !focusSupported || !autoKeyboard || !canSendKeys() || away()) return;
+  if (clipboardTools?.isActive()) return;
   const field = $('keyboard-input');
   if (keyboardOpen && document.activeElement === field) return;
   if (!keyboardOpen) showKeyboard(); else keyboardInput.setEnabled(true);
@@ -89,7 +91,12 @@ const keyboardInput = createBrowserKeyboard({ field: $('keyboard-input'), send,
 function canSendKeys() {
   return !keyboardBlocked && keyboardSupported && authenticated && header && !paused && !document.hidden && touchEnabled && !viewOnly && ws?.readyState === WebSocket.OPEN;
 }
+const clipboardTools = $('clipboard-tools') ? createBrowserClipboard({ section: $('clipboard-tools'), field: $('clipboard-text'), toggle: $('clipboard-enable'), status: $('clipboard-status'),
+  buttons: { read: $('clipboard-read-host'), copyLocal: $('clipboard-copy-local'), readLocal: $('clipboard-read-local'), copyHost: $('clipboard-copy-host'), pasteHost: $('clipboard-paste-host') },
+  canUse: canSendKeys, send, control: value => { if (!authenticated || ws?.readyState !== WebSocket.OPEN) return false; ws.send(value); return true; }, localClipboard: navigator.clipboard,
+}) : null;
 function updateArrowAvailability() {
+  clipboardTools?.refresh();
   if (!arrowPadPresent) return;
   $('arrows').hidden = !keyboardSupported || viewOnly;
   const available = canSendKeys();
@@ -156,6 +163,7 @@ function audioUnavailable() {
   $('error').textContent = 'Opus audio is unavailable in this browser. Video can continue.';
 }
 function releaseTouches(includeKeyboard = true) {
+  if (includeKeyboard) clipboardTools?.reset();
   if (includeKeyboard) keyboardInput.release();
   cancelSentTouches();
   pointers.clear();
@@ -171,6 +179,7 @@ function clearMedia() {
   audioGeneration++;
   video?.close(); video = null;
   if (audio && audio.state !== 'closed') audio.close(); audio = null;
+  clipboardTools?.setSupported(false);
   header = false; videoConfig = null; configBytes = null; audioConfig = null;
 }
 function disconnect() {
@@ -289,6 +298,7 @@ function connect(key = null, requestedMode = preferredMode) {
     try {
       if (typeof event.data === 'string') {
         const message = JSON.parse(event.data);
+        if (message.type === 'clipboard-result') { if (!authenticated) throw Error('Unexpected clipboard response.'); clipboardTools?.result(message); return; }
         if (message.type === 'rtc-offer' && authenticated && mediaMode === 'webrtc') {
           if (rtcReceiver) throw new Error('Unexpected repeated media offer.');
           rtcDisplay.hidden = false; rtcDisplay.muted = muted;
@@ -330,6 +340,7 @@ function connect(key = null, requestedMode = preferredMode) {
         viewOnly = message.viewOnly === true;
         remembered.authenticated(viewOnly);
         keyboardSupported = message.keyboard === true && !viewOnly;
+        clipboardTools?.setSupported(keyboardSupported && message.clipboard === true);
         keyboardStatusSupported = keyboardSupported && message.keyboardStatus === true;
         if (keyboardStatusSupported) socket.send('keyboard-status-subscribe');
         focusSupported = keyboardSupported && message.textFocus === true;
@@ -666,6 +677,7 @@ function unlockOrientation() {
   try { screen.orientation?.unlock?.(); } catch { /* Orientation API is optional. */ }
 }
 function setControlTray(name = null, focus = false) {
+  clipboardTools?.reset();
   releaseTouches();
   if (name) hideKeyboard();
   const previous = openControlTray;

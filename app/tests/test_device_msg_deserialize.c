@@ -197,7 +197,7 @@ static void test_reverse_keyboard(void) {
 static void test_bounded_message_vectors(void) {
     const uint8_t types[] = {DEVICE_MSG_TYPE_CLIPBOARD, DEVICE_MSG_TYPE_ACK_CLIPBOARD,
         DEVICE_MSG_TYPE_UHID_OUTPUT, DEVICE_MSG_TYPE_REVERSE_TOUCH, DEVICE_MSG_TYPE_REVERSE_KEY,
-        DEVICE_MSG_TYPE_REVERSE_TEXT, DEVICE_MSG_TYPE_REVERSE_SCROLL,
+        DEVICE_MSG_TYPE_REVERSE_TEXT, DEVICE_MSG_TYPE_REVERSE_CLIPBOARD, DEVICE_MSG_TYPE_REVERSE_SCROLL,
         DEVICE_MSG_TYPE_REVERSE_FRAME_ACK, DEVICE_MSG_TYPE_REVERSE_AUDIO_ACK,
         DEVICE_MSG_TYPE_REVERSE_SYSTEM_ACTION};
     uint32_t state = UINT32_C(0x5ad15);
@@ -245,6 +245,16 @@ int main(int argc, char *argv[]) {
     test_deserialize_reverse_system_action();
     test_deserialize_reverse_scroll();
     test_reverse_keyboard();
+    struct sc_device_msg clip;
+    const uint8_t read_clip[] = {10,0,0,0,0,7,0,0};
+    for (unsigned n=0;n<sizeof(read_clip);++n) assert(sc_device_msg_deserialize(read_clip,n,&clip)==0);
+    assert(sc_device_msg_deserialize(read_clip,sizeof(read_clip),&clip)==8 && clip.reverse_clipboard.id==7);
+    uint8_t paste_clip[] = {10,2,0,0,0,8,0,4,'t','e','x','t'};
+    assert(sc_device_msg_deserialize(paste_clip,sizeof(paste_clip),&clip)==12 && clip.reverse_clipboard.length==4);
+    paste_clip[8]=0;assert(sc_device_msg_deserialize(paste_clip,sizeof(paste_clip),&clip)==-1);
+    const uint8_t cancel_clip[] = {10,3,0,0,0,0,0,0};
+    assert(sc_device_msg_deserialize(cancel_clip,sizeof(cancel_clip),&clip)==8 && clip.reverse_clipboard.op==3);
+
     test_bounded_message_vectors();
     return 0;
 }

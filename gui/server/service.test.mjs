@@ -852,3 +852,17 @@ test('Windows browser keyboard is authenticated and fixed status IPC is not logg
  assert.equal(f.publicState().logs.some(x=>x.message.includes('DSKCPY_KEYBOARD_STATUS')||x.message.includes('private-sample')),false);
  await f.request('/api/stream/stop',{});
 });
+
+test('owner clipboard consent reaches native only for a capable full desktop private invitation', async t => {
+  for (const [consent,capable,expected] of [[true,true,true],[false,true,false],[true,false,false]]) {
+    const reservation=net.createServer();reservation.listen(0,'127.0.0.1');await once(reservation,'listening');const browserPort=reservation.address().port;await new Promise(r=>reservation.close(r));
+    const origin='https://clipboard.example.test';
+    const f=await fixture(t,{platform:'darwin',browserPort,environment:{...process.env,SCRCPY_GUI_BINARY:process.execPath,DSKCPY_VIEWER_ORIGIN:origin},readinessProbe:async()=>({...ready,features:{browserKeyboard:true,browserClipboard:capable}})});
+    const {body}=await f.request('/api/browser/invite',{browserTransport:'wifi',browserClipboard:consent});
+    const ws=new WebSocket(`ws://127.0.0.1:${browserPort}/stream`,{origin,headers:{Host:'clipboard.example.test'}});ws.on('error',()=>{});t.after(()=>ws.terminate());
+    await once(ws,'open');ws.send(body.key);await waitFor(()=>f.children.length===1);
+    assert.equal(f.children[0].args.includes('--reverse-clipboard'),expected);
+    assert.ok(!JSON.stringify(f.publicState()).includes('clipboard text'));
+    await f.request('/api/stream/stop',{});ws.terminate();
+  }
+});

@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('dskcpyHost', Object.freeze({
   start: () => ipcRenderer.invoke('host:start'),
   setConnection: connection => ipcRenderer.invoke('host:connection', connection),
   selectUsbDevice: id => ipcRenderer.invoke('host:usb-device', id),
+  setClipboardAllowed: allowed => ipcRenderer.invoke('host:clipboard-allowed', allowed),
   stop: () => ipcRenderer.invoke('host:stop'),
   refresh: () => ipcRenderer.invoke('host:refresh'),
   screenPermission: () => ipcRenderer.invoke('host:screen-permission'),

@@ -27,6 +27,10 @@ tray; Stop remains available there. Quit confirms ending an owned session.
   conflicting handler, and never provisions Funnel or public infrastructure.
 - Sandboxed renderer, context isolation, main-frame checked IPC and fixed
   commands. No arbitrary shell, URL, filesystem or IPC API is exposed.
+- Separate, off-by-default text clipboard permission for each invitation.
+  The receiver then opts in on its current connection and uses explicit read,
+  copy or paste actions. Clipboard access is excluded from remembered grants.
+  See [clipboard boundaries and protocol](../doc/browser-clipboard.md).
 
 The shell now guides account-free Android USB browser connections alongside
 private browser connections. Choose USB cable, connect and unlock an Android

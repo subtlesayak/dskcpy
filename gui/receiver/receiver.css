@@ -122,3 +122,7 @@ summary { min-height: 44px; padding: 10px 12px; border: 1px solid #405461; borde
 #auto-keyboard-feedback { grid-column: 1 / -1; margin: 4px 0 0; }
 
 #keyboard-status { grid-column: 1 / -1; margin: 4px 0 0; }
+
+#clipboard-tools > label { display: flex; align-items: center; gap: .5rem; min-height: 44px; }
+#clipboard-enable { width: 20px; height: 20px; min-height: 20px; flex: none; }
+#clipboard-text { display: block; width: 100%; min-width: 0; min-height: 5rem; font: inherit; font-size: 1rem; line-height: 1.5; padding: 8px 10px; border: 1px solid #627d8c; border-radius: 8px; color: inherit; background: #080f13; resize: vertical; }

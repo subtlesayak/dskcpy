@@ -15,6 +15,8 @@ src = [
     'src/demuxer.c',
     'src/device_msg.c',
     'src/reverse_keyboard.c',
+    'src/reverse_clipboard.c',
+    'src/reverse_windows_clipboard.c',
     'src/reverse_windows_keyboard.c',
     'src/disconnect.c',
     'src/events.c',
@@ -86,7 +88,7 @@ reverse_macos = get_option('reverse_macos') and host_machine.system() == 'darwin
 conf.set('HAVE_REVERSE_MACOS', reverse_macos)
 if reverse_macos
     add_languages('objc', native: false)
-    src += ['src/reverse_display_macos.m', 'src/reverse_macos_audio.m', 'src/reverse_macos_keyboard.m', 'src/reverse_macos_focus.m']
+    src += ['src/reverse_display_macos.m', 'src/reverse_macos_audio.m', 'src/reverse_macos_keyboard.m', 'src/reverse_macos_focus.m', 'src/reverse_macos_clipboard.m']
     add_project_arguments('-fobjc-arc', '-fblocks', '-std=gnu11', '-mmacosx-version-min=13.0', language: 'objc')
     add_project_arguments('-mmacosx-version-min=13.0', language: 'c')
     add_project_link_arguments('-mmacosx-version-min=13.0', language: ['c', 'objc'])
@@ -255,6 +257,8 @@ if get_option('buildtype') == 'debug'
             ['tests/test_reverse_macos_keyboard.m', 'src/reverse_macos_keyboard.m'],
             include_directories: src_dir, dependencies: dependencies)
         test('test_reverse_macos_keyboard', mac_keyboard_test)
+        mac_clipboard_test = executable('test_reverse_macos_clipboard', ['tests/test_reverse_macos_clipboard.m', 'src/reverse_macos_clipboard.m'], dependencies: dependencies, include_directories: src_dir)
+        test('test_reverse_macos_clipboard', mac_clipboard_test)
         mac_focus_test = executable('test_reverse_macos_focus',
             ['tests/test_reverse_macos_focus.m', 'src/reverse_macos_focus.m'],
             dependencies: dependencies, include_directories: include_directories('src'))
@@ -271,6 +275,7 @@ if get_option('buildtype') == 'debug'
         ['test_timeout', ['tests/test_timeout.c', 'src/util/timeout.c']],
         ['test_timeout_thread', ['tests/test_timeout_thread.c', 'src/util/timeout.c', 'src/util/thread.c', 'src/util/tick.c']],
         ['test_reverse_audio_encoder', ['tests/test_reverse_audio_encoder.c', 'src/reverse_audio_encoder.c']],
+        ['test_reverse_clipboard', ['tests/test_reverse_clipboard.c', 'src/reverse_clipboard.c', 'src/reverse_keyboard.c']],
         ['test_reverse_windows_keyboard', ['tests/test_reverse_windows_keyboard.c', 'src/reverse_windows_keyboard.c', 'src/reverse_keyboard.c']],
         ['test_reverse_macos_recovery', ['tests/test_reverse_macos_recovery.c']],
         ['test_reverse_touch', ['tests/test_reverse_touch.c', 'src/reverse_touch.c']],

@@ -140,3 +140,16 @@ test('a selected phone disappearing cannot silently redirect Start to the only r
   await f.host.start(); assert.equal(f.invited(), undefined, 'a second Start cannot clear the target-loss latch');
   f.host.selectUsbDevice('2'); await f.host.start(); assert.deepEqual(f.invited(), { mode: 'usb', device: '2' });
 });
+
+test('clipboard is off by default, explicit per invitation and cleared by Stop or a target change', async () => {
+  const f=fixture();f.setup.features={keyboard:true,clipboard:true};await f.host.refresh({setup:true});
+  assert.equal(f.host.snapshot().clipboardAllowed,false);assert.throws(()=>f.host.setClipboardAllowed('true'));
+  f.host.setClipboardAllowed(true);assert.equal(f.host.snapshot().clipboardAllowed,true);
+  let args;const invite=f.backend.invite;f.backend.invite=async next=>{args=next;return invite(next);};
+  await f.host.start();assert.equal(args.clipboard,true);f.host.setClipboardAllowed(false);assert.equal(f.host.snapshot().clipboardAllowed,true,'an owned session cannot be reconfigured');
+  await f.host.stop();assert.equal(f.host.snapshot().clipboardAllowed,false);
+  f.host.setClipboardAllowed(true);await f.host.setConnection('usb');assert.equal(f.host.snapshot().clipboardAllowed,false);
+});
+test('an old native host cannot be opted into clipboard by the desktop IPC', async () => {
+  const f=fixture();await f.host.refresh({setup:true});f.host.setClipboardAllowed(true);assert.equal(f.host.snapshot().clipboardAllowed,false);
+});

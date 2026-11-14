@@ -63,6 +63,18 @@
               <button id="maximize" type="button" aria-label="Maximize or restore active window" title="Maximize or restore active window" ><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/></svg><span class="sr-only" id="maximize-label">Maximize or restore active window</span></button>
             </div></details>
             <details id="remember-device" hidden><summary>Remember this browser</summary><p>Allow this browser to view your entire desktop, hear audio and control mouse and keyboard for 90 days while the host is running. The Mac must approve; it can pause or revoke access.</p><form id="remember-form"><label for="device-name">Device name</label><input id="device-name" maxlength="60" required placeholder="My phone"><button id="remember-submit" type="submit">Ask Mac to remember</button></form><p id="remember-status" role="status"></p></details>
+            <details id="clipboard-tools" hidden><summary>Clipboard</summary>
+              <label><input id="clipboard-enable" type="checkbox" aria-describedby="clipboard-help"> Enable clipboard tools for this connection</label>
+              <p id="clipboard-help" class="subtle">Text only, up to 4 KB. Each action is explicit. Copy and Paste replace the computer clipboard; Paste also sends its app’s paste shortcut. Text clears here when these tools close or sharing is interrupted.</p>
+              <label for="clipboard-text">Text to transfer</label><textarea id="clipboard-text" rows="3" maxlength="4096" autocomplete="off" autocapitalize="off" spellcheck="false" disabled aria-describedby="clipboard-help clipboard-status"></textarea>
+              <div class="quick-controls">
+                <button id="clipboard-read-host" type="button" disabled>Read computer clipboard</button>
+                <button id="clipboard-copy-local" type="button" disabled>Copy to this device</button>
+                <button id="clipboard-read-local" type="button" disabled>Paste from this device</button>
+                <button id="clipboard-copy-host" type="button" disabled>Copy to computer clipboard</button>
+                <button id="clipboard-paste-host" type="button" disabled>Paste on computer</button>
+              </div><p id="clipboard-status" class="subtle" role="status"></p>
+            </details>
             <details id="touch-help"><summary>Touch help</summary><p class="subtle">Tap to click. One or two fingers scroll. Use the selection icon to select text or drag items; two fingers still scroll.</p></details>
             <details id="connection-details"><summary>Connection details</summary><p id="stats" class="subtle">Waiting for the first decoded frame…</p></details>
           </section>

@@ -25,7 +25,7 @@ try {
     page.on('pageerror', error => errors.push(error.message));
     await page.addInitScript(() => {
       let state = { connection: 'internet', phase: 'network', permissions: { screen: true, control: true }, route: { connected: false, ready: false },
-        usb: { available: true, error: false, selected: null, devices: [] }, features: { keyboard: true }, canStop: false, invitation: null, error: null };
+        usb: { available: true, error: false, selected: null, devices: [] }, features: { keyboard: true, clipboard: true }, clipboardAllowed: false, canStop: false, invitation: null, error: null };
       let change = () => {};
       const emit = update => { state = { ...state, ...update }; change(state); return state; };
       window.usbFixture = (phase, devices = []) => emit({ phase, usb: { ...state.usb, devices, selected: null } });
@@ -33,9 +33,10 @@ try {
         snapshot: async () => state, onChange: callback => { change = callback; return () => {}; },
         setConnection: async connection => emit({ connection, phase: connection === 'usb' ? 'usb-device' : 'network' }),
         selectUsbDevice: async id => emit({ phase: 'ready', usb: { ...state.usb, selected: id } }),
+        setClipboardAllowed: async allowed => emit({clipboardAllowed:allowed}),
         refresh: async () => state,
         start: async () => emit({ phase: 'inviting', canStop: true, invitation: { joinUrl: 'http://127.0.0.1:27180/join/synthetic#connect=fixture-only', openedOnPhone: true, expiresAt: Date.now() + 300000 } }),
-        stop: async () => emit({ phase: 'ready', canStop: false, invitation: null }),
+        stop: async () => emit({ clipboardAllowed:false, phase: 'ready', canStop: false, invitation: null }),
         copyInvitation: async () => true,
       };
     });
@@ -58,8 +59,13 @@ try {
     const select = page.getByRole('radio', { name: /Second phone/ });
     await select.focus(); await page.keyboard.press('Space');
     await page.getByRole('heading', { name: 'Share with your USB phone', exact: true }).waitFor();
+    const consent=page.getByRole('checkbox',{name:'Allow text clipboard for this invitation',exact:true});
+    assert.equal(await consent.isChecked(),false);await consent.check();
+    await page.screenshot({path:path.join(output,`ready-consent-${variant.width}-${variant.rtl}-${variant.zoom}.png`),fullPage:true});
     const start = page.getByRole('button', { name: 'Start sharing', exact: true });
-    await start.focus();
+    await page.waitForFunction(() => [...document.querySelectorAll('button')].some(button => button.textContent.includes('Start sharing') && !button.disabled));
+    await page.keyboard.press('Tab');
+    assert.equal(await start.evaluate(button => document.activeElement === button), true);
     assert.notEqual(await start.evaluate(button => getComputedStyle(button).outlineStyle), 'none');
     await page.keyboard.press('Enter');
     await page.getByRole('heading', { name: 'Continue on your phone', exact: true }).waitFor();
@@ -69,7 +75,7 @@ try {
     assert.match(await page.getByRole('status').innerText(), /USB link copied/);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false);
     await page.getByRole('button', { name: 'Cancel invitation', exact: true }).click();
-    await start.waitFor();
+    await start.waitFor(); assert.equal(await consent.isChecked(),false);
     await page.evaluate(() => window.usbFixture('error'));
     await page.getByRole('button', { name: 'Try again', exact: true }).waitFor();
     assert.deepEqual(errors, []);

@@ -9,8 +9,8 @@ type Phase = 'usb-tool' | 'usb-device' | 'usb-authorize' | 'usb-select' | 'check
 type Snapshot = { phase: Phase; connection?: 'internet' | 'usb';
   usb?: { available: boolean; error: boolean; selected: string | null; devices: { id: string; name: string; state: 'ready' | 'unauthorized' | 'offline' }[] }; permissions: { screen: boolean; control: boolean }; route: { connected: boolean; ready: boolean; conflict: boolean };
   startup?: { available: boolean; requested: boolean; enabled: boolean; requiresApproval: boolean; error: string | null };
-  features: { keyboard: boolean }; error: string | null; invitation: { joinUrl: string; expiresAt: number; openedOnPhone?: boolean } | null; canStop: boolean };
-type HostAPI = { setConnection?(connection: 'internet' | 'usb'): Promise<Snapshot>; selectUsbDevice?(id: string): Promise<Snapshot>; trustedList?(): Promise<TrustedDevices>; trustedAction?(action: DeviceAction, id?: string): Promise<TrustedDevices>; snapshot(): Promise<Snapshot>; start(): Promise<Snapshot>; stop(): Promise<Snapshot>; refresh(): Promise<Snapshot>;
+  features: { keyboard: boolean; clipboard?: boolean }; clipboardAllowed?: boolean; error: string | null; invitation: { joinUrl: string; expiresAt: number; openedOnPhone?: boolean } | null; canStop: boolean };
+type HostAPI = { setClipboardAllowed?(allowed: boolean): Promise<Snapshot>; setConnection?(connection: 'internet' | 'usb'): Promise<Snapshot>; selectUsbDevice?(id: string): Promise<Snapshot>; trustedList?(): Promise<TrustedDevices>; trustedAction?(action: DeviceAction, id?: string): Promise<TrustedDevices>; snapshot(): Promise<Snapshot>; start(): Promise<Snapshot>; stop(): Promise<Snapshot>; refresh(): Promise<Snapshot>;
   screenPermission(): Promise<void>; controlPermission(): Promise<void>; privateSetup(): Promise<Snapshot>; tailscale(): Promise<void>;
   copyInvitation(): Promise<boolean>; setOpenAtLogin(enabled: boolean): Promise<unknown>; onChange(callback: (snapshot: Snapshot) => void): () => void };
 declare global { interface Window { dskcpyHost?: HostAPI } }
@@ -110,6 +110,11 @@ function App() {
         {!state?.features.keyboard && <p className="hint">Keyboard entry is not available on this host yet.</p>}
       </section>}
       {phase === 'sharing' && <div className="sharing-card"><Check size={22} aria-hidden="true" /><span>Sharing stays on when you close this window. Use dskcpy in the menu bar or system tray to stop.</span></div>}
+      {phase === 'ready' && state?.features.clipboard && api?.setClipboardAllowed && <div className="clipboard-permission">
+        <label><input type="checkbox" checked={state.clipboardAllowed === true} onChange={event => { const allowed = event.currentTarget.checked; void run(() => api.setClipboardAllowed!(allowed)); }} disabled={pending || stopping} aria-describedby="host-clipboard-help" /> Allow text clipboard for this invitation</label>
+        <p id="host-clipboard-help" className="hint">The receiver can explicitly read or replace your text clipboard and paste into the active app. This turns off when sharing ends.</p>
+      </div>}
+      {['inviting', 'sharing'].includes(phase) && state?.clipboardAllowed && <p className="hint">Text clipboard tools are allowed for this invitation. Stop sharing to end clipboard access.</p>}
       <div className="actions">
         {content.action && <button className="primary" disabled={!api || pending || stopping} onClick={primary}>{content.action}<ArrowRight aria-hidden="true" size={19} /></button>}
         {state?.canStop && !['inviting', 'preparing'].includes(phase) && <button className="stop" disabled={stopping} onClick={stopSharing}><Square size={16} aria-hidden="true" />Stop sharing</button>}
