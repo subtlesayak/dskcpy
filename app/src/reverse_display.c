@@ -13,6 +13,7 @@
 #include "events.h"
 #include "receiver.h"
 #include "reverse_watchdog.h"
+#include "reverse_pause.h"
 #include "reverse_audio.h"
 #include "reverse_touch.h"
 #include "util/env.h"
@@ -1859,6 +1860,27 @@ reverse_send_key_chord(const WORD *keys, unsigned key_count) {
 }
 
 static void
+reverse_video_pause_transition(void *context, bool paused) {
+    struct reverse_display_state *state = context;
+    if (paused) atomic_store_explicit(&state->video_paused, true, memory_order_release);
+    sc_mutex_lock(&state->watchdog_mutex);
+    sc_reverse_watchdog_set_paused(&state->watchdog, paused, av_gettime_relative());
+    sc_reverse_watchdog_set_paused(&state->audio_watchdog,
+        paused || !atomic_load_explicit(&state->audio_enabled, memory_order_acquire), av_gettime_relative());
+    sc_mutex_unlock(&state->watchdog_mutex);
+    reverse_cancel_keyboard(state);
+    reverse_cancel_touches(state);
+    if (!paused) atomic_store_explicit(&state->video_paused, false, memory_order_release);
+    LOGI("Reverse display %s (Android %s)", paused ? "paused" : "resumed", paused ? "background" : "foreground");
+}
+
+static void
+reverse_video_request_keyframe(void *context) {
+    struct reverse_display_state *state = context;
+    atomic_store_explicit(&state->force_refresh, true, memory_order_release);
+}
+
+static void
 reverse_apply_system_action(struct reverse_display_state *state,
                             enum sc_reverse_system_action action) {
     switch (action) {
@@ -1879,25 +1901,6 @@ reverse_apply_system_action(struct reverse_display_state *state,
             atomic_store_explicit(&state->stopped, true, memory_order_release);
             reverse_cancel_touches(state);
             sc_push_event(SDL_EVENT_QUIT);
-            break;
-        case SC_REVERSE_SYSTEM_ACTION_PAUSE_VIDEO:
-            atomic_store_explicit(&state->video_paused, true, memory_order_release);
-            sc_mutex_lock(&state->watchdog_mutex);
-            sc_reverse_watchdog_set_paused(&state->watchdog, true, av_gettime_relative());
-            sc_reverse_watchdog_set_paused(&state->audio_watchdog, true, av_gettime_relative());
-            sc_mutex_unlock(&state->watchdog_mutex);
-            reverse_cancel_touches(state);
-            LOGI("Reverse display paused (Android background)");
-            break;
-        case SC_REVERSE_SYSTEM_ACTION_RESUME_VIDEO:
-            sc_mutex_lock(&state->watchdog_mutex);
-            sc_reverse_watchdog_set_paused(&state->watchdog, false, av_gettime_relative());
-            sc_reverse_watchdog_set_paused(&state->audio_watchdog,
-                !atomic_load_explicit(&state->audio_enabled, memory_order_acquire), av_gettime_relative());
-            sc_mutex_unlock(&state->watchdog_mutex);
-            atomic_store_explicit(&state->force_refresh, true, memory_order_release);
-            atomic_store_explicit(&state->video_paused, false, memory_order_release);
-            LOGI("Reverse display resumed (Android foreground)");
             break;
         case SC_REVERSE_SYSTEM_ACTION_VOLUME_DOWN: {
             const WORD keys[] = {VK_VOLUME_DOWN};
@@ -1953,9 +1956,29 @@ reverse_receiver_on_system_action(struct sc_receiver *receiver,
     (void) receiver;
     struct reverse_display_state *state = userdata;
     if (!atomic_load_explicit(&state->stopped, memory_order_acquire)) {
-        if (msg->reverse_system_action.action != SC_REVERSE_SYSTEM_ACTION_AUDIO_ENABLE
-                && msg->reverse_system_action.action != SC_REVERSE_SYSTEM_ACTION_AUDIO_DISABLE) reverse_cancel_keyboard(state);
-        reverse_apply_system_action(state, msg->reverse_system_action.action);
+        enum sc_reverse_system_action action = msg->reverse_system_action.action;
+        if (action == SC_REVERSE_SYSTEM_ACTION_PAUSE_VIDEO || action == SC_REVERSE_SYSTEM_ACTION_RESUME_VIDEO) {
+            bool current = atomic_load_explicit(&state->video_paused, memory_order_acquire);
+            if (action == SC_REVERSE_SYSTEM_ACTION_PAUSE_VIDEO && current) {
+                // Preserve retry of failed key/touch release while already
+                // paused, without changing watchdog or media lifecycle state.
+                reverse_cancel_keyboard(state);
+                reverse_cancel_touches(state);
+                return;
+            }
+            static const struct sc_reverse_pause_callbacks callbacks = {
+                reverse_video_pause_transition, reverse_video_request_keyframe,
+            };
+            sc_reverse_pause(current,
+                action == SC_REVERSE_SYSTEM_ACTION_PAUSE_VIDEO, &callbacks, state);
+            return;
+        }
+        // These remain unsupported on Windows. An ignored Mac quality action
+        // must not release Windows input or imply encoder reconfiguration.
+        if (action >= SC_REVERSE_SYSTEM_ACTION_QUALITY_ORIGINAL && action <= SC_REVERSE_SYSTEM_ACTION_QUALITY_REDUCED) return;
+        if (action != SC_REVERSE_SYSTEM_ACTION_AUDIO_ENABLE
+                && action != SC_REVERSE_SYSTEM_ACTION_AUDIO_DISABLE) reverse_cancel_keyboard(state);
+        reverse_apply_system_action(state, action);
     }
 }
 
