@@ -46,7 +46,18 @@ export interface WirelessService {
   address: string;
 }
 
+export interface NativeStartupAttempt {
+  attempt: number;
+  status: 'starting' | 'connected' | 'ended' | 'failed' | 'stopped' | 'unreported';
+  startedAt: string;
+  endedAt: string | null;
+  phase: string;
+  failure: string | null;
+  events: { phase: string; at: string }[];
+}
+
 export interface BridgeStatus {
+  nativeStartup?: { current: NativeStartupAttempt; previous: NativeStartupAttempt[] } | null;
   browser?: { waiting: boolean; connected: boolean; clipboardAllowed?: boolean; url: string | null; remote: boolean; remoteAvailable: boolean; mode: string; expiresAt: string | null };
   reconnecting: boolean;
   reconnectAttempt: number;

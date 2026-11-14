@@ -261,6 +261,23 @@ select { min-width: 0; height: 37px; padding-inline: 8px; color: var(--text); ba
 
 .activity-panel { margin-block-start: 18px; padding: 16px 18px 18px; }
 .log-count { color: #6f8997; font-size: 0.7rem; }
+.startup-history { margin-block: 16px 24px; padding: 16px; border-radius: 8px; background: var(--surface-2); font-size: .875rem; line-height: 1.5; }
+.startup-heading { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 16px; }
+.startup-heading h3 { margin: 0; font-size: .95rem; font-weight: 650; line-height: 1.4; }
+.startup-heading dl { display: flex; gap: 8px; margin: 0; color: var(--muted); }
+.startup-heading dd { margin: 0; font-variant-numeric: tabular-nums; }
+.startup-result { margin-block: 12px 4px; }
+.startup-guidance { max-width: 70ch; margin-block: 4px 12px; color: var(--muted); overflow-wrap: anywhere; }
+.startup-history a { color: var(--cyan); text-underline-offset: 3px; }
+.startup-history a:focus-visible, .startup-history summary:focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; }
+.startup-steps { margin-block: 12px; padding-inline-start: 22px; }
+.startup-steps li { padding-block: 3px; overflow-wrap: anywhere; }
+.startup-steps time { display: inline-block; margin-inline-start: 12px; color: var(--muted); font-variant-numeric: tabular-nums; font-size: .8rem; white-space: nowrap; }
+.startup-history summary { min-height: 44px; padding-block: 10px; cursor: pointer; color: var(--cyan); }
+.startup-previous { padding-inline-start: 22px; }
+.startup-previous > li { margin-block-end: 20px; }
+.startup-previous p { margin-block: 6px; }
+@media (forced-colors: active) { .startup-history a:focus-visible, .startup-history summary:focus-visible { outline-color: Highlight; } }
 .log-view { height: min(60vh, 650px); min-height: 190px; overflow: auto; margin-block-start: 13px; border: 1px solid var(--border); border-radius: 7px; background: #070d11; font: 0.7rem/1.55 "Cascadia Code", "SFMono-Regular", Consolas, monospace; }
 .log-line span { overflow-wrap: anywhere; min-width: 0; }
 .empty-log { padding: 18px; color: #647680; }

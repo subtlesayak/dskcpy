@@ -79,6 +79,51 @@ async function waitFor(predicate) {
   assert.fail('Expected state transition did not occur');
 }
 
+test('phone startup history survives raw-log overflow and preserves a final partial phase', async t => {
+  const f = await fixture(t);
+  const started = await f.request('/api/stream/start', { connection: 'wifi', serial: 'fixture._adb-tls-connect._tcp' });
+  assert.equal(started.code, 202);
+  const child = f.children[0].child;
+  child.stdout.write('INFO: Reverse startup: install-');
+  child.stdout.write('start\nINFO: Reverse startup: install-ready\nINFO: Reverse startup: launch-start\nINFO: Reverse startup: launch-ready\nINFO: Reverse startup: socket-wait\n');
+  for (let n = 0; n < 220; n++) child.stderr.write(`DEBUG: retry ${n} PRIVATE_DIAGNOSTIC\n`);
+  assert.equal(f.publicState().logs.length, 160);
+  assert.ok(!f.publicState().logs.some(entry => entry.message.includes('launch-ready')));
+  child.stderr.write('INFO: Reverse startup: socket-failed'); child.exit(2);
+  const value = (await f.request('/api/status')).body.nativeStartup;
+  assert.equal(value.current.status, 'failed'); assert.equal(value.current.failure, 'socket-failed');
+  assert.deepEqual(value.current.events.map(event => event.phase), ['host-check', 'install-start', 'install-ready', 'launch-start', 'launch-ready', 'socket-wait']);
+  assert.ok(!JSON.stringify(value).includes('PRIVATE')); assert.ok(value.current.endedAt);
+});
+test('automatic reconnect retains earlier startup facts; manual start resets the history', async t => {
+  const f = await fixture(t, { reconnectDelayMs: 5 });
+  await f.request('/api/stream/start', { connection: 'usb', serial: 'fixture', autoReconnect: true });
+  f.children[0].child.stdout.write('INFO: Reverse startup: launch-ready\nINFO: Reverse startup: socket-failed\n');
+  f.children[0].child.exit(2); await waitFor(() => f.children.length === 2);
+  assert.equal(f.publicState().nativeStartup.current.attempt, 2);
+  assert.equal(f.publicState().nativeStartup.previous[0].failure, 'socket-failed');
+  await f.request('/api/stream/stop', {}); await waitFor(() => !f.publicState().running);
+  assert.equal(f.publicState().nativeStartup.current.status, 'stopped');
+  await f.request('/api/stream/start', { connection: 'usb' });
+  assert.equal(f.publicState().nativeStartup.current.attempt, 1); assert.deepEqual(f.publicState().nativeStartup.previous, []);
+});
+test('a preflight failure preserves only fixed host-check context', async t => {
+  const f = await fixture(t, { readinessProbe: async () => ({ ...ready, transports: { ...ready.transports, usb: { ready: false, message: 'PRIVATE_PATH' } } }) });
+  const result = await f.request('/api/stream/start', { connection: 'usb' });
+  assert.equal(result.code, 400); assert.equal(f.children.length, 0);
+  const value = f.publicState().nativeStartup;
+  assert.equal(value.current.failure, 'host-check-failed'); assert.ok(!JSON.stringify(value).includes('PRIVATE'));
+});
+test('old native hosts can stream without being mislabeled as still connecting', async t => {
+  const f = await fixture(t);
+  await f.request('/api/stream/start', { connection: 'usb' });
+  f.children[0].child.stdout.write('DEBUG: Reverse display encode-submission-to-decode round-trip: 12.5 ms\n');
+  assert.equal(f.publicState().running, true); assert.equal(f.publicState().latencyMs, 12.5);
+  assert.equal(f.publicState().nativeStartup.current.status, 'unreported');
+  f.children[0].child.stdout.write('INFO: Reverse startup: install-start\n');
+  assert.equal(f.publicState().nativeStartup.current.status, 'starting');
+});
+
 test('launcher health endpoint exposes only app identity and does not probe or start programs', async (t) => {
   let probes = 0;
   const f = await fixture(t, { readinessProbe: async () => { probes++; return ready; } });

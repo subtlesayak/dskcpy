@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import BrowserHostPanel from './BrowserHostPanel';
+import NativeStartupPanel from './NativeStartupPanel';
 
 import {
   fetchDevices,
@@ -771,6 +772,7 @@ export default function App() {
             <span className="log-count">{status.logs.length} events</span>
           </div>
           <p className="action-note">{status.running ? 'Live stream diagnostics' : 'Stream idle'} · {status.error ? 'Last stream reported an error' : 'No current stream error'}. Showing the latest {Math.min(24, status.logs.length)} events. <a href="#connection">Go to Connect</a></p>
+          <NativeStartupPanel history={status.nativeStartup} />
           <div className="log-view" role="log" aria-live="polite">
             {status.logs.length === 0 ? (
               <div className="empty-log">Connect a device and start streaming to see live diagnostics.</div>
