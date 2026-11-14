@@ -35,7 +35,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, summary:focus
 .is-streaming #status { font-size: .875rem; text-align: end; }
 .is-streaming #error { grid-row: 2; margin: 0; font-size: .875rem; max-height: 20dvh; overflow-y: auto; }
 #stream-panel { grid-row: 3; position: relative; min-height: 0; min-width: 0; }
-#receiver-viewport { position: relative; display: grid; width: 100%; height: 100%; grid-template-columns: minmax(0, 1fr) 56px; grid-template-rows: minmax(0, 1fr); min-height: 0; min-width: 0; }
+#receiver-viewport { position: relative; display: grid; width: 100%; height: 100%; grid-template-columns: minmax(0, 1fr) 56px; grid-template-rows: minmax(0, 1fr); min-height: 0; min-width: 0; container: receiver / size; }
 #workspace { grid-column: 1; grid-row: 1; display: flex; flex-direction: column; min-height: 0; min-width: 0; }
 #stage { flex: 1; min-height: 0; min-width: 0; background: #000; display: grid; place-items: center; overflow: hidden; border-radius: 8px; }
 canvas { display: block; grid-area: 1 / 1; z-index: 1; max-width: 100%; max-height: 100%; touch-action: none; }
@@ -69,7 +69,7 @@ canvas { display: block; grid-area: 1 / 1; z-index: 1; max-width: 100%; max-heig
 .keyboard-open #error { grid-row: 1; }
 .keyboard-open #stream-panel { grid-row: 2; }
 .keyboard-open #workspace { flex-direction: column; }
-.keyboard-open #control-panels { flex-shrink: 0; width: auto; max-height: none; margin-inline-start: 0; overflow: visible; }
+.keyboard-open #control-panels { flex-shrink: 0; width: auto; max-width: none; max-height: none; margin-inline-start: 0; overflow: visible; }
 .keyboard-open #keyboard-controls { margin-block-start: 6px; }
 .panel-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-block-end: 8px; }
 .panel-heading h2 { margin: 0; min-width: 0; font-size: 1rem; line-height: 1.4; overflow-wrap: anywhere; }
@@ -97,7 +97,7 @@ summary { min-height: 44px; padding: 10px 12px; border: 1px solid #405461; borde
 #keyboard-input:focus-visible { outline-offset: 2px; }
 @media (forced-colors: active) { button:focus-visible, summary:focus-visible, textarea:focus-visible { outline-color: Highlight; } }
 
-@media (min-width: 40rem) {
+@container receiver (min-width: 40rem) {
   #workspace { flex-direction: row; }
   #control-panels { width: 13rem; max-width: 40%; max-height: 100%; margin-inline-start: 8px; }
   #keyboard-controls, #more-controls { margin-block-start: 0; }
@@ -114,7 +114,7 @@ summary { min-height: 44px; padding: 10px 12px; border: 1px solid #405461; borde
 #arrow-down { grid-area: 2 / 2; }
 #arrow-right { grid-area: 2 / 3; }
 #arrow-help { margin: 8px 0 0; }
-@media (min-width: 40rem) { #arrow-controls { margin-block-start: 0; } }
+@container receiver (min-width: 40rem) { #arrow-controls { margin-block-start: 0; } }
 #close-arrows { min-width: 44px; }
 
 #auto-keyboard-setting label { display: flex; align-items: center; gap: .5rem; min-height: 44px; }
@@ -147,7 +147,7 @@ summary { min-height: 44px; padding: 10px 12px; border: 1px solid #405461; borde
 .view-pan button { padding: 6px; min-height: 44px; }
 .view-navigation #stage { touch-action: none; cursor: grab; }
 .view-navigation #stage:focus-visible { outline: 3px solid #64d9fa; outline-offset: -3px; }
-@media (min-width: 40rem) { #view-controls { margin-block-start: 0; } }
+@container receiver (min-width: 40rem) { #view-controls { margin-block-start: 0; } }
 
 .view-zoom { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 #view-scroll-hint { margin: 6px 0; }
@@ -163,10 +163,21 @@ summary { min-height: 44px; padding: 10px 12px; border: 1px solid #405461; borde
 #shortcut-modifiers input { width: 20px; height: 20px; min-height: 20px; flex: none; }
 #shortcut-customize { margin-block-start: 12px; }
 #shortcut-reset { width: 100%; }
-@media (min-width: 40rem) { #shortcut-controls { margin-block-start: 0; } }
+@container receiver (min-width: 40rem) { #shortcut-controls { margin-block-start: 0; } }
 @media (forced-colors: active) { #shortcut-controls select:focus-visible { outline-color: Highlight; } }
 
 #shortcut-buttons { grid-template-columns: repeat(auto-fit, minmax(min(100%, 6rem), 1fr)); }
 #shortcut-heading { position: sticky; top: 0; z-index: 2; background: #101b22; }
 #shortcut-scroll-hint { flex-basis: 100%; margin: 0; }
 .shortcuts-open #control-panels { scroll-padding-block-start: var(--shortcut-heading-clearance, 56px); }
+#options-heading { position: sticky; top: 0; z-index: 2; background: #101b22; }
+#options-scroll-hint { flex-basis: 100%; margin: 0; }
+.options-open #control-panels { scroll-padding-block-start: var(--options-heading-clearance, 56px); }
+/* The viewport has a definite width/height. Compact only its header when the
+   soft keyboard leaves little block space, retaining the close and scroll cue. */
+@container receiver (max-height: 18rem) {
+  #options-heading { display: grid; grid-template-columns: minmax(0, 1fr) 44px; gap: 0 8px; }
+  #options-heading h2 { grid-column: 1; grid-row: 1; }
+  #close-options { grid-column: 2; grid-row: 1 / span 2; }
+  #options-scroll-hint { grid-column: 1; grid-row: 2; font-size: .75rem; line-height: 1.2; }
+}

@@ -60,6 +60,7 @@ jobs:
           node desktop/test/shortcuts-ui.mjs
           node desktop/test/link-check-ui.mjs
           node desktop/test/startup-history-ui.mjs
+          node desktop/test/video-preference-ui.mjs chromium
       - name: Artifact identity and upgrade preflight regressions
         run: node --test tools/*.test.mjs
 
@@ -93,12 +94,15 @@ jobs:
           node desktop/test/browser-media-ui.mjs webkit auto
           node desktop/test/browser-media-ui.mjs chromium adaptive
           node desktop/test/browser-media-ui.mjs chromium codec-update
+          node desktop/test/video-preference-ui.mjs webkit
       - name: Preserve sanitized synthetic-media results
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: synthetic-browser-media
-          path: desktop/out/browser-media-*/
+          path: |
+            desktop/out/browser-media-*/
+            desktop/out/video-preference-ui-*/
           if-no-files-found: ignore
 
   native-windows:

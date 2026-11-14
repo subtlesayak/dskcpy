@@ -11,6 +11,7 @@ import { receiverIsAway } from '../receiver/lifecycle.mjs';
 import * as protocol from '../receiver/protocol.mjs';
 import { createVideoReceiver } from '../receiver/video.mjs';
 import { createVideoFeedback } from '../receiver/video-feedback.mjs';
+import { createVideoPreference } from '../receiver/video-preference.mjs';
 import { createBrowserKeyboard, keyboardUsage, keyPacket } from '../receiver/keyboard.mjs';
 import { validBrowserInput } from './browser-protocol.mjs';
 
@@ -22,6 +23,8 @@ const parameters = new Uint8Array([0, 0, 1, 0x67, 0x64, 0, 0x28, 0, 0, 1, 0x68, 
 function receiver(t, { portrait = false, lockFails = false, webRtc = false, webCodecs = true, qrKey = '', keyboard = false, viewOnly = false, visualHeight = 0, webAudio = false, textFocus = false, keyboardStatus = false, clipboard = false, clipboardAPI = undefined, virtualKeyboard = null, now = () => Date.now(), resumable = false, mediaFallback = false, adaptiveVideo = false, rtcOffer = async () => {} } = {}) {
   const timers = new Set(), sockets = [], decoders = [], orientation = [], rtcReceivers = [];
   let resize;
+  const animationFrames = [];
+  const flushResize = () => { for (const callback of animationFrames.splice(0)) callback(); };
   const locationState = { protocol: 'https:', host: 'receiver.test', pathname: qrKey ? '/join' : '/', search: '', hash: qrKey ? `#connect=${qrKey}` : '' };
   const historyChanges = [];
   class Target {
@@ -105,6 +108,7 @@ function receiver(t, { portrait = false, lockFails = false, webRtc = false, webC
   if (webRtc) window.RTCPeerConnection = true;
   window.history = { replaceState(_state, _title, url) { locationState.hash = ''; historyChanges.push(url); } };
   const context = vm.createContext({ ...protocol,
+    createVideoPreference,
     createVideoFeedback: options => createVideoFeedback({...options,setTimer:(fn,ms)=>{const timer=setInterval(fn,ms);timers.add(timer);return timer},clearTimer:clearInterval}),
     createKeyboardShortcuts, shortcutLabel, createDesktopView, createRelativeTrackpad, createBrowserKeyboard, keyboardUsage, keyPacket, receiverIsAway,
     createBrowserClipboard: options => createBrowserClipboard({ ...options, setTimer: (fn, ms) => { const timer = setTimeout(fn, ms); timers.add(timer); return timer; }, clearTimer: clearTimeout }),
@@ -116,7 +120,7 @@ function receiver(t, { portrait = false, lockFails = false, webRtc = false, webC
     navigator: { virtualKeyboard, clipboard: clipboardAPI }, window, document, WebSocket: Socket, VideoDecoder: Decoder, AudioDecoder: SoundDecoder, AudioContext,
     EncodedAudioChunk: class { constructor(value) { Object.assign(this, value); } },
     EncodedVideoChunk: class { constructor(value) { Object.assign(this, value); } },
-    ResizeObserver: class { constructor(callback) { resize = callback; } observe() {} }, getComputedStyle: () => ({ paddingTop: '0', paddingRight: '0', paddingBottom: '0', paddingLeft: '0' }),
+    ResizeObserver: class { constructor(callback) { resize = callback; } observe() {} }, requestAnimationFrame: callback => animationFrames.push(callback), getComputedStyle: () => ({ paddingTop: '0', paddingRight: '0', paddingBottom: '0', paddingLeft: '0', zoom: '1' }),
     Date: class extends Date { static now() { return now(); } },
     location: locationState, performance: { now: () => 2000 }, AbortSignal,
     innerWidth: portrait ? 390 : 844, innerHeight: portrait ? 844 : 390,
@@ -139,8 +143,22 @@ function receiver(t, { portrait = false, lockFails = false, webRtc = false, webC
     new Uint8Array(bytes, 16).set(payload); socket.emit('message', { data: bytes });
   }
   media(0, 1, parameters);
-  return { context, $, document, window, socket, sockets, locationState, decoders, rtcReceivers, media, orientation, historyChanges, cssVariables, soundDecoders, audioSources, audioContexts, reflow: () => resize() };
+  return { context, $, document, window, socket, sockets, locationState, decoders, rtcReceivers, media, orientation, historyChanges, cssVariables, soundDecoders, audioSources, audioContexts,
+    notifyResize: () => resize(), flushResize, animationFrames, reflow: () => { resize(); flushResize(); } };
 }
+
+test('stage resize notifications coalesce outside observer delivery and use the latest viewport without releasing keys', t => {
+  const h = receiver(t, {keyboard:true,visualHeight:400});
+  h.$('keyboard').emit('click');h.$('keyboard-input').emit('keydown',{code:'ControlLeft',key:'Control'});
+  const before=h.socket.sent.filter(Buffer.isBuffer).filter(p=>p[0]===8).length;
+  h.window.visualViewport.height=250;h.notifyResize();h.notifyResize();
+  assert.equal(h.animationFrames.length,1);assert.equal(h.cssVariables.get('--receiver-height'),'400px');
+  h.window.visualViewport.height=220;h.flushResize();
+  assert.equal(h.cssVariables.get('--receiver-height'),'220px');assert.equal(h.animationFrames.length,0);
+  assert.equal(h.socket.sent.filter(Buffer.isBuffer).filter(p=>p[0]===8).length,before);
+  h.$('keyboard-input').emit('keyup',{code:'ControlLeft',key:'Control'});
+  assert.equal(h.socket.sent.filter(Buffer.isBuffer).filter(p=>p[0]===8).at(-1)[1],1);
+});
 
 test('suspension drains queued frames and ignores stale decoder callbacks after resume', async (t) => {
   const h = receiver(t);

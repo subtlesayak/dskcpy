@@ -8,8 +8,10 @@ stay fixed. This is a source candidate, not a hardware-qualified deployment.
 In the dashboard's Performance page, **Adjust browser video automatically**
 controls the next stream. The selected bitrate and FPS remain upper limits.
 The beginner desktop shell requests automatic video on capable hosts. In the
-receiver's Options, the same labeled switch can restore manual limits for the
-current session. The status shows the last settings reported by the native
+receiver's Options, the same labeled switch can restore manual limits. An
+[explicit automatic/manual choice](browser-video-preference.md) is remembered
+in this browser for the current receiver origin and restored only after the next
+authenticated, capable stream is ready. The status shows the last settings reported by the native
 encoder, as targets/caps rather than measured throughput. The switch is disabled
 while paused or unavailable. Older native hosts retain manual mode. The separate
 [Windows candidate](windows-adaptive-video.md) uses checked encoder replacement;
