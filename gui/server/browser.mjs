@@ -8,6 +8,7 @@ import { WebSocketServer } from 'ws';
 import { createBrowserSession } from './browser-session.mjs';
 import { BROWSER_RESUME_MS } from '../receiver/protocol.mjs';
 import { deviceDigest, deviceName, TRUST_LIFETIME_MS } from './trusted-devices.mjs';
+import { createWindowTargets } from './window-targets.mjs';
 
 const assets = new Map([
   ['/', ['index.html', 'text/html; charset=utf-8']],
@@ -21,6 +22,7 @@ const assets = new Map([
   ['/keyboard.mjs', ['keyboard.mjs', 'text/javascript; charset=utf-8']],
   ['/clipboard.mjs', ['clipboard.mjs', 'text/javascript; charset=utf-8']],
   ['/video-feedback.mjs', ['video-feedback.mjs', 'text/javascript; charset=utf-8']],
+  ['/window-chooser.mjs', ['window-chooser.mjs', 'text/javascript; charset=utf-8']],
   ['/video-preference.mjs', ['video-preference.mjs', 'text/javascript; charset=utf-8']],
   ['/protocol.mjs', ['protocol.mjs', 'text/javascript; charset=utf-8']],
   ['/remembered.mjs', ['remembered.mjs', 'text/javascript; charset=utf-8']],
@@ -42,7 +44,7 @@ export function receiverOrigin(value) {
 // Remote access is opt-in via a user-managed Tailscale Serve HTTPS proxy.
 export function createBrowserReceiver({ configuredPort = 27180, origin,
   tls, rtcBind = '127.0.0.1', onConnect, onChange = () => {}, invitationMs = 300000, authMs = 5000,
-  resumeMs = BROWSER_RESUME_MS, lifetimeMs = 12 * 60 * 60 * 1000, nativeEndGraceMs = 15000, rtcMediaFactory, trustedDevices, onTrustedConnect } = {}) {
+  resumeMs = BROWSER_RESUME_MS, lifetimeMs = 12 * 60 * 60 * 1000, nativeEndGraceMs = 15000, rtcMediaFactory, trustedDevices, onTrustedConnect, onRetireWindow } = {}) {
   const remoteOrigin = receiverOrigin(origin);
   const healthInstance = randomBytes(16).toString('hex'); // launch marker, never an access credential
   let port, closed = false;
@@ -262,7 +264,7 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
         const deviceId = trustedTicket?.id; trustedTicket = null;
         const token = Buffer.from(req.resumeToken);
         const active = createBrowserSession({ socket: ws, onConnect, resumeMs, lifetimeMs, nativeEndGraceMs, rtcMediaFactory,
-          mediaMode, rtcBind, ...inputPolicy, onChange, onClose: () => {
+          mediaMode, rtcBind, ...inputPolicy, onRetireWindow, onChange, onClose: () => {
           token.fill(0);
           pendingCleanup = Promise.all([pendingCleanup, active.cleanup]).then(() => {});
           if (session === active) session = null;
@@ -306,6 +308,9 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
   }
   async function invite(connection = 'local', policy = {}, grant = null) {
     if (invitation || session) throw new Error('A browser session is already open. Stop it first.');
+    const windowGroup = createWindowTargets(policy.windowTargets, policy.initialWindow);
+    if (windowGroup && (policy.viewOnly !== true || typeof onRetireWindow !== 'function' || grant))
+      throw Error('Window switching requires an explicitly selected view-only window session.');
     await ensureListening(connection);
     if (invitation || session) throw new Error('A browser session is already open. Stop it first.');
     if (grant && !trustedDevices?.allowed(grant.id, grant.digest)) throw new Error('Remembered access was paused or revoked.');
@@ -317,6 +322,7 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
       textFocus: policy.textFocus === true && policy.keyboard === true && policy.viewOnly !== true,
       captureRecovery: policy.captureRecovery === true && policy.viewOnly !== true };
     inputPolicy.adaptiveVideo = policy.adaptiveVideo === true && policy.viewOnly !== true;
+    if (windowGroup) inputPolicy.windowGroup = windowGroup;
     invitation = randomBytes(24);
     failures = 0;
     const duration = grant ? 15000 : invitationMs;

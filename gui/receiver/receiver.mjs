@@ -8,6 +8,7 @@ import { BROWSER_RESUME_MS, MEDIA_FALLBACK_PROTOCOL, avcCodec, avcParameters, to
 import { createRtcReceiver } from './rtc.mjs';
 import { createVideoReceiver } from './video.mjs';
 import { createVideoFeedback } from './video-feedback.mjs';
+import { createWindowChooser } from './window-chooser.mjs';
 import { createVideoPreference } from './video-preference.mjs';
 import { createBrowserKeyboard, keyboardUsage, keyPacket } from './keyboard.mjs';
 
@@ -123,6 +124,21 @@ const shortcutsPresent = ['shortcuts', 'shortcut-controls', 'close-shortcuts', '
 if (shortcutsPresent) controlTrays.push({ trigger: 'shortcuts', panel: 'shortcut-controls', first: 'shortcut-0' });
 const viewPresent = ['view', 'view-controls', 'close-view', 'view-scale', 'view-in', 'view-out', 'view-fit', 'view-up', 'view-down', 'view-left', 'view-right'].every(id => $(id));
 if (viewPresent) controlTrays.push({ trigger: 'view', panel: 'view-controls', first: 'close-view' });
+const windowChooserPresent = ['choose-window','window-choices','window-choice-list','window-choice-status','close-window-choices'].every(id => $(id));
+if (windowChooserPresent) controlTrays.push({trigger:'choose-window',panel:'window-choices',first:'close-window-choices'});
+let windowFrames = 0, windowSwitchExpected = false;
+const windowChooser = windowChooserPresent ? createWindowChooser({document,trigger:$('choose-window'),list:$('window-choice-list'),status:$('window-choice-status'),
+  canSelect: () => authenticated && header && !mediaSwitching && !paused && !away() && ws?.readyState === WebSocket.OPEN,
+  send: message => { if (ws?.readyState !== WebSocket.OPEN) return false; ws.send(JSON.stringify(message)); return true; },
+  snapshot: () => {
+    const source = mediaMode === 'webrtc' ? rtcDisplay : canvas;
+    if (mediaMode === 'webrtc' ? rtcDisplay.readyState < 2 || !rtcDisplay.videoWidth : !windowFrames) return null;
+    const preview = document.createElement('canvas'); preview.width=160;preview.height=100;
+    const ctx=preview.getContext('2d',{alpha:false}), w=source.videoWidth||source.width,h=source.videoHeight||source.height;
+    const scale=Math.min(160/w,100/h);
+    try {ctx.fillStyle='#080f13';ctx.fillRect(0,0,160,100);ctx.drawImage(source,(160-w*scale)/2,(100-h*scale)/2,w*scale,h*scale);return preview;}catch{return null;}
+  },
+}) : null;
 let openControlTray = null;
 const viewNavigationActive = () => viewPresent && openControlTray === 'view';
 let selectDrag = false, touchGesture = null, trackpadMode = false;
@@ -252,6 +268,7 @@ const clipboardTools = $('clipboard-tools') ? createBrowserClipboard({ section: 
   canUse: canSendKeys, send, control: value => { if (!authenticated || ws?.readyState !== WebSocket.OPEN) return false; ws.send(value); return true; }, localClipboard: navigator.clipboard,
 }) : null;
 function updateArrowAvailability() {
+  windowChooser?.refresh();
   if (qualityToggle) qualityToggle.disabled = !canSetVideoQuality();
   $('keyboard').disabled = mediaSwitching || !authenticated || !header;
   paintTrackpad();
@@ -379,6 +396,7 @@ function releaseTouches(includeKeyboard = true) {
 }
 function fail(message) { $('error').textContent = message; disconnect(); }
 function clearMedia() {
+  windowFrames = 0; windowChooser?.supported(false);
   qualityFeedback?.close(); qualityFeedback = null; qualitySupported = qualityAvailable = false;
   qualityResumeReady = false; qualityPreferencePending = null;
   if (qualitySetting) qualitySetting.hidden = true;
@@ -397,6 +415,7 @@ function disconnect() {
   if (closing) return;
   closing = true;
   const cancelRetainedCapture = mediaSwitching || sameCaptureRecovery;
+  windowChooser?.clear(); windowSwitchExpected=false;
   resumeAllowed = false;
   generation++;
   resumePendingMedia = null;
@@ -528,13 +547,18 @@ function connect(key = null, requestedMode = preferredMode) {
     resumePendingMedia = null;
     clearTimeout(connectionTimer);
     releaseTouches(); clearMedia(); ws = null; authenticated = false; mediaSwitching = false; clearFocusCapability(false); updateArrowAvailability();
+    // WebKit may omit close metadata. Only a validated authenticated
+    // switching acknowledgment permits its otherwise-terminal 1005 path.
+    const windowSwitch = windowSwitchExpected || (event.code === 1012 && event.reason === 'window-switch');
+    windowSwitchExpected = false;
+    if (windowSwitch) sameCaptureRecovery = true;
     const captureRestart = event.code === 1012 && event.reason === 'capture-restart';
     const mediaFallback = fallbackNegotiated && (fallbackAcknowledged || fallbackRequested || (event.code === 1012 && event.reason === 'media-fallback'));
-    if (captureRestart || mediaFallback) { hideKeyboard(); fitCanvas(); }
+    if (captureRestart || mediaFallback || windowSwitch) { hideKeyboard(); fitCanvas(); }
     if (mediaFallback) { sameCaptureRecovery = true; muted = true; setRailLabel('audio', 'Audio off'); $('audio').setAttribute('aria-pressed', 'false'); $('audio').setAttribute('aria-label', 'Audio off'); }
-    if (sessionExpected && ![1000, 1008, 4000, 4002].includes(event.code) && (event.code !== 1005 || mediaFallback)) {
+    if (sessionExpected && ![1000, 1008, 4000, 4002].includes(event.code) && (event.code !== 1005 || mediaFallback || windowSwitch)) {
       resumeDeadline ||= Date.now() + BROWSER_RESUME_MS;
-      $('status').textContent = document.hidden ? 'Paused while away' : captureRestart ? 'Restoring the computer display…' : mediaFallback ? 'Restoring browser video…' : 'Reconnecting…';
+      $('status').textContent = document.hidden ? 'Paused while away' : windowSwitch ? 'Switching window…' : captureRestart ? 'Restoring the computer display…' : mediaFallback ? 'Restoring browser video…' : 'Reconnecting…';
       retryTimer = setTimeout(resumeSession, 250);
     } else {
       sessionExpected = false;
@@ -597,6 +621,12 @@ function connect(key = null, requestedMode = preferredMode) {
           if (message.status === 'ready' && $('error').textContent.startsWith('The computer could not accept all keyboard input.')) $('error').textContent = '';
           return;
         }
+        if (message.type === 'window-state') {
+          if (!authenticated || !viewOnly || !windowChooser) throw Error('Unexpected window selection response.');
+          windowChooser.receive(message);
+          if (message.switching) windowSwitchExpected=true;
+          return;
+        }
         if (message.type === 'text-focus') {
           if (!authenticated || ![true, false, null].includes(message.focused)) throw new Error('Unexpected focus hint.');
           autoFocusKeyboard(message.focused); return;
@@ -620,8 +650,13 @@ function connect(key = null, requestedMode = preferredMode) {
             send: sample => { if (mine === generation && socket === ws && socket.readyState === WebSocket.OPEN && !mediaSwitching) socket.send(JSON.stringify(sample)); },
           });
         }
-        sameCaptureRecovery = false;
+        windowSwitchExpected=false;
         viewOnly = message.viewOnly === true;
+        // Never silently replace a window grant with remembered full-desktop access.
+        sameCaptureRecovery = viewOnly;
+        windowChooser?.supported(viewOnly && message.windowSwitch === true);
+        if (windowChooser && viewOnly && message.windowSwitch === true) socket.send('window-select-subscribe');
+        else windowChooser?.clear();
         remembered.authenticated(viewOnly);
         keyboardSupported = message.keyboard === true && !viewOnly;
         clipboardTools?.setSupported(keyboardSupported && message.clipboard === true);
@@ -708,7 +743,7 @@ function connect(key = null, requestedMode = preferredMode) {
       onAck: (timestamp) => { if (mine === generation) mediaAcks.acknowledge(4, timestamp); },
       onFrame: (frame) => {
         if (mine !== generation || paused || document.hidden) return;
-        context.drawImage(frame, 0, 0, canvas.width, canvas.height); frames++;
+        context.drawImage(frame, 0, 0, canvas.width, canvas.height); frames++; windowFrames++;
         clearTimeout(timeout);
         $('status').textContent = 'Streaming';
         if (performance.now() - statsAt > 1000) {
@@ -1029,6 +1064,7 @@ function setControlsVisible(visible) {
   fitCanvas();
   (visible ? $('hide-controls') : $('show-controls')).focus();
 }
+if (windowChooserPresent) $('close-window-choices').addEventListener('click',()=>setControlTray(null,true));
 $('hide-controls').addEventListener('click', () => setControlsVisible(false));
 $('show-controls').addEventListener('click', () => setControlsVisible(true));
 function fitCanvas() {
@@ -1042,6 +1078,7 @@ function fitCanvas() {
   const stage = $('stage');
   document.body.classList.toggle('view-navigation', viewNavigationActive());
   document.body.classList.toggle('shortcuts-open', openControlTray === 'shortcuts');
+  document.body.classList.toggle('window-choices-open', openControlTray === 'choose-window');
   document.body.classList.toggle('options-open', openControlTray === 'more');
   stage.tabIndex = viewNavigationActive() ? 0 : -1;
   if (viewNavigationActive()) { stage.setAttribute('role', 'group'); stage.setAttribute('aria-label', 'Move the local view'); stage.setAttribute('aria-describedby', 'view-help'); }
@@ -1065,6 +1102,11 @@ function fitCanvas() {
     const cue = $('options-scroll-hint'), scroller = $('control-panels');
     cue.hidden = true; cue.hidden = openControlTray !== 'more' || scroller.scrollHeight <= scroller.clientHeight + 1;
     document.documentElement.style.setProperty('--options-heading-clearance', `${($('options-heading')?.offsetHeight || 48) + 12}px`);
+  }
+  if ($('window-choice-scroll-hint')) {
+    const cue=$('window-choice-scroll-hint'),scroller=$('control-panels');
+    cue.hidden=true;cue.hidden=openControlTray!=='choose-window'||scroller.scrollHeight<=scroller.clientHeight+1;
+    document.documentElement.style.setProperty('--window-choice-clearance', `${($('window-choice-heading')?.offsetHeight||48)+12}px`);
   }
   hint.hidden = true;
   hint.hidden = !(controls.scrollHeight > controls.clientHeight + 1);

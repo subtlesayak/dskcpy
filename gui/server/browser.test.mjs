@@ -836,3 +836,58 @@ test('adaptive feedback requires a current subscription and never forwards arbit
  ws.ping();await once(ws,'pong');assert.equal(ws.readyState,WebSocket.OPEN);assert.equal(Buffer.concat(input).length,count);
  const closed=once(ws,'close');ws.send(Buffer.from([5,14]));assert.equal((await closed)[0],1008);
 });
+
+const windowPolicy = {viewOnly:true,windowTargets:[{id:11,ownerPid:41,label:'Editor'},{id:12,ownerPid:42,label:'Notes'}],initialWindow:{windowId:11,windowOwnerPid:41}};
+function windowStates(ws) { return ws.received.filter(m=>!m.binary).map(m=>JSON.parse(m.data)).filter(m=>m.type==='window-state'); }
+async function windowLogin(f) { const ws=await login(f);ws.send('window-select-subscribe');ws.send('resume');ws.send(Buffer.from([5,8]));await until(()=>windowStates(ws).length);return ws; }
+test('authorized window switch waits for owner retirement, keeps cookie and lifetime, and clears old media geometry',async t=>{
+ let retire,owner;
+ const next=Buffer.from(header);next.writeUInt32BE(800,8);next.writeUInt32BE(600,12);
+ const f=await fixture(t,{inputPolicy:windowPolicy,headers:[header,next],nativeEndGraceMs:80,
+  onRetireWindow:token=>{owner=token;return {done:new Promise(resolve=>retire=resolve),cancel(){}};}});
+ const ws=await windowLogin(f),cookie=ws.cookie.split(';')[0],first=windowStates(ws).at(-1);
+ assert.equal(f.bridge().keyboard,false);assert.equal(f.bridge().viewOnly,true);assert.equal(f.bridge().windowTarget.id,11);
+ const closed=once(ws,'close');ws.send(JSON.stringify({type:'window-select',key:first.windows[1].key}));
+ const [code,reason]=await closed;assert.equal(code,1012);assert.equal(String(reason),'window-switch');
+ assert.equal(owner,f.bridge().windowOwner);assert.equal(f.calls(),1);
+ retire(true);await until(()=>f.calls()===2);await until(()=>!f.receiver.status().recovering);
+ assert.equal(f.bridge().windowTarget.id,12);assert.equal(f.bridge().windowTarget.ownerPid,42);
+ const resumed=await f.open(undefined,cookie);await until(()=>resumed.received.some(m=>m.binary));
+ assert.deepEqual(resumed.received.filter(m=>m.binary).map(m=>m.data),[next]);
+ assert.equal(windowStates(resumed).length,0); // Each socket must opt in again.
+ resumed.send('window-select-subscribe');resumed.send('resume');resumed.send(Buffer.from([5,8]));
+ await until(()=>windowStates(resumed).length);
+ assert.equal(windowStates(resumed)[0].current,first.windows[1].key);
+ assert.equal(windowStates(resumed)[0].grant,first.grant);
+ await new Promise(resolve=>setTimeout(resolve,100)); // Old classification timer must be retired.
+ assert.equal(await resumable(f,cookie),true);
+ resumed.send(JSON.stringify({type:'window-select',key:first.windows[0].key}));
+ await until(()=>windowStates(resumed).at(-1).error==='wait');assert.equal(f.calls(),2);
+ resumed.close(4000);
+});
+test('window selection requires subscription, allowlist membership and view-only grant',async t=>{
+ for(const kind of ['unsubscribed','unknown','extra']){
+  const f=await fixture(t,{inputPolicy:windowPolicy,onRetireWindow:()=>assert.fail('must not retire')});
+  const ws=kind==='unsubscribed'?await login(f):await windowLogin(f);
+  const key=windowStates(ws)[0]?.windows[1].key||'x'.repeat(16),ended=once(ws,'close');
+  ws.send(JSON.stringify({type:'window-select',key:kind==='unknown'?'z'.repeat(16):key,...(kind==='extra'?{id:12}:{})}));
+  const [code]=await ended;assert.equal(code,1008);assert.equal(f.calls(),1);
+ }
+ const receiver=createBrowserReceiver({configuredPort:0,onConnect:()=>{},onRetireWindow:()=>{}});t.after(()=>receiver.shutdown());
+ await assert.rejects(receiver.invite('local',{...windowPolicy,viewOnly:false}));
+});
+test('failed window retirement is terminal and never opens another capture',async t=>{
+ let retire;const f=await fixture(t,{inputPolicy:windowPolicy,onRetireWindow:()=>({done:new Promise(resolve=>retire=resolve),cancel(){}})});
+ const ws=await windowLogin(f),cookie=ws.cookie.split(';')[0];
+ ws.send(JSON.stringify({type:'window-select',key:windowStates(ws)[0].windows[1].key}));await once(ws,'close');
+ retire(false);await until(()=>!f.receiver.status().connected);
+ assert.equal(f.calls(),1);assert.equal(await resumable(f,cookie),false);
+});
+
+test('switching does not renew the original browser-session lifetime',async t=>{
+ const f=await fixture(t,{inputPolicy:windowPolicy,lifetimeMs:350,onRetireWindow:()=>({done:Promise.resolve(true),cancel(){}})});
+ const ws=await windowLogin(f),cookie=ws.cookie.split(';')[0];
+ ws.send(JSON.stringify({type:'window-select',key:windowStates(ws)[0].windows[1].key}));await once(ws,'close');
+ await until(()=>f.calls()===2);const resumed=await f.open(undefined,cookie);await until(()=>resumed.received.some(m=>m.binary));
+ const ended=once(resumed,'close');const [code]=await ended;assert.equal(code,1008);assert.equal(await resumable(f,cookie),false);assert.equal(f.calls(),2);
+});

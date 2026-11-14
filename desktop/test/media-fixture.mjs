@@ -38,12 +38,12 @@ export function mediaPacket(payload, pts, flags) {
   const packet = Buffer.alloc(16 + payload.length);
   packet.writeUInt32BE(payload.length); packet.writeBigUInt64BE(BigInt(pts), 4); packet.writeUInt32BE(flags, 12); payload.copy(packet, 16); return packet;
 }
-export async function generateMediaFixture({ replacement = false, outOfBandParameters = false, retainSps = false } = {}) {
+export async function generateMediaFixture({ replacement = false, outOfBandParameters = false, retainSps = false, width = 640, height = 360 } = {}) {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'dskcpy-synthetic-media-'));
   try {
     const video = path.join(directory, 'pattern.h264'), audio = path.join(directory, 'tone.ogg');
     const options = { timeout: 30000, maxBuffer: 1024 * 1024 };
-    await execute('ffmpeg', ['-hide_banner', '-v', 'error', '-nostdin', '-f', 'lavfi', '-i', replacement ? 'color=c=blue:size=640x360:rate=10' : 'testsrc2=size=640x360:rate=10',
+    await execute('ffmpeg', ['-hide_banner', '-v', 'error', '-nostdin', '-f', 'lavfi', '-i', replacement ? `color=c=blue:size=${width}x${height}:rate=10` : `testsrc2=size=${width}x${height}:rate=10`,
       '-an', '-frames:v', '20', '-c:v', 'libx264', '-profile:v', 'baseline', '-level:v', '3.0', '-preset', 'ultrafast', '-tune', 'zerolatency',
       '-pix_fmt', 'yuv420p', '-x264-params', `aud=1:repeat-headers=1:keyint=10:min-keyint=10:scenecut=0:sps-id=${replacement ? 1 : 0}`, '-f', 'h264', video], options);
     await execute('ffmpeg', ['-hide_banner', '-v', 'error', '-nostdin', '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000',
@@ -71,6 +71,6 @@ export async function generateMediaFixture({ replacement = false, outOfBandParam
     }
     const { stdout } = await execute('ffmpeg', ['-version'], options);
     return { frames, configuration: Buffer.concat(parameters.flatMap(n => [prefix, n])), sound, parameterSetIds,
-      width: 640, height: 360, encoder: stdout.split(/\r?\n/)[0] };
+      width, height, encoder: stdout.split(/\r?\n/)[0] };
   } finally { await rm(directory, { recursive: true, force: true }); }
 }

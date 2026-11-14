@@ -28,6 +28,10 @@ export default function BrowserHostPanel({ status, config, online, onStatus }: {
   const [transport, setTransport] = useState('local');
   const [windows, setWindows] = useState<{ id: number; ownerPid: number; title: string; application: string }[]>([]);
   const [selectedWindow, setSelectedWindow] = useState('');
+  const [allowWindowSwitch, setAllowWindowSwitch] = useState(false);
+  const [extraWindows, setExtraWindows] = useState<string[]>([]);
+  const approvedWindows = windows.filter(w => windowKey(w) === selectedWindow || extraWindows.includes(windowKey(w)));
+  const switchAvailable = Boolean(selectedWindow && status.readiness?.features?.browserCaptureRecovery);
   const [clipboardAllowed, setClipboardAllowed] = useState(false);
   const [windowBusy, setWindowBusy] = useState(false);
   const keyTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -61,6 +65,7 @@ export default function BrowserHostPanel({ status, config, online, onStatus }: {
             : !readiness.ready ? readiness.message
               : mode === 'usb' && adbCheck && !adbCheck.ready ? adbCheck.message
                 : selectedWindow && !windows.some((w) => windowKey(w) === selectedWindow) ? 'Select an available window before creating the invitation.'
+                  : allowWindowSwitch && (!switchAvailable || approvedWindows.length < 2 || approvedWindows.length > 8) ? 'Select between two and eight available windows to allow switching.'
                   : needsSetup ? 'Set up a secure link, or choose USB cable or This computer.' : '';
 
   useEffect(() => { if (!active) setClipboardAllowed(false); }, [active]);
@@ -95,6 +100,7 @@ export default function BrowserHostPanel({ status, config, online, onStatus }: {
         headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...config,
           windowId: windows.find((window) => windowKey(window) === selectedWindow)?.id,
           windowOwnerPid: windows.find((window) => windowKey(window) === selectedWindow)?.ownerPid,
+          browserWindows: allowWindowSwitch && switchAvailable ? approvedWindows.map(w => ({id:w.id,ownerPid:w.ownerPid,label:`${w.application} — ${w.title}`.slice(0,80)})) : undefined,
           browserClipboard: clipboardAllowed && !selectedWindow, browserTransport: mode, browserSerial: config.connection === 'usb' ? config.serial : undefined }) });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || 'Could not create a link. Try again.');
@@ -137,7 +143,7 @@ export default function BrowserHostPanel({ status, config, online, onStatus }: {
         <div><input id="browser-code" value={key} readOnly autoComplete="off" spellCheck={false} aria-describedby="browser-code-help" />
           <button className="secondary-button" type="button" onClick={() => copy(key, 'code')}><Copy size={16} aria-hidden="true" />{copied === 'code' ? 'Code copied' : 'Copy code'}</button></div>
       </div>
-      <p id="browser-code-help" className="action-note">One use · expires five minutes after creation. Share only with someone you trust: this code lets them view and control your computer.</p>
+      <p id="browser-code-help" className="action-note">One use · expires five minutes after creation. Share only with someone you trust: {selectedWindow ? 'this code lets them view the selected windows, with audio and control off.' : 'this code lets them view and control your computer.'}</p>
   </>;
 
   return <section className="panel browser-host-panel" aria-labelledby="browser-title">
@@ -163,7 +169,7 @@ export default function BrowserHostPanel({ status, config, online, onStatus }: {
     {status.hostPlatform === 'macOS' && status.readiness?.features?.macWindowCapture && <fieldset disabled={active || busy || windowBusy}>
       <legend>Choose what to share</legend>
       <label htmlFor="browser-capture-target">Capture target</label>
-      <select id="browser-capture-target" value={selectedWindow} onChange={(event) => { setSelectedWindow(event.target.value); setClipboardAllowed(false); }}>
+      <select id="browser-capture-target" value={selectedWindow} onChange={(event) => { setSelectedWindow(event.target.value); setClipboardAllowed(false); setAllowWindowSwitch(false); setExtraWindows([]); }}>
         <option value="">Entire desktop · video, audio and control</option>
         {selectedWindow && !windows.some((w) => windowKey(w) === selectedWindow)
           && <option value={selectedWindow} disabled>Selected window is no longer available</option>}
@@ -173,8 +179,20 @@ export default function BrowserHostPanel({ status, config, online, onStatus }: {
         {windowBusy ? 'Refreshing windows…' : 'Refresh windows'}
       </button>
       <p className="action-note">{selectedWindow
-        ? 'Only this window is captured. Window mode is view-only with audio off; minimizing, hiding or closing it ends the stream. Resize keeps a fixed video canvas.'
-        : 'Refresh to choose a single window. Window names stay in this local picker.'}</p>
+        ? allowWindowSwitch ? 'Only approved windows can be selected by the receiver. Window mode is view-only with audio off. Closing or hiding the captured window ends sharing.' : 'Only this window is captured. Window mode is view-only with audio off; minimizing, hiding or closing it ends the stream. Resize keeps a fixed video canvas.'
+        : 'Refresh to choose windows. Names stay in this local picker unless you allow receiver switching.'}</p>
+    </fieldset>}
+
+    {switchAvailable && <fieldset disabled={active || busy || windowBusy} className="browser-window-choices">
+      <legend>Window switching</legend>
+      <label><input type="checkbox" checked={allowWindowSwitch} onChange={event=>setAllowWindowSwitch(event.target.checked)} /> Allow receiver to switch windows</label>
+      <p className="action-note">Choose two to eight windows. Their names will appear in the receiver. Switching briefly reconnects video; it never shares the entire desktop.</p>
+      {allowWindowSwitch && windows.map(w=><label key={windowKey(w)}>
+        <input type="checkbox" checked={windowKey(w)===selectedWindow || extraWindows.includes(windowKey(w))}
+          disabled={windowKey(w)===selectedWindow || (approvedWindows.length>=8 && !extraWindows.includes(windowKey(w)))}
+          onChange={event=>setExtraWindows(previous=>event.target.checked?[...previous,windowKey(w)]:previous.filter(k=>k!==windowKey(w)))} />
+        <span>{w.application} — {w.title}{windowKey(w)===selectedWindow?' (initial window)':''}</span>
+      </label>)}
     </fieldset>}
 
     {status.readiness?.features?.browserClipboard && !selectedWindow && mode !== 'local' && !active && <fieldset className="browser-clipboard-permission" disabled={busy}>
@@ -214,10 +232,10 @@ export default function BrowserHostPanel({ status, config, online, onStatus }: {
         : mode === 'local' ? 'Open the receiver below, paste the connection code, then select Connect.'
           : 'Point your phone’s camera at the QR code and open the link. It connects using this one-use invitation. Keep Tailscale connected for Internet / VPN.'}</p>
       {qr && <div className="browser-qr">
-        <svg role="img" aria-label="Scan this QR code to view and control this computer" viewBox={`0 0 ${qr.size} ${qr.size}`} shapeRendering="crispEdges">
+        <svg role="img" aria-label={selectedWindow ? "Scan this QR code to view selected windows" : "Scan this QR code to view and control this computer"} viewBox={`0 0 ${qr.size} ${qr.size}`} shapeRendering="crispEdges">
           <rect width={qr.size} height={qr.size} fill="white" /><path d={qr.path} fill="black" />
         </svg>
-        <p>Scan with your phone’s camera. No copying needed.<br /><span className="action-note">Anyone with this invitation can view and control your screen. It expires after five minutes or its first use.</span></p>
+        <p>Scan with your phone’s camera. No copying needed.<br /><span className="action-note">{selectedWindow ? 'Anyone with this invitation can view the selected windows. Audio and control are off.' : 'Anyone with this invitation can view and control your screen.'} It expires after five minutes or its first use.</span></p>
       </div>}
       {mode === 'usb' ? <details className="wireless-setup"><summary>Manual USB connection</summary>{invitationFields}</details> : invitationFields}
       {mode === 'local' && <a className="secondary-button browser-open" href={url} target="_blank" rel="noreferrer"><ExternalLink size={16} aria-hidden="true" />Open browser receiver</a>}
