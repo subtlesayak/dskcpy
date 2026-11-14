@@ -102,6 +102,7 @@ export function createControlService({
     pid: null,
     encoder: null,
     latencyMs: null,
+    nativeInputPermission: null,
     command: null,
     startedAt: null,
     lastExitCode: null,
@@ -505,6 +506,7 @@ export function createControlService({
     state.reconnecting = Boolean(retrySession);
     state.nextRetryAt = null;
     state.config = config;
+    state.nativeInputPermission = null;
     state.error = null;
     state.latencyMs = null;
     state.encoder = null;
@@ -554,37 +556,49 @@ export function createControlService({
         stdio: ['pipe', 'pipe', 'pipe'],
       });
       streamProcess = child;
+      state.nativeInputPermission = platform === 'darwin' && !config.windowId ? 'unreported' : null;
       startupAttempt?.spawned();
       let captureEndReason = null;
       state.pid = child.pid ?? null;
       child.stdin.on('error', () => {}); // Child may exit before reading q.
-      child.stdout.on('data', (chunk) => consumeOutput('stdout', chunk, line => {
-        if (streamProcess === child) startupAttempt?.observe(line);
-        if (line.startsWith('DSKCPY_VIDEO_QUALITY ')) {
-          const match = /^DSKCPY_VIDEO_QUALITY (unsupported|[012] ([1-9][0-9]{0,2}) ([1-9][0-9]{0,7}))$/.exec(line);
-          if (match && streamProcess === child && browserBridge?.adaptiveVideo)
-            browserBridge.videoQuality(match[1] === 'unsupported' ? null : { level: Number(match[1][0]), fps: Number(match[2]), bitRate: Number(match[3]) });
+      child.stdout.on('data', (chunk) => {
+        if (streamProcess !== child || ownedGeneration !== captureGeneration) return;
+        consumeOutput('stdout', chunk, line => {
+          if (line.startsWith('DSKCPY_INPUT_PERMISSION ')) {
+            const match = /^DSKCPY_INPUT_PERMISSION (ready|blocked)$/.exec(line);
+            if (match && platform === 'darwin' && !config.windowId && !streamStopRequested && !shuttingDown) {
+              state.nativeInputPermission = match[1]; broadcast();
+            }
+            return true;
+          }
+          if (streamProcess === child) startupAttempt?.observe(line);
+          if (line.startsWith('DSKCPY_VIDEO_QUALITY ')) {
+            const match = /^DSKCPY_VIDEO_QUALITY (unsupported|[012] ([1-9][0-9]{0,2}) ([1-9][0-9]{0,7}))$/.exec(line);
+            if (match && streamProcess === child && browserBridge?.adaptiveVideo)
+              browserBridge.videoQuality(match[1] === 'unsupported' ? null : { level: Number(match[1][0]), fps: Number(match[2]), bitRate: Number(match[3]) });
+            return true;
+          }
+          if (line.startsWith('DSKCPY_CAPTURE_END ')) {
+            const match = /^DSKCPY_CAPTURE_END (display-change|sleep|permission-lost|user-stop)$/.exec(line);
+            if (match && platform === 'darwin' && streamProcess === child && browserBridge && readiness.features?.browserCaptureRecovery) captureEndReason = match[1];
+            return true;
+          }
+          if (line.startsWith('DSKCPY_KEYBOARD_STATUS ')) {
+            const status = /^DSKCPY_KEYBOARD_STATUS (ready|blocked|unsupported)$/.exec(line);
+            if (status && streamProcess === child && browserBridge?.keyboard) browserBridge.keyboardStatus(status[1]);
+            return true;
+          }
+          if (!line.startsWith('DSKCPY_TEXT_FOCUS ')) return false;
+          // Consume metadata separately from user logs. Only the current child
+          // and negotiated full-desktop keyboard session can publish a hint.
+          const match = /^DSKCPY_TEXT_FOCUS ([01?])$/.exec(line);
+          if (match && streamProcess === child && browserBridge?.textFocus)
+            browserBridge.focusHint(match[1] === '?' ? null : match[1] === '1');
           return true;
-        }
-        if (line.startsWith('DSKCPY_CAPTURE_END ')) {
-          const match = /^DSKCPY_CAPTURE_END (display-change|sleep|permission-lost|user-stop)$/.exec(line);
-          if (match && platform === 'darwin' && streamProcess === child && browserBridge && readiness.features?.browserCaptureRecovery) captureEndReason = match[1];
-          return true;
-        }
-        if (line.startsWith('DSKCPY_KEYBOARD_STATUS ')) {
-          const status = /^DSKCPY_KEYBOARD_STATUS (ready|blocked|unsupported)$/.exec(line);
-          if (status && streamProcess === child && browserBridge?.keyboard) browserBridge.keyboardStatus(status[1]);
-          return true;
-        }
-        if (!line.startsWith('DSKCPY_TEXT_FOCUS ')) return false;
-        // Consume metadata separately from user logs. Only the current child
-        // and negotiated full-desktop keyboard session can publish a hint.
-        const match = /^DSKCPY_TEXT_FOCUS ([01?])$/.exec(line);
-        if (match && streamProcess === child && browserBridge?.textFocus)
-          browserBridge.focusHint(match[1] === '?' ? null : match[1] === '1');
-        return true;
-      }));
+        });
+      });
       child.stderr.on('data', (chunk) => consumeOutput('stderr', chunk, line => {
+        if (line.startsWith('DSKCPY_INPUT_PERMISSION ')) return true;
         if (streamProcess === child) startupAttempt?.observe(line);
         return false;
       }));
@@ -604,7 +618,7 @@ export function createControlService({
             const finalReason = source === 'stdout' && /^DSKCPY_CAPTURE_END (display-change|sleep|permission-lost|user-stop)$/.exec(logRemainders[source]);
             if (finalReason && platform === 'darwin' && streamProcess === child && browserBridge && readiness.features?.browserCaptureRecovery)
               captureEndReason = finalReason[1];
-            else appendLog(source, logRemainders[source]);
+            else if (!logRemainders[source].startsWith('DSKCPY_INPUT_PERMISSION ')) appendLog(source, logRemainders[source]);
             logRemainders[source] = '';
           }
         }
@@ -633,6 +647,7 @@ export function createControlService({
         state.running = false;
         state.stopping = false;
         state.pid = null;
+        state.nativeInputPermission = null;
         state.lastExitCode = code;
         state.error = streamStopRequested || recoverCapture || switchCapture ? null : state.error ?? (permissionDenied
           ? 'Screen capture permission is unavailable. Restore Screen & System Audio Recording for the launching app before restarting sharing.'
@@ -678,6 +693,7 @@ export function createControlService({
       state.running = false;
       state.stopping = false;
       state.pid = null;
+      state.nativeInputPermission = null;
       state.error = attempt.signal.aborted ? null : error.message;
       if (attempt.signal.aborted || !retrySession || !scheduleReconnect(retrySession)) cancelReconnect();
       broadcast();

@@ -7,6 +7,7 @@ import './style.css';
 
 type Phase = 'checking-link' | 'usb-tool' | 'usb-device' | 'usb-authorize' | 'usb-select' | 'checking' | 'installation' | 'screen-permission' | 'control-permission' | 'network' | 'route-conflict' | 'private-link' | 'ready' | 'preparing' | 'inviting' | 'sharing' | 'error';
 type Snapshot = { phase: Phase; connection?: 'internet' | 'usb';
+  nativeInputPermission?: 'ready' | 'blocked' | 'unreported' | null;
   usb?: { available: boolean; error: boolean; selected: string | null; devices: { id: string; name: string; state: 'ready' | 'unauthorized' | 'offline' }[] }; permissions: { screen: boolean; control: boolean }; route: { connected: boolean; ready: boolean; conflict: boolean; verified?: boolean | null };
   startup?: { available: boolean; requested: boolean; enabled: boolean; requiresApproval: boolean; error: string | null };
   features: { keyboard: boolean; clipboard?: boolean }; clipboardAllowed?: boolean; error: string | null; invitation: { joinUrl: string; expiresAt: number; openedOnPhone?: boolean } | null; canStop: boolean };
@@ -22,7 +23,7 @@ const copy: Record<Phase, { title: string; description: string; action?: string 
   checking: { title: 'Let’s get your computer ready', description: 'Checking the app’s streaming components…' },
   installation: { title: 'The app installation is incomplete', description: 'A required streaming component is missing or could not load. Install a fresh copy of dskcpy Host, then open it again.' },
   'screen-permission': { title: 'Allow your screen to be shared', description: 'Allow dskcpy Host when macOS asks. If System Settings opens, turn it on under Screen & System Audio Recording. If asked to quit, reopen dskcpy afterward.', action: 'Allow screen sharing' },
-  'control-permission': { title: 'Allow remote mouse and keyboard', description: 'In System Settings → Accessibility, turn on dskcpy Host. This lets your connected device control this computer.', action: 'Open control permissions' },
+  'control-permission': { title: 'Allow remote mouse and keyboard', description: 'In System Settings, allow dskcpy Host under Accessibility or Device Control and Data Access. This lets your connected device control this computer.', action: 'Open control permissions' },
   network: { title: 'Connect your devices privately', description: 'Open Tailscale on both devices. Sign in or accept a device share so your receiving device can reach this computer. Return here when both are connected.', action: 'Get Tailscale' },
   'route-conflict': { title: 'This private address is already in use', description: 'Another app uses the connection address dskcpy needs. Its settings have been kept. Ask the person who set up Tailscale to choose a dedicated address for dskcpy.' },
   'private-link': { title: 'Set up your private connection', description: 'Do this once to let your connected Tailscale devices reach dskcpy. You choose when screen sharing starts.', action: 'Set up connection' },
@@ -78,6 +79,13 @@ function App() {
     : usb && phase === 'ready' ? { title: 'Share with your USB phone', description: 'Start sharing opens the phone browser with access to view your whole screen, hear desktop audio and control this computer. Keep the phone unlocked and connected. No QR or account is needed.', action: 'Start sharing' }
     : usb && phase === 'inviting' ? { title: 'Continue on your phone', description: state?.invitation?.openedOnPhone ? 'The receiver opened on your phone. Choose a browser if Android asks. Keep the cable connected.' : 'The USB connection is ready, but the phone browser did not open. Copy the USB link and paste it into the browser on that connected phone.' }
     : copy[phase]; const setup = !['ready', 'preparing', 'checking-link', 'inviting', 'sharing'].includes(phase);
+  const nativeControlWarning = phase === 'sharing' && ['blocked', 'unreported'].includes(state?.nativeInputPermission || '');
+  const description = phase === 'sharing' && state?.nativeInputPermission === 'blocked'
+    ? 'Your screen is being shared, but macOS is blocking mouse and keyboard input. Allow control access for this copy of dskcpy Host in System Settings.'
+    : phase === 'sharing' && state?.nativeInputPermission === 'unreported'
+      ? 'Your screen is being shared. This host has not reported whether remote control is allowed.'
+      : phase === 'sharing' && !state?.features.keyboard
+        ? 'The connected device can see your whole screen, hear desktop audio and use the mouse. Stop sharing to end its access.' : content.description;
   return <div className="host-app">
     <header><span className="brand"><Monitor aria-hidden="true" size={22} /> dskcpy</span>
       {(phase === 'inviting' || phase === 'preparing' || phase === 'checking-link') && state?.canStop
@@ -92,8 +100,9 @@ function App() {
       {phase !== 'inviting' && <div className={`hero-icon ${phase === 'sharing' ? 'is-sharing' : ''}`}><Monitor aria-hidden="true" size={34} /></div>}
       <p className="eyebrow">{setup ? 'SET UP YOUR COMPUTER' : phase === 'sharing' ? 'CONNECTED' : 'BROWSER RECEIVER · NO APP NEEDED'}</p>
       <h1 ref={heading} tabIndex={-1}>{content.title}</h1>
-      <p className="description"><span role="alert">{state?.error || ''}</span>{!state?.error && (phase === 'sharing' && !state?.features.keyboard
-        ? 'The connected device can see your whole screen, hear desktop audio and use the mouse. Stop sharing to end its access.' : content.description)}</p>
+      <p className="description" role={nativeControlWarning ? 'status' : undefined}><span role="alert">{state?.error || ''}</span>{!state?.error && description}</p>
+      {nativeControlWarning && <button className="secondary" disabled={!api || pending || stopping}
+        onClick={() => run(api?.controlPermission)}>Open control permissions</button>}
       {setup && state && <ol className="setup-list" aria-label="Setup progress">
         {[['Screen access', state.permissions.screen], ['Mouse and keyboard', state.permissions.control], [usb ? 'USB phone' : 'Private connection', usb ? Boolean(state.usb?.selected) : state.route.ready && state.route.verified !== false]].map(([label, done], i) =>
           <li key={String(label)}><span className={done ? 'step done' : 'step'}>{done ? <Check aria-hidden="true" size={15} /> : i + 1}</span><span>{label}{done && <span className="sr-only">: ready</span>}</span></li>)}

@@ -35,7 +35,7 @@ test('service IPC runs the existing backend on its own ephemeral controller with
     assert.equal((await request('ready')).ok, true);
     const ready = await request('readiness'); assert.equal(ready.value.ready, process.platform === 'darwin');
     const status = await request('status');
-    assert.deepEqual(status.value, { running: false, browser: { waiting: false, connected: false } });
+    assert.deepEqual(status.value, { running: false, browser: { waiting: false, connected: false }, nativeInputPermission: null });
     assert.ok(!JSON.stringify(status).includes(directory));
     assert.deepEqual(await request('unknown-command'), { id: 4, ok: false });
     assert.equal(ready.value.adb, true);
@@ -46,7 +46,7 @@ test('service IPC runs the existing backend on its own ephemeral controller with
     await writeFile(devices, 'List of devices attached\nPRIVATE-USB-SERIAL unauthorized model:Test_Phone\n');
     assert.equal((await request('invite', { mode: 'usb', device: usb.value.devices[0].id })).ok, false, 'authorization must still exist at Start');
     assert.equal((await request('invite', { mode: 'invalid' })).ok, false);
-    assert.deepEqual((await request('status')).value, { running: false, browser: { waiting: false, connected: false } });
+    assert.deepEqual((await request('status')).value, { running: false, browser: { waiting: false, connected: false }, nativeInputPermission: null });
     const conflict=await request('prepare-receiver');assert.equal(conflict.ok,false);assert.equal(conflict.code,'receiver-port-in-use');
     assert.ok(!JSON.stringify(conflict).includes('private diagnostic'));
     const unknown=await request('prepare-receiver');assert.equal(unknown.ok,false);assert.equal(unknown.code,undefined);

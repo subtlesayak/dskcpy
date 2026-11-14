@@ -34,7 +34,8 @@ parent.on('message', async ({ data }) => {
       case 'ready': await api('/api/status'); value = true; break;
       case 'status': {
         const status = service.publicState();
-        value = { running: status.running, browser: { waiting: status.browser.waiting, connected: status.browser.connected } }; break;
+        value = { running: status.running, browser: { waiting: status.browser.waiting, connected: status.browser.connected },
+          nativeInputPermission: ['ready', 'blocked', 'unreported'].includes(status.nativeInputPermission) ? status.nativeInputPermission : null }; break;
       }
       case 'readiness': {
         const readiness = (await api('/api/status')).readiness;

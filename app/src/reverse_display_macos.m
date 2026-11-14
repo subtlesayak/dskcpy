@@ -97,6 +97,18 @@ static bool mac_session_ended(struct mac_state *s) {
         || atomic_load(&s->disconnected) || atomic_load(&s->quit);
 }
 
+// Report the capture process's own trust, never the desktop shell's preflight.
+// Only fixed state changes cross stdout; no prompt, field contents or app names.
+static bool mac_input_permission_tick(struct mac_state *s, int *previous) {
+    if (s->window_id || mac_session_ended(s)) return false;
+    int trusted = AXIsProcessTrusted() ? 1 : 0;
+    if (*previous == trusted) return false;
+    *previous = trusted;
+    printf("DSKCPY_INPUT_PERMISSION %s\n", trusted ? "ready" : "blocked");
+    fflush(stdout);
+    return true;
+}
+
 @interface SCMacState : NSObject { @public struct mac_state state; }
 @end
 @implementation SCMacState
@@ -1069,12 +1081,14 @@ sc_reverse_display_macos_run(sc_socket video_socket, sc_socket control_socket, c
                 bool gui_pipe = mac_gui_pipe();
                 int64_t display_check_us = 0;
                 int previous_focus = -2;
+                int previous_input_permission = -1;
                 for (;;) {
                     if (mac_gui_quit(gui_pipe) || atomic_load(&s->quit)) { result = SCRCPY_EXIT_SUCCESS; break; }
                     mac_clipboard_tick(s);
                     int64_t display_now = av_gettime_relative();
                     if (display_now >= display_check_us) {
                         display_check_us = display_now + 250000;
+                        mac_input_permission_tick(s, &previous_input_permission);
                         if (options->reverse_text_focus && s->keyboard_enabled) {
                             int focused = atomic_load(&s->paused) || mac_session_ended(s) ? -1 : sc_reverse_macos_editable_focus();
                             bool clicked = atomic_exchange(&s->focus_probe_pending, false);
