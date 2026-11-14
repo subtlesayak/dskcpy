@@ -46,6 +46,22 @@ test('an existing owned stream remains visible and stoppable even if later setup
   f.setup.permissions.screen = false; await f.host.refresh({ setup: true }); await f.host.start();
   assert.equal(f.host.snapshot().phase, 'sharing'); assert.equal(f.host.snapshot().canStop, true); assert.equal(f.counts().stops, 0);
 });
+test('native Mac denial overrides shell-ready guidance while sharing remains stoppable', async () => {
+  const f = fixture();
+  f.setStatus({ running: true, browser: { connected: true }, nativeInputPermission: 'blocked' });
+  await f.host.refresh({ setup: true });
+  assert.equal(f.host.snapshot().permissions.control, true);
+  assert.equal(f.host.snapshot().nativeInputPermission, 'blocked');
+  assert.equal(f.host.snapshot().phase, 'sharing'); assert.equal(f.host.snapshot().canStop, true);
+  assert.equal(f.counts().stops, 0); assert.equal(f.counts().invites, 0);
+  for (const value of ['ready', 'unreported', null, 'private diagnostic']) {
+    f.setStatus({ running: true, browser: { connected: true }, nativeInputPermission: value });
+    await f.host.refresh();
+    assert.equal(f.host.snapshot().nativeInputPermission, value === 'private diagnostic' ? null : value);
+  }
+  f.setStatus({ running: false, browser: {}, nativeInputPermission: 'ready' });
+  await f.host.refresh(); assert.equal(f.host.snapshot().nativeInputPermission, null);
+});
 test('stop during asynchronous setup cannot create a late invitation', async () => {
   const f = fixture(); let finish; f.host.checkSetup = () => new Promise(resolve => { finish = resolve; });
   const starting = f.host.start(); await tick(); await f.host.stop(); finish(f.setup); await starting;

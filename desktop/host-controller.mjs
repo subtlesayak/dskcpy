@@ -55,6 +55,8 @@ export class HostController {
   snapshot() {
     const phase = hostPhase(this);
     return { phase, permissions: { ...this.permissions },
+      nativeInputPermission: this.status?.running && ['ready', 'blocked', 'unreported'].includes(this.status.nativeInputPermission)
+        ? this.status.nativeInputPermission : null,
       connection: this.connection, usb: { ...this.usb, devices: this.usb.devices.map(device => ({ ...device })) },
       clipboardAllowed: this.clipboardAllowed,
       features: { ...this.features },
