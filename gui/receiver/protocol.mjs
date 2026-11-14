@@ -1,3 +1,6 @@
+// Optional browser/controller recovery capability; not a native SRD version.
+export const MEDIA_FALLBACK_PROTOCOL = 'dskcpy.receiver.media-fallback.v1';
+
 // Shared browser/host recovery bound; it does not extend invitation or session lifetime.
 export const BROWSER_RESUME_MS = 5 * 60 * 1000;
 

@@ -18,8 +18,8 @@ const parameters = new Uint8Array([0, 0, 1, 0x67, 0x64, 0, 0x28, 0, 0, 1, 0x68, 
 
 // Deterministic lifecycle tests against the actual receiver script. These model
 // delayed browser callbacks; rendered/device QA is separate from this harness.
-function receiver(t, { portrait = false, lockFails = false, webRtc = false, webCodecs = true, qrKey = '', keyboard = false, viewOnly = false, visualHeight = 0, webAudio = false, textFocus = false, keyboardStatus = false, clipboard = false, clipboardAPI = undefined, virtualKeyboard = null, now = () => Date.now(), resumable = false } = {}) {
-  const timers = new Set(), sockets = [], decoders = [], orientation = [];
+function receiver(t, { portrait = false, lockFails = false, webRtc = false, webCodecs = true, qrKey = '', keyboard = false, viewOnly = false, visualHeight = 0, webAudio = false, textFocus = false, keyboardStatus = false, clipboard = false, clipboardAPI = undefined, virtualKeyboard = null, now = () => Date.now(), resumable = false, mediaFallback = false, rtcOffer = async () => {} } = {}) {
+  const timers = new Set(), sockets = [], decoders = [], orientation = [], rtcReceivers = [];
   let resize;
   const locationState = { protocol: 'https:', host: 'receiver.test', pathname: qrKey ? '/join' : '/', search: '', hash: qrKey ? `#connect=${qrKey}` : '' };
   const historyChanges = [];
@@ -55,9 +55,9 @@ function receiver(t, { portrait = false, lockFails = false, webRtc = false, webC
   document.exitFullscreen = async () => { document.fullscreenElement = null; document.emit('fullscreenchange'); };
   class Socket extends Target {
     static OPEN = 1; readyState = 1; sent = [];
-    constructor(url) { super(); this.url = url; this.fragmentAtConnect = locationState.hash; sockets.push(this); }
+    constructor(url, protocols = []) { super(); this.protocols = protocols; this.url = url; this.fragmentAtConnect = locationState.hash; sockets.push(this); }
     send(data) { this.sent.push(typeof data === 'string' ? data : Buffer.from(data)); }
-    close(code) { this.readyState = 3; this.emit('close', { code }); }
+    close(code, reason) { this.readyState = 3; this.emit('close', { code, reason }); }
   }
   class Decoder extends Target {
     static async isConfigSupported() { return { supported: true }; }
@@ -110,6 +110,7 @@ function receiver(t, { portrait = false, lockFails = false, webRtc = false, webC
       fetch: (...args) => context.fetch(...args),
       setTimeout: (fn, ms) => { const timer = setTimeout(fn, ms); timers.add(timer); return timer; }, clearTimeout }),
     createVideoReceiver: (options) => createVideoReceiver({ ...options, Decoder }),
+    createRtcReceiver: options => { const value = { ...options, closed: false, offer: async description => rtcOffer(description), close() { this.closed = true; } }; rtcReceivers.push(value); return value; },
     navigator: { virtualKeyboard, clipboard: clipboardAPI }, window, document, WebSocket: Socket, VideoDecoder: Decoder, AudioDecoder: SoundDecoder, AudioContext,
     EncodedAudioChunk: class { constructor(value) { Object.assign(this, value); } },
     EncodedVideoChunk: class { constructor(value) { Object.assign(this, value); } },
@@ -126,7 +127,7 @@ function receiver(t, { portrait = false, lockFails = false, webRtc = false, webC
   t.after(() => { for (const timer of timers) clearTimeout(timer); });
   if (!qrKey) { $('session-key').value = 'x'.repeat(32); $('join-form').emit('submit'); }
   const socket = sockets[0]; socket.emit('open');
-  socket.emit('message', { data: JSON.stringify({ type: 'authenticated', keyboard, viewOnly, textFocus, keyboardStatus, clipboard, mediaMode: webRtc ? 'webrtc' : 'webcodecs' }) });
+  socket.emit('message', { data: JSON.stringify({ type: 'authenticated', keyboard, viewOnly, textFocus, keyboardStatus, clipboard, mediaFallback, mediaMode: webRtc ? 'webrtc' : 'webcodecs' }) });
   const header = new ArrayBuffer(16), view = new DataView(header);
   view.setUint32(0, 0x53524431); view.setUint32(4, 1); view.setUint32(8, 640); view.setUint32(12, 480);
   socket.emit('message', { data: header });
@@ -136,7 +137,7 @@ function receiver(t, { portrait = false, lockFails = false, webRtc = false, webC
     new Uint8Array(bytes, 16).set(payload); socket.emit('message', { data: bytes });
   }
   media(0, 1, parameters);
-  return { context, $, document, window, socket, sockets, locationState, decoders, media, orientation, historyChanges, cssVariables, soundDecoders, audioSources, audioContexts, reflow: () => resize() };
+  return { context, $, document, window, socket, sockets, locationState, decoders, rtcReceivers, media, orientation, historyChanges, cssVariables, soundDecoders, audioSources, audioContexts, reflow: () => resize() };
 }
 
 test('suspension drains queued frames and ignores stale decoder callbacks after resume', async (t) => {
@@ -972,4 +973,151 @@ test('WebCodecs resume enables audio only with prior consent and a running Audio
   assert.equal(commands.some(p => p[1] === 10), false);
   assert.equal(commands.at(-1)[1], 11);
   assert.equal(h.$('audio').attrs.get('aria-label'), 'Audio off');
+});
+
+
+function offerRtc(h) {
+  h.socket.emit('message', { data: JSON.stringify({ type: 'rtc-offer', description: { type: 'offer', sdp: 'owned' } }) });
+}
+
+test('negotiated RTC failure releases typing, blocks stale input and resumes the existing cookie in WebCodecs', async t => {
+  const h = receiver(t, { webRtc: true, keyboard: true, mediaFallback: true, rtcOffer: async () => { throw Error('owned RTC failure'); } });
+  assert.deepEqual(Array.from(h.socket.protocols), [protocol.MEDIA_FALLBACK_PROTOCOL]);
+  h.$('keyboard').emit('click'); h.$('keyboard-input').emit('keydown', { code: 'ControlLeft', key: 'Control', ctrlKey: true });
+  offerRtc(h); await new Promise(setImmediate);
+  assert.equal(h.socket.sent.filter(x => x === 'media-fallback').length, 1);
+  assert.equal(h.socket.readyState, 1); assert.equal(h.rtcReceivers[0].closed, true);
+  assert.equal(h.$('keyboard-controls').hidden, true);
+  assert.equal(h.socket.sent.filter(p => Buffer.isBuffer(p) && p[0] === 8).at(-1)[1], 2);
+  const before = h.socket.sent.length;
+  h.$('keyboard-input').value = 'must not send'; h.$('keyboard-input').emit('input');
+  h.$('arrow-left').emit('click'); h.rtcReceivers[0].onFailure('late duplicate'); h.rtcReceivers[0].onPlaying();
+  assert.equal(h.socket.sent.length, before); assert.match(h.$('status').textContent, /another video method/);
+  h.context.fetch = async () => ({ ok: true, json: async () => ({ resumable: true, mediaMode: 'webcodecs' }) });
+  h.socket.close(1012, 'media-fallback'); await new Promise(r => setTimeout(r, 300));
+  assert.equal(h.sockets.length, 2); const next = h.sockets[1]; assert.match(next.url, /\/stream$/);
+  assert.equal(next.sent.some(x => typeof x === 'string' && /^[A-Za-z0-9_-]{32}$/.test(x)), false);
+  next.emit('message', { data: JSON.stringify({ type: 'authenticated', keyboard: true, mediaMode: 'webcodecs' }) });
+  const header = new ArrayBuffer(16), view = new DataView(header);
+  view.setUint32(0, 0x53524431); view.setUint32(4, 1); view.setUint32(8, 640); view.setUint32(12, 480);
+  next.emit('message', { data: header });
+  assert.equal(h.$('join-panel').hidden, true); assert.equal(h.$('audio').attrs.get('aria-label'), 'Audio off');
+  assert.equal(next.sent.some(p => Buffer.isBuffer(p) && p[0] === 5 && p[1] === 10), false);
+  h.rtcReceivers[0].onPlaying(); h.rtcReceivers[0].onFailure('stale');
+  assert.notEqual(h.$('status').textContent, 'Streaming'); h.$('disconnect').emit('click');
+});
+
+test('RTC recovery defers while away or paused and requests once on deliberate return', async t => {
+  for (const mode of ['away', 'paused']) {
+    const h = receiver(t, { webRtc: true, mediaFallback: true, rtcOffer: async () => { throw Error('owned'); } });
+    if (mode === 'away') { h.document.hidden = true; h.document.emit('visibilitychange'); }
+    else h.$('pause').emit('click');
+    offerRtc(h); await new Promise(setImmediate);
+    assert.equal(h.socket.sent.includes('media-fallback'), false); assert.equal(h.$('join-panel').hidden, true);
+    if (mode === 'away') { h.document.hidden = false; h.document.emit('visibilitychange'); }
+    else h.$('pause').emit('click');
+    assert.equal(h.socket.sent.filter(x => x === 'media-fallback').length, 1);
+    h.$('disconnect').emit('click');
+  }
+});
+
+test('playback gesture errors do not downgrade media; unsupported viewers and old hosts keep their contract', async t => {
+  const h = receiver(t, { webRtc: true, mediaFallback: true }); offerRtc(h);
+  h.rtcReceivers[0].onError('Tap Resume to start browser playback.');
+  assert.equal(h.socket.sent.includes('media-fallback'), false); assert.match(h.$('error').textContent, /Tap Resume/);
+  h.$('disconnect').emit('click');
+  for (const options of [{ webCodecs: false, mediaFallback: true }, { mediaFallback: false }]) {
+    const legacy = receiver(t, { webRtc: true, ...options, rtcOffer: async () => { throw Error('owned unsupported'); } });
+    offerRtc(legacy); await new Promise(setImmediate);
+    assert.equal(legacy.socket.sent.includes('media-fallback'), false); assert.equal(legacy.$('join-panel').hidden, false);
+    if (options.webCodecs === false) assert.equal(legacy.socket.protocols.length, 0);
+  }
+});
+
+test('Disconnect during RTC setup prevents a late rejection from recovering access', async t => {
+  let reject;
+  const h = receiver(t, { webRtc: true, mediaFallback: true, rtcOffer: () => new Promise((resolve, fail) => { reject = fail; }) });
+  offerRtc(h); h.$('disconnect').emit('click'); reject(Error('late owned failure')); await new Promise(setImmediate);
+  assert.equal(h.socket.sent.includes('media-fallback'), false); assert.equal(h.sockets.length, 1);
+  assert.equal(h.$('join-panel').hidden, false); assert.match(h.$('status').textContent, /Disconnected/);
+});
+
+test('server media fallback retires pending RTC work before the reconnect delay', async t => {
+  let reject;
+  const h = receiver(t, { webRtc: true, mediaFallback: true, rtcOffer: () => new Promise((resolve, fail) => { reject = fail; }) });
+  offerRtc(h); h.socket.close(1012, 'media-fallback'); reject(Error('retired RTC setup'));
+  await new Promise(setImmediate);
+  assert.equal(h.$('join-panel').hidden, true);
+  assert.match(h.$('status').textContent, /Restoring browser video/);
+  assert.equal(h.$('error').textContent, ''); h.$('disconnect').emit('click');
+});
+
+test('negotiated media acknowledgment survives missing close metadata without a fresh code', async t => {
+  const h = receiver(t, { webRtc: true, mediaFallback: true });
+  h.context.fetch = async () => ({ ok: true, json: async () => ({ resumable: true, mediaMode: 'webcodecs' }) });
+  h.socket.emit('message', { data: JSON.stringify({ type: 'media-fallback', mediaMode: 'webcodecs' }) });
+  h.socket.close(1005, ''); await new Promise(r => setTimeout(r, 300));
+  assert.equal(h.sockets.length, 2); assert.match(h.sockets[1].url, /\/stream$/);
+  assert.equal(h.$('join-panel').hidden, true); assert.equal(h.$('audio').attrs.get('aria-label'), 'Audio off');
+  h.$('disconnect').emit('click');
+});
+
+test('media recovery never starts remembered capture when its original session ended', async t => {
+  const h = receiver(t, { webRtc: true, mediaFallback: true }); const routes = [];
+  h.context.fetch = async url => { routes.push(url); return { ok: true, json: async () => url === '/stream/session' ? { resumable: false } : { status: 'approved', key: 'x'.repeat(32) } }; };
+  h.socket.emit('message', { data: JSON.stringify({ type: 'media-fallback', mediaMode: 'webcodecs' }) });
+  h.socket.close(1005, ''); await new Promise(r => setTimeout(r, 300));
+  assert.equal(h.sockets.length, 1); assert.equal(routes.includes('/stream/trusted/connect'), false);
+  assert.equal(routes.includes('/stream/remember/status'), false); assert.equal(h.$('join-panel').hidden, false);
+  assert.match(h.$('error').textContent, /Sharing ended while restoring video/);
+});
+
+test('media acknowledgments require the negotiated capability and cannot override explicit Stop', async t => {
+  for (const options of [{ mediaFallback: false }, { mediaFallback: true, webCodecs: false }]) {
+    const h = receiver(t, { webRtc: true, ...options });
+    h.socket.emit('message', { data: JSON.stringify({ type: 'media-fallback', mediaMode: 'webcodecs' }) });
+    assert.equal(h.$('join-panel').hidden, false); assert.match(h.$('error').textContent, /Unexpected media recovery/);
+  }
+  for (const code of [1000, 1008, 4000, 4002]) {
+    const h = receiver(t, { webRtc: true, mediaFallback: true });
+    h.socket.emit('message', { data: JSON.stringify({ type: 'media-fallback', mediaMode: 'webcodecs' }) });
+    h.socket.close(code, 'capture-ended'); await new Promise(setImmediate);
+    assert.equal(h.$('join-panel').hidden, false); assert.equal(h.sockets.length, 1);
+  }
+});
+
+test('retiring media ignores queued advisories and cannot signal from its old RTC peer', async t => {
+  const h = receiver(t, { webRtc: true, mediaFallback: true, keyboard: true, keyboardStatus: true, textFocus: true,
+    rtcOffer: async () => { throw Error('owned failure'); } });
+  offerRtc(h); await new Promise(setImmediate);
+  const before = h.socket.sent.length;
+  h.rtcReceivers[0].signal({ type: 'rtc-answer', description: { type: 'answer', sdp: 'retired' } });
+  assert.equal(h.socket.sent.length, before, 'retired RTC signaling cannot cross the media boundary');
+  h.socket.emit('message', { data: JSON.stringify({ type: 'keyboard-status', status: 'blocked' }) });
+  h.socket.emit('message', { data: JSON.stringify({ type: 'text-focus', focused: true }) });
+  offerRtc(h); h.media(100, 4);
+  assert.equal(h.$('join-panel').hidden, true); assert.match(h.$('status').textContent, /another video method/);
+  assert.equal(h.rtcReceivers.length, 1);
+  h.socket.emit('message', { data: JSON.stringify({ type: 'media-fallback', mediaMode: 'webcodecs' }) });
+  assert.equal(h.$('join-panel').hidden, true); h.$('disconnect').emit('click');
+});
+
+test('audio and keyboard controls cannot queue actions during the recovery reconnect gap', async t => {
+  const h = receiver(t, { webRtc: true, keyboard: true, mediaFallback: true }); offerRtc(h);
+  h.socket.emit('message', { data: JSON.stringify({ type: 'media-fallback', mediaMode: 'webcodecs' }) });
+  h.socket.close(1005, '');
+  await h.$('audio').emit('click');
+  assert.equal(h.$('audio').attrs.get('aria-label'), 'Audio off');
+  assert.equal(h.$('keyboard').disabled, true); assert.equal(h.sockets.length, 1);
+  h.$('disconnect').emit('click');
+});
+
+test('Disconnect cancels the retained capture even before the retiring socket closes', async t => {
+  const h = receiver(t, { webRtc: true, mediaFallback: true }); const requests = [];
+  h.context.fetch = async (url, options) => { requests.push({url,options}); return {ok:true,json:async()=>({resumable:false})}; };
+  h.socket.emit('message', { data: JSON.stringify({ type: 'media-fallback', mediaMode: 'webcodecs' }) });
+  assert.equal(h.socket.readyState, 1); h.$('disconnect').emit('click');
+  await new Promise(setImmediate);
+  assert.equal(requests.filter(r => r.url === '/stream/session' && r.options.method === 'POST' && r.options.credentials === 'same-origin').length, 1);
+  assert.equal(h.sockets.length, 1); assert.equal(h.$('join-panel').hidden, false);
 });

@@ -1,7 +1,7 @@
 import net from 'node:net';
 import { WebSocket } from 'ws';
 import { SrdParser, validBrowserInput, MAX_PACKET } from './browser-protocol.mjs';
-import { ack, avcParameters, touchPacket } from '../receiver/protocol.mjs';
+import { ack, avcParameters, touchPacket, MEDIA_FALLBACK_PROTOCOL } from '../receiver/protocol.mjs';
 import { createRtcMedia } from './browser-rtc.mjs';
 import { createClipboardBroker } from './browser-clipboard.mjs';
 
@@ -39,6 +39,8 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
     focusAt = Date.now(); peer.send(JSON.stringify({ type: 'text-focus', focused }));
   }
   let rtc, rtcGeneration = 0, negotiating = false;
+  let fallbackUsed = false;
+  const rtcVideo = new Set(), rtcAudio = new Set();
   let rtcCleanup = Promise.resolve();
   const nativeAcks = new Map();
   const command = (value) => native?.write(Buffer.from([5, value]));
@@ -48,8 +50,30 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
   }
   function stopRtc() {
     rtcGeneration++; negotiating = false;
+    drain(rtcVideo, 4); drain(rtcAudio, 6);
     const previous = rtc; rtc = null;
     if (previous) rtcCleanup = Promise.all([rtcCleanup, previous.close()]).then(() => {}).catch(() => {});
+  }
+  function fallbackMedia() {
+    if (closed || fallbackUsed || mediaMode !== 'webrtc' || !ready || recovering
+        || !native || !peer || peer.readyState !== WebSocket.OPEN || peer.bufferedAmount > MAX_PACKET
+        || peer.protocol !== MEDIA_FALLBACK_PROTOCOL) return false;
+    fallbackUsed = true;
+    // Retain this capture and its original authorization/lifetime. Discard the
+    // old viewer epoch, release input and resume only through its existing cookie.
+    suspend(); command(11); stopRtc(); drain(video, 4); drain(audio, 6);
+    mediaMode = 'webcodecs';
+    const target = peer; peer = null;
+    // Some browsers omit service-restart close metadata. Only the negotiated
+    // viewer receives this acknowledgment, before the old socket is retired.
+    target.send(JSON.stringify({ type: 'media-fallback', mediaMode: 'webcodecs' }));
+    target.close(1012, 'media-fallback');
+    setTimeout(() => target.terminate(), 1000).unref();
+    onChange(); return true;
+  }
+  function rtcFailure(mine, target) {
+    if (closed || mine !== rtcGeneration || target !== peer) return;
+    if (!fallbackMedia()) close();
   }
   async function negotiateRtc() {
     if (closed || mediaMode !== 'webrtc' || !videoConfig || !peer || rtc || negotiating) return;
@@ -58,14 +82,14 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
     try {
       const active = rtcMediaFactory({ bind: rtcBind, configuration: videoConfig.subarray(16),
         onKeyframe: () => { if (!closed && rtcGeneration === mine && !suspended && !capturePaused) command(8); },
-        onFailure: () => { if (!closed && rtcGeneration === mine) close(); },
+        onFailure: () => rtcFailure(mine, target),
         onConnected: () => { if (!closed && rtcGeneration === mine) onChange(); } });
       rtc = active;
       const offer = await active.offer();
       if (!closed && target === peer && rtcGeneration === mine && offer) {
         target.send(JSON.stringify({ type: 'rtc-offer', description: offer }));
       }
-    } catch { if (!closed && rtcGeneration === mine) close(); }
+    } catch { rtcFailure(mine, target); }
     finally { if (rtcGeneration === mine) negotiating = false; }
   }
   function releaseTouches() {
@@ -79,7 +103,7 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
     if (!suspended) { suspended = true; awayTimer = setTimeout(close, resumeMs); }
   }
   function drain(pending, type) {
-    if (pending.size) native?.write(ack(type, [...pending].at(-1)));
+    if (pending.size) acknowledgeNative(type, [...pending].reduce((a, b) => BigInt(a) > BigInt(b) ? a : b));
     pending.clear();
   }
   function detach(ws, replaced = false) {
@@ -105,7 +129,8 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
   }
   function announce() {
     if (!ready || !peer) return;
-    peer.send(JSON.stringify({ type: 'authenticated', mediaMode, keyboard, viewOnly, textFocus: focusSupported, keyboardStatus: keyboard && !viewOnly, clipboard: clipboardSupported }));
+    peer.send(JSON.stringify({ type: 'authenticated', mediaMode, keyboard, viewOnly, textFocus: focusSupported, keyboardStatus: keyboard && !viewOnly, clipboard: clipboardSupported,
+      mediaFallback: mediaMode === 'webrtc' && !fallbackUsed && peer.protocol === MEDIA_FALLBACK_PROTOCOL }));
     if (wireHeader) forward(wireHeader);
     if (videoConfig && mediaMode === 'webcodecs') forward(videoConfig);
     if (audioConfig) forward(audioConfig);
@@ -133,6 +158,7 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
       if (Date.now() - rateAt >= 1000) { rateAt = Date.now(); events = 0; }
       if (++events > 1000 || native?.writableLength > 65536) { close(); return; }
       if (!binary) {
+        if (message.toString() === 'media-fallback') { if (!fallbackMedia()) close(); return; }
         if (message.toString() === 'clipboard-enable') { if (!clipboardBroker.enable(ws)) close(); return; }
         if (message.toString() === 'clipboard-disable') { clipboardBroker.disable(); return; }
         if (message.toString() === 'text-focus-subscribe') {
@@ -154,7 +180,8 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
           try {
             const signal = JSON.parse(message.toString());
             if (signal.type !== 'rtc-answer') { close(); return; }
-            void rtc.answer(signal.description).catch(close);
+            const active = rtc, mine = rtcGeneration, target = peer;
+            void active.answer(signal.description).catch(() => rtcFailure(mine, target));
           } catch { close(); }
           return;
         }
@@ -170,6 +197,7 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
         const pts = message.readBigUInt64BE(1);
         if (!pending.has(pts.toString())) { close(); return; }
         for (const old of pending) if (BigInt(old) <= pts) pending.delete(old);
+        acknowledgeNative(message[0], pts); return;
       } else if (suspended) {
         // A hidden page may acknowledge in-flight media, but cannot inject input.
         return;
@@ -252,14 +280,18 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
         if (mediaMode === 'webrtc') {
           void negotiateRtc();
           const pts = packet.readBigUInt64BE(4);
-          if ([0, 2].includes(flags)) {
-            if (!rtc || suspended || capturePaused || !peer) acknowledgeNative(4, pts);
-            else void rtc.frame(packet.subarray(16), pts, flags === 2)
-              .then(() => { if (native === socket) acknowledgeNative(4, pts); }).catch(() => { if (native === socket) close(); });
-          } else if (flags === 8) {
-            if (!rtc || suspended || capturePaused || !peer) acknowledgeNative(6, pts);
-            else void rtc.sound(packet.subarray(16), pts)
-              .then(() => { if (native === socket) acknowledgeNative(6, pts); }).catch(() => { if (native === socket) close(); });
+          if ([0, 2, 8].includes(flags)) {
+            const type = flags === 8 ? 6 : 4, pending = flags === 8 ? rtcAudio : rtcVideo;
+            if (!rtc || suspended || capturePaused || !peer) acknowledgeNative(type, pts);
+            else {
+              pending.add(pts); if (pending.size > 8) { close(); return; }
+              const active = rtc, mine = rtcGeneration, target = peer;
+              const sending = flags === 8 ? active.sound(packet.subarray(16), pts) : active.frame(packet.subarray(16), pts, flags === 2);
+              void Promise.resolve(sending).then(() => {
+                if (native !== socket || mine !== rtcGeneration) return;
+                pending.delete(pts); acknowledgeNative(type, pts);
+              }).catch(() => { if (native === socket) rtcFailure(mine, target); });
+            }
           } else if ([4, 16].includes(flags)) forward(packet);
           return;
         }
@@ -314,5 +346,5 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
         captureRecovery: canRecover, restartNative, close, get closed() { return closed; } });
     } catch { close(); }
   }
-  return { start, attach, close, mediaMode, get recovering() { return recovering; }, get cleanup() { return rtcCleanup; } };
+  return { start, attach, close, get mediaMode() { return mediaMode; }, get recovering() { return recovering; }, get cleanup() { return rtcCleanup; } };
 }

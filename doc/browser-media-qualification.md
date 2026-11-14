@@ -28,8 +28,9 @@ records inbound Opus RTP counters; WebCodecs records native AudioDecoder output.
 The test mutes the video element or routes Web Audio through a zero-gain node.
 It does not qualify audible playback or physical latency. Reports contain only
 counters and candidate categories, without SDP, addresses, codes or identities.
-The WebCodecs test disables RTC only inside its owned page to select the existing
-transport; it is not automatic production fallback.
+The explicit WebCodecs test disables RTC only inside its owned page. The
+additional automatic-recovery and native-only lanes are documented in
+[browser media recovery](browser-media-recovery.md).
 
 ## Audio state after reload
 
@@ -49,8 +50,9 @@ with one mDNS candidate. A separate native WebKit peer-pair data-channel probe
 connects. Testing the sender on the existing LAN interface, a diagnostic full-ICE
 sender and bounded/early-answer candidates did not establish media. The failing
 experiments are preserved locally; none of those product changes is shipped.
-The root cause remains unresolved. Run `webkit webrtc` to reproduce; it is not
-included as a passing CI lane.
+The root cause remains unresolved. The `webkit auto` lane now records whether
+the actual RTC attempt works or recovers to WebCodecs; recovered receiving must
+not be counted as a passing WebKit RTC lane.
 
 Playwright's WebKit engine is not branded Safari. Engine versions and platform
 codec availability differ, so these checks do not qualify Safari, iOS, Android,

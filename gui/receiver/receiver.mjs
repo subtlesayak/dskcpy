@@ -4,7 +4,7 @@ import { createKeyboardShortcuts, shortcutLabel } from './shortcuts.mjs';
 import { createDesktopView } from './view.mjs';
 import { createRelativeTrackpad } from './trackpad.mjs';
 import { receiverIsAway } from './lifecycle.mjs';
-import { BROWSER_RESUME_MS, avcCodec, avcParameters, touchPacket, scrollPacket, takeDecodedTimestamps, fitDisplay, createMediaAcknowledger, needsControlsRow, parseJoinFragment } from './protocol.mjs';
+import { BROWSER_RESUME_MS, MEDIA_FALLBACK_PROTOCOL, avcCodec, avcParameters, touchPacket, scrollPacket, takeDecodedTimestamps, fitDisplay, createMediaAcknowledger, needsControlsRow, parseJoinFragment } from './protocol.mjs';
 import { createRtcReceiver } from './rtc.mjs';
 import { createVideoReceiver } from './video.mjs';
 import { createBrowserKeyboard, keyboardUsage, keyPacket } from './keyboard.mjs';
@@ -68,6 +68,9 @@ const preferredMode = 'RTCPeerConnection' in window ? 'webrtc' : 'webcodecs';
 const context = canvas.getContext('2d', { alpha: false, desynchronized: true });
 let ws, video, audio, audioContext, videoConfig, configBytes, audioConfig;
 let authenticated = false, header = false, closing = false, paused = false, muted = true, touchEnabled = true;
+let mediaSwitching = false;
+let resumePendingMedia;
+let sameCaptureRecovery = false;
 let frames = 0, statsAt = 0, nextAudio = 0, repeatTimer, repeatInterval;
 // Allow one preserved 100ms capture chunk plus bounded network/decoder jitter.
 // A larger discontinuity still resynchronizes instead of accumulating audio.
@@ -96,7 +99,7 @@ let selectDrag = false, touchGesture = null, trackpadMode = false;
 const trackpadPresent = ['trackpad-mode', 'trackpad-cursor', 'trackpad-help'].every(id => $(id));
 let trackMoveTimer, pendingTrackMove;
 function canSendPointer() {
-  return !viewNavigationActive() && authenticated && header && !paused && !document.hidden && !away() && touchEnabled && !viewOnly && ws?.readyState === WebSocket.OPEN;
+  return !mediaSwitching && !viewNavigationActive() && authenticated && header && !paused && !document.hidden && !away() && touchEnabled && !viewOnly && ws?.readyState === WebSocket.OPEN;
 }
 function flushTrackMove() {
   clearTimeout(trackMoveTimer); trackMoveTimer = null;
@@ -209,16 +212,17 @@ if (viewPresent) {
   });
 }
 const keyboardInput = createBrowserKeyboard({ field: $('keyboard-input'), send,
-  canSend: () => !viewNavigationActive() && !keyboardBlocked && keyboardSupported && authenticated && header && !paused && !document.hidden && touchEnabled && !viewOnly,
+  canSend: () => !mediaSwitching && !viewNavigationActive() && !keyboardBlocked && keyboardSupported && authenticated && header && !paused && !document.hidden && touchEnabled && !viewOnly,
   onError: (message) => { $('error').textContent = message; } });
 function canSendKeys() {
-  return !viewNavigationActive() && !keyboardBlocked && keyboardSupported && authenticated && header && !paused && !document.hidden && touchEnabled && !viewOnly && ws?.readyState === WebSocket.OPEN;
+  return !mediaSwitching && !viewNavigationActive() && !keyboardBlocked && keyboardSupported && authenticated && header && !paused && !document.hidden && touchEnabled && !viewOnly && ws?.readyState === WebSocket.OPEN;
 }
 const clipboardTools = $('clipboard-tools') ? createBrowserClipboard({ section: $('clipboard-tools'), field: $('clipboard-text'), toggle: $('clipboard-enable'), status: $('clipboard-status'),
   buttons: { read: $('clipboard-read-host'), copyLocal: $('clipboard-copy-local'), readLocal: $('clipboard-read-local'), copyHost: $('clipboard-copy-host'), pasteHost: $('clipboard-paste-host') },
   canUse: canSendKeys, send, control: value => { if (!authenticated || ws?.readyState !== WebSocket.OPEN) return false; ws.send(value); return true; }, localClipboard: navigator.clipboard,
 }) : null;
 function updateArrowAvailability() {
+  $('keyboard').disabled = mediaSwitching || !authenticated || !header;
   paintTrackpad();
   paintShortcuts();
   clipboardTools?.refresh();
@@ -312,7 +316,7 @@ $('close-options').addEventListener('click', () => setControlTray(null, true));
 for (const id of ['volume', 'window']) $(id).addEventListener('toggle', () => releaseTouches());
 
 function send(bytes) {
-  if (!authenticated || !header || ws?.readyState !== WebSocket.OPEN) return false;
+  if (mediaSwitching || !authenticated || !header || ws?.readyState !== WebSocket.OPEN) return false;
   ws.send(bytes); return true;
 }
 function action(value) { send(new Uint8Array([5, value])); }
@@ -358,9 +362,12 @@ function clearMedia() {
 function disconnect() {
   if (closing) return;
   closing = true;
+  const cancelRetainedCapture = mediaSwitching || sameCaptureRecovery;
   resumeAllowed = false;
   generation++;
-  if (sessionExpected && ws?.readyState !== WebSocket.OPEN) void fetch('/stream/session', { method: 'POST', credentials: 'same-origin' }).catch(() => {});
+  resumePendingMedia = null;
+  sameCaptureRecovery = false;
+  if (sessionExpected && (cancelRetainedCapture || ws?.readyState !== WebSocket.OPEN)) void fetch('/stream/session', { method: 'POST', credentials: 'same-origin' }).catch(() => {});
   sessionExpected = false; resumeDeadline = 0; clearFocusCapability();
   if (document.fullscreenElement) void document.exitFullscreen().catch(() => {});
   clearTimeout(retryTimer); clearTimeout(connectionTimer);
@@ -370,7 +377,7 @@ function disconnect() {
   trackpadMode = false; trackpad.reset(); desktopView.reset();
   hideKeyboard(); keyboardSupported = false; viewOnly = false; $('keyboard').hidden = true;
   if (audioContext) void audioContext.close().catch(() => {}); audioContext = null;
-  authenticated = false; header = false; muted = true; paused = false; updateArrowAvailability();
+  authenticated = false; header = false; muted = true; paused = false; mediaSwitching = false; updateArrowAvailability();
   videoConfig = null; configBytes = null; audioConfig = null; frames = 0;
   context.clearRect(0, 0, canvas.width, canvas.height);
   $('join-panel').hidden = false; $('stream-panel').hidden = true;
@@ -400,6 +407,11 @@ async function resumeSession() {
       sessionExpected = true; resumeDeadline ||= Date.now() + BROWSER_RESUME_MS;
       $('error').textContent = ''; connect(null, sessionInfo.mediaMode || preferredMode);
     } else {
+      if (sameCaptureRecovery) {
+        sessionExpected = false;
+        fail('Sharing ended while restoring video. Reconnect with saved access or ask for a new invitation.');
+        return;
+      }
       const ticket = await remembered.ticket();
       if (mine !== generation || ws || away()) return;
       if (ticket) { sessionExpected = false; resumeDeadline = 0; connect(ticket); }
@@ -436,28 +448,59 @@ $('join-form').addEventListener('submit', (event) => {
 });
 
 function connect(key = null, requestedMode = preferredMode) {
+  mediaSwitching = false;
+  let fallbackNegotiated = false, fallbackRequested = false, fallbackAcknowledged = false, fallbackNeeded = false;
+  const canFallback = requestedMode === 'webrtc' && 'VideoDecoder' in window && 'EncodedVideoChunk' in window;
   mediaAcks.reset();
   $('join').disabled = true; $('join').textContent = 'Connecting…'; $('status').textContent = 'Authenticating…';
   if (!key) $('status').textContent = 'Reconnecting…';
   const mine = ++generation;
-  const socket = new WebSocket(`${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}${requestedMode === 'webrtc' ? '/stream/webrtc' : '/stream'}`);
+  const socket = new WebSocket(`${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}${requestedMode === 'webrtc' ? '/stream/webrtc' : '/stream'}`, canFallback ? [MEDIA_FALLBACK_PROTOCOL] : []);
   ws = socket; socket.binaryType = 'arraybuffer';
   // A resumed capture may still be draining its previous native process. Keep
   // this attempt bounded and inside the original five-minute resume deadline.
   const connectionWait = !key && sessionExpected ? Math.min(30000, Math.max(1000, resumeDeadline - Date.now())) : 15000;
-  const timeout = connectionTimer = setTimeout(() => { if (mine === generation && !document.hidden && !paused) fail('Connection timed out. Check the desktop invitation and receiver address.'); }, connectionWait);
+  const timeout = connectionTimer = setTimeout(() => { if (mine === generation && !document.hidden && !paused && !requestMediaFallback()) fail('Connection timed out. Check the desktop invitation and receiver address.'); }, connectionWait);
+  function requestMediaFallback() {
+    if (mine !== generation || !authenticated || !fallbackNegotiated || !canFallback || mediaMode !== 'webrtc'
+        || socket !== ws || socket.readyState !== WebSocket.OPEN) return false;
+    if (away() || paused) { fallbackNeeded = true; return true; }
+    if (fallbackRequested) return true;
+    fallbackRequested = true; fallbackNeeded = false; sameCaptureRecovery = true;
+    prepareMediaChange();
+    try { socket.send('media-fallback'); }
+    catch { fail('Could not restore browser video. Check the private connection.'); return true; }
+    return true;
+  }
+  function prepareMediaChange() {
+    if (!mediaSwitching) {
+      releaseTouches(); hideKeyboard(); clearFocusCapability(false);
+      mediaSwitching = true; rtcReceiver?.close(); updateArrowAvailability();
+    }
+    clearTimeout(timeout); clearTimeout(connectionTimer);
+    $('status').textContent = 'Trying another video method…'; $('error').textContent = '';
+    connectionTimer = setTimeout(() => {
+      if (mine === generation && mediaSwitching) fail('Could not restore browser video. Reconnect using saved access or a new invitation.');
+    }, 5000);
+  }
+  resumePendingMedia = () => fallbackNeeded && requestMediaFallback();
   socket.addEventListener('open', () => { if (key) { socket.send(key); key = null; } }, { once: true });
   // The close event decides whether this is a resumable network interruption.
   socket.addEventListener('error', () => {});
   socket.addEventListener('close', (event) => {
     clearTimeout(timeout);
     if (mine !== generation) return;
-    releaseTouches(); clearMedia(); ws = null; authenticated = false; clearFocusCapability(false); updateArrowAvailability();
+    generation++; // Retire old async media work before the reconnect delay.
+    resumePendingMedia = null;
+    clearTimeout(connectionTimer);
+    releaseTouches(); clearMedia(); ws = null; authenticated = false; mediaSwitching = false; clearFocusCapability(false); updateArrowAvailability();
     const captureRestart = event.code === 1012 && event.reason === 'capture-restart';
-    if (captureRestart) { hideKeyboard(); fitCanvas(); }
-    if (sessionExpected && ![1000, 1005, 1008, 4000, 4002].includes(event.code)) {
+    const mediaFallback = fallbackNegotiated && (fallbackAcknowledged || fallbackRequested || (event.code === 1012 && event.reason === 'media-fallback'));
+    if (captureRestart || mediaFallback) { hideKeyboard(); fitCanvas(); }
+    if (mediaFallback) { sameCaptureRecovery = true; muted = true; setRailLabel('audio', 'Audio off'); $('audio').setAttribute('aria-pressed', 'false'); $('audio').setAttribute('aria-label', 'Audio off'); }
+    if (sessionExpected && ![1000, 1008, 4000, 4002].includes(event.code) && (event.code !== 1005 || mediaFallback)) {
       resumeDeadline ||= Date.now() + BROWSER_RESUME_MS;
-      $('status').textContent = document.hidden ? 'Paused while away' : captureRestart ? 'Restoring the computer display…' : 'Reconnecting…';
+      $('status').textContent = document.hidden ? 'Paused while away' : captureRestart ? 'Restoring the computer display…' : mediaFallback ? 'Restoring browser video…' : 'Reconnecting…';
       retryTimer = setTimeout(resumeSession, 250);
     } else {
       sessionExpected = false;
@@ -472,19 +515,25 @@ function connect(key = null, requestedMode = preferredMode) {
     try {
       if (typeof event.data === 'string') {
         const message = JSON.parse(event.data);
+        if (message.type === 'media-fallback') {
+          if (!authenticated || !fallbackNegotiated || !canFallback || fallbackAcknowledged || mediaMode !== 'webrtc' || message.mediaMode !== 'webcodecs') throw Error('Unexpected media recovery response.');
+          fallbackAcknowledged = true; sameCaptureRecovery = true; prepareMediaChange(); return;
+        }
+        if (mediaSwitching) return; // Only the negotiated acknowledgment belongs to this retiring socket.
         if (message.type === 'clipboard-result') { if (!authenticated) throw Error('Unexpected clipboard response.'); clipboardTools?.result(message); return; }
         if (message.type === 'rtc-offer' && authenticated && mediaMode === 'webrtc') {
           if (rtcReceiver) throw new Error('Unexpected repeated media offer.');
           rtcDisplay.hidden = false; rtcDisplay.muted = muted;
           document.body.classList.add('rtc-stream');
           rtcReceiver = createRtcReceiver({ element: rtcDisplay,
-            signal: (value) => { if (mine === generation && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(value)); },
+            signal: (value) => { if (mine === generation && !mediaSwitching && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(value)); },
             onPlaying: () => {
-              if (mine !== generation || paused || document.hidden) return;
+              if (mine !== generation || mediaSwitching || paused || document.hidden) return;
               clearTimeout(timeout); $('status').textContent = 'Streaming'; $('error').textContent = '';
               $('stats').textContent = `${canvas.width} × ${canvas.height} · WebRTC · native browser video and audio`;
-            }, onError: (message) => { if (mine === generation) $('error').textContent = message; } });
-          void rtcReceiver.offer(message.description).catch((error) => { if (mine === generation) fail(error.message); });
+            }, onError: (message) => { if (mine === generation && !mediaSwitching) $('error').textContent = message; },
+            onFailure: (message) => { if (mine === generation && !mediaSwitching && !requestMediaFallback()) $('error').textContent = message; } });
+          void rtcReceiver.offer(message.description).catch((error) => { if (mine === generation && !mediaSwitching && !requestMediaFallback()) fail(error.message); });
           return;
         }
         if (message.type === 'keyboard-status') {
@@ -508,9 +557,11 @@ function connect(key = null, requestedMode = preferredMode) {
         }
         if (message.type !== 'authenticated') throw new Error('Unexpected receiver response.');
         mediaMode = message.mediaMode || 'webcodecs';
+        fallbackNegotiated = canFallback && mediaMode === 'webrtc' && message.mediaFallback === true;
         if (mediaMode === 'webcodecs' && !('VideoDecoder' in window)) throw new Error('This connection needs WebCodecs. Use the private VPN link for browser-native video.');
         const restoring = sessionExpected;
         authenticated = true; sessionExpected = true;
+        sameCaptureRecovery = false;
         viewOnly = message.viewOnly === true;
         remembered.authenticated(viewOnly);
         keyboardSupported = message.keyboard === true && !viewOnly;
@@ -534,6 +585,7 @@ function connect(key = null, requestedMode = preferredMode) {
         document.body.classList.add('is-streaming');
         return;
       }
+      if (mediaSwitching) return;
       if (!authenticated) throw new Error('Unauthenticated media.');
       const data = new DataView(event.data);
       if (!header) {
@@ -655,7 +707,7 @@ function configureAudio() {
   catch { audioUnavailable(); }
 }
 $('audio').addEventListener('click', async () => {
-  if (viewOnly) return;
+  if (viewOnly || mediaSwitching || !authenticated || !header) return;
   if (mediaMode === 'webrtc') {
     const mine = generation, attempt = ++playbackAttempt;
     const updateButton = () => {
@@ -689,7 +741,8 @@ $('audio').addEventListener('click', async () => {
 });
 function updatePause() {
   updateArrowAvailability();
-  if (!authenticated || !header || ws?.readyState !== WebSocket.OPEN) return;
+  if (mediaSwitching || !authenticated || !header || ws?.readyState !== WebSocket.OPEN) return;
+  if (!away() && !paused && resumePendingMedia?.()) return;
   releaseTouches(); stopAudio();
   if (paused || away()) hideKeyboard();
   suspendDecoder();
