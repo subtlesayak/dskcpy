@@ -18,14 +18,21 @@ test('actual Windows resume dispatch preserves held input and active watchdogs o
   t.skip('Requires a standalone C compiler; native Meson pause tests run separately');return;
  }
  const source=await readFile(new URL('../../app/src/reverse_display.c',import.meta.url),'utf8');
- const device=await readFile(new URL('../../app/src/device_msg.h',import.meta.url),'utf8');
+ const device=(await readFile(new URL('../../app/src/device_msg.h',import.meta.url),'utf8')).replace(/\r\n/g,'\n');
  const enumeration=device.match(/enum sc_reverse_system_action \{[\s\S]*?\n\};/)[0];
- function body(name){
-  const start=source.indexOf(`static void\n${name}(`);assert.ok(start>=0,`Missing production callback ${name}`);
-  const open=source.indexOf('{',start);let depth=1,end=open+1;
-  while(depth&&end<source.length){if(source[end]==='{')depth++;if(source[end]==='}')depth--;end++}
-  assert.equal(depth,0);return source.slice(start,end);
+ function body(name,text=source){
+  text=text.replace(/\r\n/g,'\n');
+  const start=text.indexOf(`static void\n${name}(`);assert.ok(start>=0,`Missing production callback ${name}`);
+  const open=text.indexOf('{',start);let depth=1,end=open+1;
+  while(depth&&end<text.length){if(text[end]==='{')depth++;if(text[end]==='}')depth--;end++}
+  assert.equal(depth,0);return text.slice(start,end);
  }
+ const callbacks=['reverse_video_pause_transition','reverse_video_request_keyframe','reverse_receiver_on_system_action'].map(name=>{
+  // A Windows checkout changes source line endings, not the callback. Exercise
+  // both forms on every platform before compiling the production bodies.
+  assert.equal(body(name,source.replace(/\r\n/g,'\n')),body(name,source.replace(/\r?\n/g,'\r\n')));
+  return body(name);
+ });
  const code=`#include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -43,9 +50,7 @@ static int64_t av_gettime_relative(void){return 1000;}
 static void reverse_cancel_keyboard(struct reverse_display_state *s){if(s->check_paused_cleanup)assert(atomic_load(&s->video_paused));if(!s->fail_cleanup)s->key_held=false;s->key_cancels++;}
 static void reverse_cancel_touches(struct reverse_display_state *s){if(s->check_paused_cleanup)assert(atomic_load(&s->video_paused));if(!s->fail_cleanup)s->mouse_held=false;s->touch_cancels++;}
 static void reverse_apply_system_action(struct reverse_display_state *s,enum sc_reverse_system_action a){s->other++;if(a==SC_REVERSE_SYSTEM_ACTION_PAUSE_VIDEO)atomic_store(&s->video_paused,true);if(a==SC_REVERSE_SYSTEM_ACTION_RESUME_VIDEO)atomic_store(&s->video_paused,false);if(a==SC_REVERSE_SYSTEM_ACTION_STOP_SESSION){atomic_store(&s->stopped,true);reverse_cancel_touches(s);}}
-${body('reverse_video_pause_transition')}
-${body('reverse_video_request_keyframe')}
-${body('reverse_receiver_on_system_action')}
+${callbacks.join('\n')}
 static void action(struct reverse_display_state *s,enum sc_reverse_system_action a){struct sc_device_msg m={.reverse_system_action={a}};reverse_receiver_on_system_action(NULL,&m,s);}
 int main(void){
  struct reverse_display_state s={0};atomic_init(&s.stopped,false);atomic_init(&s.video_paused,false);atomic_init(&s.force_refresh,false);atomic_init(&s.audio_enabled,true);
