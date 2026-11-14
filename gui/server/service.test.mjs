@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile, readFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createTrustedDevices, deviceDigest } from './trusted-devices.mjs';
@@ -109,6 +109,67 @@ test('native capture denial reaches the authenticated browser as a fixed recover
   const [code, reason] = await closed;
   assert.equal(code, 1008); assert.equal(reason.toString(), 'capture-permission');
   assert.equal(f.publicState().running, false);
+});
+
+test('known Mac geometry changes wait for drained child close, then start a fresh authorized capture', async t=>{
+  const f=await fixture(t,{platform:'darwin',readinessProbe:async()=>({...ready,features:{browserCaptureRecovery:true}})});
+  const {body}=await f.request('/api/browser/invite',{});
+  const ws=new WebSocket(body.url.replace('http:','ws:')+'stream',{origin:body.url.slice(0,-1)});
+  let cookie;ws.on('upgrade',res=>cookie=res.headers['set-cookie'][0].split(';')[0]);ws.on('error',()=>{});t.after(()=>ws.terminate());
+  await once(ws,'open');ws.send(body.key);await waitFor(()=>f.children.length===1);
+  const old=f.children[0].child,closed=once(ws,'close');
+  old.exitCode=2;old.emit('exit',2);
+  assert.equal(f.children.length,1);assert.equal(f.publicState().running,true);
+  // Native reason may arrive after exit but before stdio closes.
+  old.stdout.write('DSKCPY_CAPTURE_END display-');old.stdout.write('change\n');old.emit('close',2);
+  const [code]=await closed;assert.equal(code,1012);
+  await waitFor(()=>f.children.length===2);
+  assert.equal(f.publicState().running,true);assert.equal(f.publicState().error,null);
+  assert.ok(!JSON.stringify(f.publicState().logs).includes('DSKCPY_CAPTURE_END'));
+  const response=await fetch(body.url+'stream/session',{headers:{Cookie:cookie}});
+  assert.equal((await response.json()).resumable,true);
+  await f.request('/api/stream/stop',{});await waitFor(()=>!f.publicState().running);
+  assert.equal(f.children.length,2);assert.equal(f.publicState().browser.connected,false);
+});
+
+for(const scenario of ['permission','user-stop','unknown','old-host','window'])test('capture recovery does not restart '+scenario,async t=>{
+  const f=await fixture(t,{platform:'darwin',readinessProbe:async()=>({...ready,features:{browserCaptureRecovery:scenario!=='old-host',macWindowCapture:true}})});
+  const {body}=await f.request('/api/browser/invite',scenario==='window'?{windowId:12,windowOwnerPid:34}:{});
+  const ws=new WebSocket(body.url.replace('http:','ws:')+'stream',{origin:body.url.slice(0,-1)});
+  ws.on('error',()=>{});t.after(()=>ws.terminate());await once(ws,'open');ws.send(body.key);
+  await waitFor(()=>f.children.length===1);const child=f.children[0].child;
+  child.stdout.write('DSKCPY_CAPTURE_END '+(scenario==='unknown'?'untrusted-reason':'display-change')+'\n');
+  if(scenario==='permission')child.stdout.write('DSKCPY_CAPTURE_END permission-lost\n');
+  if(scenario==='user-stop')child.stdout.write('DSKCPY_CAPTURE_END user-stop\n');
+  const ended=once(ws,'close');child.exit(scenario==='user-stop'?0:2);const [code]=await ended;assert.equal(code,1008);
+  await waitFor(()=>!f.publicState().running);assert.equal(f.children.length,1);
+});
+
+test('owner Stop during recovery readiness cancels the fresh child and preserves stopped access',async t=>{
+  let block=false,entered=false,release;const waiting=new Promise(resolve=>release=resolve);
+  const f=await fixture(t,{platform:'darwin',readinessProbe:async()=>{
+    if(block){entered=true;await waiting;}
+    return {...ready,features:{browserCaptureRecovery:true}};
+  }});
+  const {body}=await f.request('/api/browser/invite',{});
+  const ws=new WebSocket(body.url.replace('http:','ws:')+'stream',{origin:body.url.slice(0,-1)});
+  ws.on('error',()=>{});t.after(()=>ws.terminate());await once(ws,'open');ws.send(body.key);
+  await waitFor(()=>f.children.length===1);block=true;
+  f.children[0].child.stdout.write('DSKCPY_CAPTURE_END display-change\n');f.children[0].child.exit(2);
+  await waitFor(()=>entered);await f.request('/api/stream/stop',{});release();
+  await waitFor(()=>!f.publicState().running);
+  assert.equal(f.children.length,1);assert.equal(f.publicState().browser.connected,false);assert.equal(f.publicState().error,null);
+});
+
+test('view-only capture drains a late permission reason without acquiring restart permission',async t=>{
+ const f=await fixture(t,{platform:'darwin',readinessProbe:async()=>({...ready,features:{browserCaptureRecovery:true,macWindowCapture:true}})});
+ const {body}=await f.request('/api/browser/invite',{windowId:12,windowOwnerPid:34});
+ const ws=new WebSocket(body.url.replace('http:','ws:')+'stream',{origin:body.url.slice(0,-1)});ws.on('error',()=>{});t.after(()=>ws.terminate());
+ await once(ws,'open');ws.send(body.key);await waitFor(()=>f.children.length===1);
+ const child=f.children[0].child;child.exitCode=2;child.emit('exit',2);
+ assert.equal(f.publicState().running,true);
+ child.stdout.write('DSKCPY_CAPTURE_END permission-lost\n');const ended=once(ws,'close');child.emit('close',2);await ended;
+ assert.equal(f.children.length,1);assert.match(f.publicState().error,/Screen capture permission/);
 });
 
 test('Mac browser launch selects compatible video and reports send RTT without decode latency', async (t) => {
@@ -719,6 +780,22 @@ test('owner Stop durably pauses remembered access; remote origin cannot re-enabl
   assert.equal(denied.status, 403);
   assert.equal((await f.request('/api/browser/trusted', { action: 'resume' })).body.paused, false);
   assert.equal(f.children.length, 0);
+});
+
+for(const reason of ['user-stop','permission-lost'])test('native '+reason+' durably pauses existing remembered grants',async t=>{
+ const dir=await mkdtemp(path.join(os.tmpdir(),'dskcpy-native-stop-trust-'));t.after(()=>rm(dir,{recursive:true,force:true}));
+ const filename=path.join(dir,'devices.json'),store=createTrustedDevices({filename});await store.ready;
+ await store.approve({id:'b'.repeat(32),digest:deviceDigest('y'.repeat(43)),name:'Synthetic browser',origin:'https://host.example',profile:{maxSize:1600,maxFps:30,bitRateMbps:8}});
+ await store.pause(false);
+ const f=await fixture(t,{platform:'darwin',trustedDevicesPath:filename,readinessProbe:async()=>({...ready,features:{browserCaptureRecovery:true}})});
+ const {body}=await f.request('/api/browser/invite',{}),ws=new WebSocket(body.url.replace('http:','ws:')+'stream',{origin:body.url.slice(0,-1)});
+ ws.on('error',()=>{});t.after(()=>ws.terminate());await once(ws,'open');ws.send(body.key);await waitFor(()=>f.children.length===1);
+ const ended=once(ws,'close');f.children[0].child.stdout.write('DSKCPY_CAPTURE_END '+reason+'\n');f.children[0].child.exit(reason==='user-stop'?0:2);await ended;
+ const status=(await f.request('/api/browser/trusted')).body;
+ assert.equal(status.paused,true);assert.equal(status.storageError,false);
+ assert.equal(JSON.parse(await readFile(filename,'utf8')).paused,true);
+ const reloaded=createTrustedDevices({filename});await reloaded.ready;assert.equal(reloaded.snapshot().paused,true);
+ assert.equal(f.children.length,1);
 });
 
 test('current native child focus metadata reaches only its capable browser and is not logged',async t=>{

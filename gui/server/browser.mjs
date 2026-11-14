@@ -36,7 +36,7 @@ export function receiverOrigin(value) {
 // Remote access is opt-in via a user-managed Tailscale Serve HTTPS proxy.
 export function createBrowserReceiver({ configuredPort = 27180, origin,
   tls, rtcBind = '127.0.0.1', onConnect, onChange = () => {}, invitationMs = 300000, authMs = 5000,
-  resumeMs = BROWSER_RESUME_MS, lifetimeMs = 12 * 60 * 60 * 1000, trustedDevices, onTrustedConnect } = {}) {
+  resumeMs = BROWSER_RESUME_MS, lifetimeMs = 12 * 60 * 60 * 1000, nativeEndGraceMs = 15000, rtcMediaFactory, trustedDevices, onTrustedConnect } = {}) {
   const remoteOrigin = receiverOrigin(origin);
   let port, closed = false;
   let listening;
@@ -157,7 +157,7 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
   function status() {
     return { waiting: Boolean(invitation), connected: Boolean(session),
       url: port ? viewerUrl() : null, remote: !['local', 'usb'].includes(mode),
-      remoteAvailable: Boolean(remoteOrigin), mode, expiresAt, mediaMode: session?.mediaMode ?? null };
+      remoteAvailable: Boolean(remoteOrigin), mode, expiresAt, mediaMode: session?.mediaMode ?? null, recovering: Boolean(session?.recovering) };
   }
   function cancel() {
     clearTimeout(expiryTimer);
@@ -250,7 +250,7 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
         for (const other of sockets) if (other !== ws) other.terminate();
         const deviceId = trustedTicket?.id; trustedTicket = null;
         const token = Buffer.from(req.resumeToken);
-        const active = createBrowserSession({ socket: ws, onConnect, resumeMs, lifetimeMs,
+        const active = createBrowserSession({ socket: ws, onConnect, resumeMs, lifetimeMs, nativeEndGraceMs, rtcMediaFactory,
           mediaMode, rtcBind, ...inputPolicy, onChange, onClose: () => {
           token.fill(0);
           pendingCleanup = Promise.all([pendingCleanup, active.cleanup]).then(() => {});
@@ -302,7 +302,8 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
     rememberProfile = policy.rememberProfile || null;
     mode = connection;
     inputPolicy = { keyboard: policy.keyboard === true && policy.viewOnly !== true, viewOnly: policy.viewOnly === true,
-      textFocus: policy.textFocus === true && policy.keyboard === true && policy.viewOnly !== true };
+      textFocus: policy.textFocus === true && policy.keyboard === true && policy.viewOnly !== true,
+      captureRecovery: policy.captureRecovery === true && policy.viewOnly !== true };
     invitation = randomBytes(24);
     failures = 0;
     const duration = grant ? 15000 : invitationMs;

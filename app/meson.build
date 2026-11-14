@@ -272,6 +272,7 @@ if get_option('buildtype') == 'debug'
         ['test_timeout_thread', ['tests/test_timeout_thread.c', 'src/util/timeout.c', 'src/util/thread.c', 'src/util/tick.c']],
         ['test_reverse_audio_encoder', ['tests/test_reverse_audio_encoder.c', 'src/reverse_audio_encoder.c']],
         ['test_reverse_windows_keyboard', ['tests/test_reverse_windows_keyboard.c', 'src/reverse_windows_keyboard.c', 'src/reverse_keyboard.c']],
+        ['test_reverse_macos_recovery', ['tests/test_reverse_macos_recovery.c']],
         ['test_reverse_touch', ['tests/test_reverse_touch.c', 'src/reverse_touch.c']],
         ['test_reverse_watchdog', ['tests/test_reverse_watchdog.c']],
         ['test_reverse_macos_helpers', ['tests/test_reverse_macos_helpers.c', 'src/reverse_macos_helpers.c']],

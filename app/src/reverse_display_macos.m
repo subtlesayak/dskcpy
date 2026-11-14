@@ -14,6 +14,7 @@
 #include "reverse_macos_audio.h"
 #include "reverse_macos_keyboard.h"
 #include "reverse_macos_focus.h"
+#include "reverse_macos_recovery.h"
 #include "receiver.h"
 #include "options.h"
 #include "util/binary.h"
@@ -42,6 +43,7 @@ struct mac_state {
     uint64_t audio_queue_drops; // Protected by mutex; no device identity.
     _Atomic bool audio_route_changed;
     _Atomic bool keyboard_release_pending, focus_probe_pending;
+    _Atomic int capture_change;
     CVPixelBufferRef latest; // Exactly one newest capture, protected by mutex.
     uint64_t generation;
     VTCompressionSessionRef encoder;
@@ -99,6 +101,7 @@ static bool mac_session_ended(struct mac_state *s) {
         atomic_init(&state.audio_route_changed, false);
         atomic_init(&state.keyboard_release_pending, false);
         atomic_init(&state.focus_probe_pending, false);
+        atomic_init(&state.capture_change, SC_MACOS_CAPTURE_UNCHANGED);
         atomic_init(&state.audio_acked_pts, -1); atomic_init(&state.acked_pts, -1);
         atomic_init(&state.sent_pts, -1); atomic_init(&state.encoding_since, 0);
         sc_reverse_watchdog_init(&state.watchdog);
@@ -172,18 +175,21 @@ static void mac_audio_abandon_pending(struct mac_state *s) {
 - (void)stream:(SCStream *)stream didStopWithError:(NSError *)error {
     (void)stream;
     SCMacState *owner = self.owner;
+    // A real user stop can arrive during geometry teardown. Retain its veto
+    // even after stopped is set; never turn that late event into a restart.
+    if (owner && [error.domain isEqualToString:SCStreamErrorDomain] && error.code == SCStreamErrorUserStopped) {
+        if (!atomic_load(&owner->state.stopped)) LOGI("Mac screen sharing stopped by the user");
+        atomic_store(&owner->state.quit, true);
+        return;
+    }
     if (owner && !atomic_load(&owner->state.stopped)) {
-        if ([error.domain isEqualToString:SCStreamErrorDomain] && error.code == SCStreamErrorUserStopped) {
-            LOGI("Mac screen sharing stopped by the user");
-            atomic_store(&owner->state.quit, true);
-            return;
-        }
         if (atomic_load(&owner->state.disconnected)) return;
         // Refresh the immutable stream header and input geometry after a known
         // display change. Permission loss/other capture errors stay fatal and
         // must not silently restart a user-ended sharing session.
         if (CGPreflightScreenCaptureAccess() && !mac_display_matches(&owner->state)) {
             LOGI("Mac display changed; reconnect to refresh capture and input geometry");
+            atomic_store(&owner->state.capture_change, SC_MACOS_DISPLAY_CHANGED);
             atomic_store(&owner->state.disconnected, true);
         } else {
             LOGE("Mac capture stopped (ScreenCaptureKit code %ld). Check Screen Recording permission and reconnect.", (long)error.code);
@@ -946,6 +952,7 @@ sc_reverse_display_macos_run(sc_socket video_socket, sc_socket control_socket, c
                         // workspace callback remains safe during observer removal.
                         if (!atomic_load(&owner->state.stopped)) {
                             LOGI("Mac is sleeping; reconnect after wake");
+                            atomic_store(&owner->state.capture_change, SC_MACOS_SLEEP);
                             atomic_store(&owner->state.disconnected, true);
                         }
                     }];
@@ -971,6 +978,7 @@ sc_reverse_display_macos_run(sc_socket video_socket, sc_socket control_socket, c
                         if (s->keyboard_enabled && (!AXIsProcessTrusted() || atomic_load(&s->keyboard_release_pending))) mac_cancel_keyboard(s);
                         if (!mac_display_matches(s)) {
                             LOGI("Mac display changed; reconnect to refresh capture and input geometry");
+                            atomic_store(&s->capture_change, SC_MACOS_DISPLAY_CHANGED);
                             atomic_store(&s->disconnected, true);
                         }
                         if (s->window_id && !mac_session_ended(s)) {
@@ -1036,6 +1044,15 @@ sc_reverse_display_macos_run(sc_socket video_socket, sc_socket control_socket, c
             output.owner = nil;
             dispatch_sync(queue, ^{}); // Drain output callbacks before releasing capture state.
             dispatch_sync(audio_queue, ^{});
+            // Publish only after input/media cleanup and late capture callbacks.
+            // The broker retains authorization briefly while awaiting this reason.
+            bool permitted = CGPreflightScreenCaptureAccess();
+            if (atomic_load(&s->quit)) result = SCRCPY_EXIT_SUCCESS;
+            const char *recovery = sc_macos_capture_recovery_reason(atomic_load(&s->capture_change),
+                result == SCRCPY_EXIT_DISCONNECTED, atomic_load(&s->failed), atomic_load(&s->quit), permitted);
+            if (atomic_load(&s->quit)) { printf("DSKCPY_CAPTURE_END user-stop\n"); fflush(stdout); }
+            else if (recovery) { printf("DSKCPY_CAPTURE_END %s\n", recovery); fflush(stdout); }
+            else if (!permitted && result != SCRCPY_EXIT_SUCCESS) { printf("DSKCPY_CAPTURE_END permission-lost\n"); fflush(stdout); }
             return result;
         }
         LOGE("The experimental Mac host requires macOS 13 or newer");

@@ -7,10 +7,14 @@ import { createRtcMedia } from './browser-rtc.mjs';
 // Keep the native transport alive across a bounded browser suspension. Never
 // retain video frames: only the wire header and codec parameter sets are replayed.
 export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lifetimeMs,
-  mediaMode = 'webcodecs', rtcBind, keyboard = false, viewOnly = false, textFocus = false, onChange = () => {} }) {
+  mediaMode = 'webcodecs', rtcBind, keyboard = false, viewOnly = false, textFocus = false,
+  captureRecovery = false, nativeEndGraceMs = 15000, rtcMediaFactory = createRtcMedia, onChange = () => {} }) {
   let native, peer, closed = false, ready = false, nativeTimer, awayTimer;
+  let listener, nativeEndTimer, recovering = false, restarting = false;
+  let restartTimes = [];
+  const canRecover = captureRecovery && !viewOnly;
   let wireHeader, videoConfig, audioConfig, width = 0, height = 0;
-  let suspended = false, alive = true, rateAt = Date.now(), events = 0;
+  let suspended = false, capturePaused = false, alive = true, rateAt = Date.now(), events = 0;
   const video = new Set(), audio = new Set(), touches = new Map();
   const focusSupported = textFocus && keyboard && !viewOnly;
   let focusAt = -Infinity, focusSubscribed = false;
@@ -44,8 +48,8 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
     negotiating = true;
     const target = peer, mine = ++rtcGeneration;
     try {
-      const active = createRtcMedia({ bind: rtcBind, configuration: videoConfig.subarray(16),
-        onKeyframe: () => { if (!closed && rtcGeneration === mine && !suspended) command(8); },
+      const active = rtcMediaFactory({ bind: rtcBind, configuration: videoConfig.subarray(16),
+        onKeyframe: () => { if (!closed && rtcGeneration === mine && !suspended && !capturePaused) command(8); },
         onFailure: () => { if (!closed && rtcGeneration === mine) close(); },
         onConnected: () => { if (!closed && rtcGeneration === mine) onChange(); } });
       rtc = active;
@@ -144,6 +148,8 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
         }
         close(); return;
       }
+      // Never apply old geometry, ACKs or text to a new capture epoch.
+      if (recovering) return;
       if (!native || !validBrowserInput(message, width, height, { keyboard })) { close(); return; }
       if (viewOnly && ![4, 6].includes(message[0])
           && !(message[0] === 5 && [7, 8, 9, 11].includes(message[1]))) { close(); return; }
@@ -156,6 +162,8 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
         // A hidden page may acknowledge in-flight media, but cannot inject input.
         return;
       }
+      if (capturePaused && ![4,6,5].includes(message[0])) return;
+      if (message[0] === 5 && [7,8].includes(message[1])) capturePaused = message[1] === 7;
       if (message[0] === 3) {
         const id = message.readBigUInt64BE(2).toString();
         if (message[1] === 3) touches.clear();
@@ -166,13 +174,52 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
     });
     announce();
   }
-  const listener = net.createServer((socket) => {
-    if (closed || native) { socket.destroy(); return; }
-    native = socket; listener.close(); clearTimeout(nativeTimer);
+  function prepareRecovery() {
+    if (closed || !canRecover) return false;
+    if (recovering && !native) return true;
+    recovering = true; ready = false;
+    clearTimeout(nativeTimer); clearTimeout(awayTimer);
+    listener?.close();
+    releaseTouches(); stopRtc(); video.clear(); audio.clear(); nativeAcks.clear();
+    suspended = capturePaused = true; awayTimer = setTimeout(close, resumeMs);
+    wireHeader = videoConfig = audioConfig = null; width = height = 0;
+    lastKeyboardStatus = null; focusSubscribed = keyboardStatusSubscribed = false;
+    const previous = native; native = null;
+    previous?.end(); // Flush cancellation before closing the old input epoch.
+    if (previous) setTimeout(() => previous.destroy(), 1000).unref();
+    // Retain authorization while the owner classifies native shutdown. Only
+    // the owner may start another child after all old capture/input cleanup.
+    nativeEndTimer = setTimeout(() => close('capture-recovery'), nativeEndGraceMs);
+    onChange(); return true;
+  }
+  async function restartNative() {
+    if (closed || !canRecover || restarting) return false;
+    restartTimes = restartTimes.filter(time => Date.now() - time < 30000);
+    if (restartTimes.length >= 3) { close('capture-recovery'); return false; }
+    restartTimes.push(Date.now());
+    if (!prepareRecovery()) return false;
+    restarting = true; clearTimeout(nativeEndTimer);
+    // Notify only after the owner has classified this exit as recoverable.
+    // Otherwise cached viewers must receive a terminal close, not an invitation
+    // to reconnect through their remembered-device fallback.
+    const target = peer; peer = null;
+    target?.close(1012, 'capture-restart');
+    if (target) setTimeout(() => target.terminate(), 1000).unref();
+    try {
+      await rtcCleanup;
+      if (closed) return false;
+      await start();
+      return !closed;
+    } finally { restarting = false; }
+  }
+  function createListener() { const server = net.createServer((socket) => {
+    if (closed || native || listener !== server) { socket.destroy(); return; }
+    native = socket; server.close(); clearTimeout(nativeTimer);
     socket.setNoDelay(true);
     const parser = new SrdParser((packet, header) => {
-      if (closed) return;
+      if (closed || native !== socket) return;
       if (header) {
+        recovering = false;
         wireHeader = packet;
         width = packet.readUInt32BE(8); height = packet.readUInt32BE(12);
         if (suspended) command(7);
@@ -191,13 +238,13 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
           void negotiateRtc();
           const pts = packet.readBigUInt64BE(4);
           if ([0, 2].includes(flags)) {
-            if (!rtc || suspended || !peer) acknowledgeNative(4, pts);
+            if (!rtc || suspended || capturePaused || !peer) acknowledgeNative(4, pts);
             else void rtc.frame(packet.subarray(16), pts, flags === 2)
-              .then(() => acknowledgeNative(4, pts)).catch(close);
+              .then(() => { if (native === socket) acknowledgeNative(4, pts); }).catch(() => { if (native === socket) close(); });
           } else if (flags === 8) {
-            if (!rtc || suspended || !peer) acknowledgeNative(6, pts);
+            if (!rtc || suspended || capturePaused || !peer) acknowledgeNative(6, pts);
             else void rtc.sound(packet.subarray(16), pts)
-              .then(() => acknowledgeNative(6, pts)).catch(close);
+              .then(() => { if (native === socket) acknowledgeNative(6, pts); }).catch(() => { if (native === socket) close(); });
           } else if ([4, 16].includes(flags)) forward(packet);
           return;
         }
@@ -211,18 +258,25 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
       }
       forward(packet);
     });
-    socket.on('data', (chunk) => { try { parser.push(chunk); } catch { close(); } });
-    socket.on('error', close); socket.on('close', close);
-  });
+    socket.on('data', (chunk) => { if (native === socket) { try { parser.push(chunk); } catch { close(); } } });
+    const ended = () => {
+      if (native !== socket || closed) return;
+      if (!prepareRecovery()) close();
+    };
+    socket.on('error', ended); socket.on('close', ended);
+  }); return server; }
   function close(reason) {
     if (closed) return;
     closed = true;
     stopRtc();
-    clearTimeout(nativeTimer); clearTimeout(awayTimer); clearTimeout(lifetimeTimer); clearInterval(pingTimer);
-    releaseTouches(); listener.close(); native?.destroy();
+    clearTimeout(nativeTimer); clearTimeout(awayTimer); clearTimeout(nativeEndTimer); clearTimeout(lifetimeTimer); clearInterval(pingTimer);
+    releaseTouches(); listener?.close(); native?.destroy();
     const target = peer; peer = null;
-    target?.close(reason === 'capture-permission' ? 1008 : 1000,
-      reason === 'capture-permission' ? 'capture-permission' : 'Session ended. Create a new code on the computer.');
+    const category = ['capture-permission', 'capture-recovery'].includes(reason) ? reason : 'capture-ended';
+    // All server-ended sessions are terminal, including view-only/older hosts.
+    // Cached receivers otherwise treat a normal1000 as a transport retry and
+    // could silently ask their remembered grant for a different capture.
+    target?.close(1008, category);
     if (target) setTimeout(() => target.terminate(), 1000).unref();
     onClose();
   }
@@ -235,13 +289,15 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
   attach(socket);
   async function start() {
     try {
+      listener = createListener();
       await new Promise((resolve, reject) => {
         listener.once('error', reject); listener.listen(0, '127.0.0.1', resolve);
       });
       if (closed) { listener.close(); return; }
       ready = true; nativeTimer = setTimeout(close, 10000); announce();
-      await onConnect({ port: listener.address().port, keyboard, viewOnly, textFocus: focusSupported, focusHint, keyboardStatus, close, get closed() { return closed; } });
+      await onConnect({ port: listener.address().port, keyboard, viewOnly, textFocus: focusSupported, focusHint, keyboardStatus,
+        captureRecovery: canRecover, restartNative, close, get closed() { return closed; } });
     } catch { close(); }
   }
-  return { start, attach, close, mediaMode, get cleanup() { return rtcCleanup; } };
+  return { start, attach, close, mediaMode, get recovering() { return recovering; }, get cleanup() { return rtcCleanup; } };
 }

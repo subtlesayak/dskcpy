@@ -611,7 +611,8 @@ test('PiP keeps browser-native video and audio running while the original page i
   h.document.hidden = true; h.document.emit('visibilitychange');
   assert.equal(h.$('rtc-display').paused, false);
   assert.equal(h.$('rtc-display').muted, false);
-  assert.equal(h.socket.sent.at(-2), 'resume');
+  assert.equal(h.socket.sent.at(-3), 'resume');
+  assert.deepEqual(h.socket.sent.slice(-2),[Buffer.from([5,8]),Buffer.from([5,10])]);
   assert.ok(!h.socket.sent.includes('suspend'));
   h.document.pictureInPictureElement = null; h.$('rtc-display').emit('leavepictureinpicture');
   assert.equal(h.$('rtc-display').paused, true);
@@ -619,7 +620,7 @@ test('PiP keeps browser-native video and audio running while the original page i
   h.$('disconnect').emit('click');
 });
 
-test('an expired session uses a saved credential and explicit Disconnect suppresses automatic retry', async t => {
+test('transport loss with an expired session uses a saved credential; explicit Disconnect suppresses retry', async t => {
   const h = receiver(t, { webRtc: true, webCodecs: false });
   await new Promise(setImmediate);
   let requests = [];
@@ -628,7 +629,7 @@ test('an expired session uses a saved credential and explicit Disconnect suppres
     return { ok: true, json: async () => url.endsWith('/session') ? { resumable: false }
       : url.endsWith('/remember/status') ? { status: 'approved', paused: false } : { key: 'r'.repeat(32) } };
   };
-  h.socket.readyState = 3; h.socket.emit('close', { code: 1000 });
+  h.socket.readyState = 3; h.socket.emit('close', { code: 1006 });
   await new Promise(resolve => setTimeout(resolve, 280));
   assert.ok(requests.includes('/stream/trusted/connect'));
   assert.equal(h.sockets.length, 2);
@@ -762,4 +763,45 @@ test('negotiated keyboard failure clears the local context; a deliberate reopen 
 
 test('legacy hosts get no new keyboard-status subscription',t=>{
  const h=receiver(t,{keyboard:true});assert.equal(h.socket.sent.includes('keyboard-status-subscribe'),false);
+});
+
+test('fresh capture recovery clears old typing and adopts new dimensions without enabling disabled touch', async t=>{
+ const h=receiver(t,{keyboard:true,resumable:true});
+ h.$('keyboard').emit('click');h.$('keyboard-input').value='old composition';
+ h.$('touch').emit('click');
+ h.socket.readyState=3;h.socket.emit('close',{code:1012,reason:'capture-restart'});
+ assert.equal(h.$('keyboard-controls').hidden,true);assert.equal(h.$('keyboard-input').value,'');
+ assert.match(h.$('status').textContent,/Restoring/);
+ await new Promise(resolve=>setTimeout(resolve,300));
+ assert.equal(h.sockets.length,2);const next=h.sockets[1];next.emit('open');
+ next.emit('message',{data:JSON.stringify({type:'authenticated',keyboard:true,viewOnly:false})});
+ const header=new ArrayBuffer(16),view=new DataView(header);
+ view.setUint32(0,0x53524431);view.setUint32(4,1);view.setUint32(8,1280);view.setUint32(12,720);
+ next.emit('message',{data:header});
+ assert.equal(h.$('display').width,1280);assert.equal(h.$('display').height,720);
+ assert.equal(h.$('touch').attrs.get('aria-pressed'),'false');
+ assert.equal(h.$('keyboard-input').value,'');
+ assert.ok(!next.sent.some(p=>Buffer.isBuffer(p)&&[3,8,9].includes(p[0])));
+ h.$('disconnect').emit('click');
+});
+
+for(const code of [1000,1008])test('server-ended capture is terminal even when a remembered fallback could exist: '+code,async t=>{
+ const h=receiver(t,{resumable:true});h.socket.readyState=3;h.socket.emit('close',{code,reason:'capture-ended'});
+ assert.equal(h.$('join-panel').hidden,false);
+ await new Promise(resolve=>setTimeout(resolve,300));assert.equal(h.sockets.length,1);
+});
+
+test('fresh WebRTC capture reapplies the explicit audio choice and respects video pause',async t=>{
+ const h=receiver(t,{webRtc:true,webCodecs:false,resumable:true});
+ await h.$('audio').emit('click');assert.equal(h.$('audio').attrs.get('aria-pressed'),'true');
+ h.socket.readyState=3;h.socket.emit('close',{code:1012,reason:'capture-restart'});
+ await new Promise(resolve=>setTimeout(resolve,300));const next=h.sockets[1];assert.ok(next);next.emit('open');
+ next.emit('message',{data:JSON.stringify({type:'authenticated',mediaMode:'webrtc'})});
+ const b=new ArrayBuffer(16),v=new DataView(b);v.setUint32(0,0x53524431);v.setUint32(4,1);v.setUint32(8,1280);v.setUint32(12,720);
+ next.emit('message',{data:b});
+ const commands=()=>next.sent.filter(p=>Buffer.isBuffer(p)&&p[0]===5).map(p=>p[1]);
+ assert.equal(commands().at(-1),10); // New native defaults to muted until this explicit restoration.
+ h.$('pause').emit('click');assert.equal(commands().at(-1),11);
+ h.$('pause').emit('click');assert.equal(commands().at(-1),10);
+ h.$('disconnect').emit('click');
 });

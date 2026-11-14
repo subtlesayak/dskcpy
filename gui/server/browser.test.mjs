@@ -26,7 +26,7 @@ async function fixture(t, options = {}) {
     native = net.connect(bridge.port, '127.0.0.1');
     native.on('error', () => {});
     await once(native, 'connect');
-    native.write(header);
+    native.write(options.headers?.[calls-1] || header);
   }, ...options });
   t.after(async () => { native?.destroy(); await receiver.shutdown(); });
   const invitation = await receiver.invite('local', options.inputPolicy);
@@ -58,6 +58,71 @@ async function resumable(f, cookie, extra = {}) {
   const response = await fetch(f.invitation.url + 'stream/session', { headers: { Cookie: cookie, ...extra } });
   return (await response.json()).resumable;
 }
+
+test('native capture recovery preserves authorization, clears old media and adopts fresh geometry', async t => {
+  const nextHeader=Buffer.from(header);nextHeader.writeUInt32BE(1280,8);nextHeader.writeUInt32BE(720,12);
+  const f=await fixture(t,{inputPolicy:{keyboard:true,captureRecovery:true},headers:[header,nextHeader]});
+  const first=await login(f),cookie=first.cookie.split(';')[0],original=f.native(),bridge=f.bridge();
+  const received=[];original.on('data',chunk=>received.push(chunk));
+  first.send(touchPacket(0,0,10,10,640,480));first.send(Buffer.from([8,0,0,224,1]));
+  await until(()=>Buffer.concat(received).includes(Buffer.from([8,0,0,224,1])));
+  const stopped=once(first,'close');
+  await bridge.restartNative();await stopped;
+  assert.equal(f.calls(),2);assert.equal(await resumable(f,cookie),true);
+  await until(()=>!f.receiver.status().recovering);
+  await until(()=>Buffer.concat(received).includes(Buffer.from([8,2,0,0,0])));
+  const second=await f.open(undefined,cookie);
+  await until(()=>second.received.some(m=>m.binary));
+  const binary=second.received.filter(m=>m.binary);
+  assert.deepEqual(binary[0].data,nextHeader);
+  assert.equal(binary.length,1); // No old codec, frame or audio replay.
+  second.send('resume');
+  second.send(Buffer.from([5,8]));
+  const nextInput=[];f.native().on('data',chunk=>nextInput.push(chunk));
+  second.send(touchPacket(0,0,1200,700,1280,720));
+  await until(()=>Buffer.concat(nextInput).includes(Buffer.from(touchPacket(0,0,1200,700,1280,720))));
+  second.close(4000);
+});
+
+test('native transport loss holds only a bounded owner-classification grace; it does not itself start capture', async t=>{
+  const f=await fixture(t,{inputPolicy:{captureRecovery:true},nativeEndGraceMs:40});
+  const ws=await login(f),cookie=ws.cookie.split(';')[0];
+  const ended=once(ws,'close');f.native().destroy();
+  await until(()=>f.receiver.status().recovering);
+  assert.equal(await resumable(f,cookie),true);
+  const [code]=await ended;assert.equal(code,1008);assert.equal(f.calls(),1);
+  assert.equal(await resumable(f,cookie),false);assert.equal(f.calls(),1);
+});
+
+test('capture recovery budget and cancellation never create an unbounded or unauthorized restart', async t=>{
+  const f=await fixture(t,{inputPolicy:{captureRecovery:true}});
+  const ws=await login(f),cookie=ws.cookie.split(';')[0];
+  for(let i=0;i<3;i++){assert.equal(await f.bridge().restartNative(),true);await until(()=>!f.receiver.status().recovering);}
+  assert.equal(await f.bridge().restartNative(),false);assert.equal(f.calls(),4);
+  assert.equal(await resumable(f,cookie),false);
+  const other=await fixture(t,{inputPolicy:{captureRecovery:true}});await login(other);
+  const stale=other.bridge();other.receiver.cancel();
+  assert.equal(await stale.restartNative(),false);assert.equal(other.calls(),1);
+});
+
+test('WebRTC keyframe feedback cannot undo an explicit video pause',async t=>{
+ let feedback;
+ const f=await fixture(t,{rtcMediaFactory:options=>{
+  feedback=options.onKeyframe;
+  return {offer:async()=>({type:'offer',sdp:'synthetic'}),answer:async()=>{},close:async()=>{},frame:async()=>{},sound:async()=>{}};
+ }});
+ const ws=await f.open(undefined,undefined,'stream/webrtc');ws.send(f.invitation.key);
+ await until(()=>f.calls()===1);
+ f.native().write(packet(0,1,Buffer.from('000000016742c01e0102030000000168ce3c80','hex')));
+ await until(()=>feedback);
+ const chunks=[];f.native().on('data',chunk=>chunks.push(chunk));
+ ws.send(Buffer.from([5,7]));await until(()=>Buffer.concat(chunks).includes(Buffer.from([5,7])));
+ let before=Buffer.concat(chunks).length;feedback();ws.ping();await once(ws,'pong');
+ assert.equal(Buffer.concat(chunks).length,before);
+ ws.send(Buffer.from([5,8]));await until(()=>Buffer.concat(chunks).length>before);
+ before=Buffer.concat(chunks).length;feedback();await until(()=>Buffer.concat(chunks).length>before);
+ ws.close(4000);
+});
 
 test('receiver origin accepts explicit HTTPS origins, no paths or credentials; direct listeners stay private', () => {
   assert.equal(receiverOrigin(), null);

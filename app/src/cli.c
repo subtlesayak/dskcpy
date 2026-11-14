@@ -1013,7 +1013,8 @@ static const struct sc_option options[] = {
         .longopt = "reverse-socket",
         .argdesc = "port",
         .text = "Use an authenticated Display Bridge proxy on localhost. "
-                "Requires --reverse-display; bypasses ADB. Do not expose this proxy.",
+                "Requires --reverse-display; bypasses ADB. Do not expose this proxy. "
+                "Mac browser-capture-recovery-v1 reports safe capture changes.",
     },
     {
         .shortopt = 'v',

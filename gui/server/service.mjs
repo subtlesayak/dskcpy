@@ -81,6 +81,8 @@ export function createControlService({
   let pairingInProgress = false;
   let internetBridge = null;
   let lastNativeError = null;
+  let captureGeneration = 0;
+  let nativeTrustPause = Promise.resolve();
   let logRemainders = { stdout: '', stderr: '' };
   const state = {
     readiness: null,
@@ -403,6 +405,7 @@ export function createControlService({
       }
       if (attempt.signal.aborted) throw new Error('Connection cancelled.');
       const invitation = await browserReceiver.invite(mode, { viewOnly: Boolean(config.windowId),
+        captureRecovery: platform === 'darwin' && !config.windowId && readiness.features?.browserCaptureRecovery === true,
         // Typing into a receiver focused on the host itself would feed the
         // injected events back into its own typing field. Local preview omits it.
         textFocus: mode !== 'local' && !config.windowId && readiness.features?.browserTextFocus === true,
@@ -460,6 +463,7 @@ export function createControlService({
       state.reconnectAttempt = 0;
     }
     const attempt = new AbortController();
+    const ownedGeneration = ++captureGeneration;
     startAttempt = attempt; // Reserve the slot before any asynchronous probe.
     state.running = true;
     state.stopping = false;
@@ -512,9 +516,15 @@ export function createControlService({
         stdio: ['pipe', 'pipe', 'pipe'],
       });
       streamProcess = child;
+      let captureEndReason = null;
       state.pid = child.pid ?? null;
       child.stdin.on('error', () => {}); // Child may exit before reading q.
       child.stdout.on('data', (chunk) => consumeOutput('stdout', chunk, line => {
+        if (line.startsWith('DSKCPY_CAPTURE_END ')) {
+          const match = /^DSKCPY_CAPTURE_END (display-change|sleep|permission-lost|user-stop)$/.exec(line);
+          if (match && platform === 'darwin' && streamProcess === child && browserBridge && readiness.features?.browserCaptureRecovery) captureEndReason = match[1];
+          return true;
+        }
         if (line.startsWith('DSKCPY_KEYBOARD_STATUS ')) {
           const status = /^DSKCPY_KEYBOARD_STATUS (ready|blocked|unsupported)$/.exec(line);
           if (status && streamProcess === child && browserBridge?.keyboard) browserBridge.keyboardStatus(status[1]);
@@ -551,14 +561,24 @@ export function createControlService({
         if (streamProcess === child) streamProcess = null;
         // Only a fixed recovery category crosses to an authenticated viewer;
         // raw host diagnostics can contain local paths or private details.
-        internetBridge?.close(!streamStopRequested && /^Allow Screen Recording\b/.test(lastNativeError || '')
-          ? 'capture-permission' : undefined);
+        const permissionDenied = captureEndReason === 'permission-lost' || /^Allow Screen Recording\b/.test(lastNativeError || '');
+        const recoverCapture = !shuttingDown && !streamStopRequested && !permissionDenied && code === 2
+          && browserBridge?.captureRecovery && ['display-change', 'sleep'].includes(captureEndReason);
+        if (permissionDenied || captureEndReason === 'user-stop') {
+          // block() in this action is synchronous: no remembered ticket may
+          // race the later durable pause after an OS Stop or permission loss.
+          const pausing = browserReceiver.trustAction('pause');
+          nativeTrustPause = Promise.all([nativeTrustPause, pausing]).then(() => {}).catch(() => {});
+        }
+        if (!recoverCapture) internetBridge?.close(!streamStopRequested && permissionDenied ? 'capture-permission' : undefined);
         internetBridge = null;
         state.running = false;
         state.stopping = false;
         state.pid = null;
         state.lastExitCode = code;
-        state.error = streamStopRequested ? null : state.error ?? (code ? lastNativeError ?? exitError(code) : null);
+        state.error = streamStopRequested || recoverCapture ? null : state.error ?? (permissionDenied
+          ? 'Screen capture permission is unavailable. Restore Screen & System Audio Recording for the launching app before restarting sharing.'
+          : code ? lastNativeError ?? exitError(code) : null);
         const retryable = !streamStopRequested && (code === 2
           || (code === 1 && /^Reverse display stalled\b/.test(lastNativeError || ''))
           || (retrySession && code === 1 && state.latencyMs === null));
@@ -566,9 +586,24 @@ export function createControlService({
         if (state.error) appendLog('error', state.error);
         appendLog('gui', 'Stream stopped' + (code === null ? '' : ' (exit ' + code + ')'));
         if (!retryable || !scheduleReconnect(session)) cancelReconnect();
+        if (recoverCapture) {
+          state.reconnecting = true;
+          appendLog('gui', 'Mac capture changed; restoring the authorized browser session with fresh geometry');
+          void browserBridge.restartNative().then(ok => {
+            if (!ok && ownedGeneration === captureGeneration) {
+              state.reconnecting = false;
+              state.error = 'The Mac display changed, but sharing could not recover. Reconnect using saved access or a new invitation.';
+              broadcast();
+            }
+          }).catch(() => browserBridge.close('capture-recovery'));
+        }
         broadcast();
       };
-      child.on('exit', handleExit);
+      // Recovery reasons must be fully drained before a fresh child starts.
+      // Node's close event follows exit and closure of all stdio streams.
+      child.on('exit', code => {
+        if (!(platform === 'darwin' && browserBridge && readiness.features?.browserCaptureRecovery)) handleExit(code);
+      });
       child.on('close', handleExit);
       broadcast();
       return publicState();
@@ -589,6 +624,7 @@ export function createControlService({
   }
 
   function stopStream() {
+    captureGeneration++;
     browserPreparation?.abort();
     browserReceiver.cancel();
     cancelReconnect();
@@ -780,9 +816,11 @@ export function createControlService({
         return;
       }
       if (request.method === 'GET' && url.pathname === '/api/browser/trusted') {
-        await trustedDevices.ready; writeJson(response, 200, browserReceiver.trustedStatus()); return;
+        await trustedDevices.ready; await nativeTrustPause;
+        writeJson(response, 200, browserReceiver.trustedStatus()); return;
       }
       if (request.method === 'POST' && url.pathname === '/api/browser/trusted') {
+        await nativeTrustPause;
         const body = await readJson(request);
         if (!['approve', 'reject', 'revoke', 'pause', 'resume'].includes(body.action)
             || (['approve', 'reject', 'revoke'].includes(body.action) && !/^[a-f0-9]{32}$/.test(body.id))) throw new Error('Invalid device action.');
@@ -832,6 +870,7 @@ export function createControlService({
     clearInterval(heartbeat);
     stopStream();
     await browserReceiver.shutdown();
+    await nativeTrustPause;
     await browserUsbCleanupPending;
     for (const response of clients) response.end();
     clients.clear();

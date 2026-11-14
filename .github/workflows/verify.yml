@@ -49,6 +49,7 @@ jobs:
           node desktop/test/beginner-ui.mjs
           node desktop/test/remembered-ui.mjs
           node desktop/test/remembered-cookie.mjs
+          node desktop/test/capture-recovery-ui.mjs
       - name: Artifact identity and upgrade preflight regressions
         run: node --test tools/*.test.mjs
 

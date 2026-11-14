@@ -259,7 +259,10 @@ function connect(key = null, requestedMode = preferredMode) {
   const mine = ++generation;
   const socket = new WebSocket(`${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}${requestedMode === 'webrtc' ? '/stream/webrtc' : '/stream'}`);
   ws = socket; socket.binaryType = 'arraybuffer';
-  const timeout = connectionTimer = setTimeout(() => { if (mine === generation && !document.hidden && !paused) fail('Connection timed out. Check the desktop invitation and receiver address.'); }, 15000);
+  // A resumed capture may still be draining its previous native process. Keep
+  // this attempt bounded and inside the original five-minute resume deadline.
+  const connectionWait = !key && sessionExpected ? Math.min(30000, Math.max(1000, resumeDeadline - Date.now())) : 15000;
+  const timeout = connectionTimer = setTimeout(() => { if (mine === generation && !document.hidden && !paused) fail('Connection timed out. Check the desktop invitation and receiver address.'); }, connectionWait);
   socket.addEventListener('open', () => { if (key) { socket.send(key); key = null; } }, { once: true });
   // The close event decides whether this is a resumable network interruption.
   socket.addEventListener('error', () => {});
@@ -267,14 +270,17 @@ function connect(key = null, requestedMode = preferredMode) {
     clearTimeout(timeout);
     if (mine !== generation) return;
     releaseTouches(); clearMedia(); ws = null; authenticated = false; clearFocusCapability(false); updateArrowAvailability();
-    if (sessionExpected && ![1008, 4000, 4002].includes(event.code)) {
+    const captureRestart = event.code === 1012 && event.reason === 'capture-restart';
+    if (captureRestart) { hideKeyboard(); fitCanvas(); }
+    if (sessionExpected && ![1000, 1005, 1008, 4000, 4002].includes(event.code)) {
       resumeDeadline ||= Date.now() + BROWSER_RESUME_MS;
-      $('status').textContent = document.hidden ? 'Paused while away' : 'Reconnecting…';
+      $('status').textContent = document.hidden ? 'Paused while away' : captureRestart ? 'Restoring the computer display…' : 'Reconnecting…';
       retryTimer = setTimeout(resumeSession, 250);
     } else {
       sessionExpected = false;
       fail(event.code === 1008 && event.reason === 'capture-permission'
         ? 'On the Mac, allow Screen & System Audio Recording for Terminal/dskcpy, then restart dskcpy and scan a fresh QR.'
+        : event.code === 1008 && event.reason === 'capture-recovery' ? 'The computer could not restore sharing after its display changed. Reconnect using saved access or ask for a new invitation.'
         : event.code === 4002 ? 'The stream moved to another browser tab. Continue there.' : 'The session ended. Create a new link and code on the computer.');
     }
   });
@@ -319,6 +325,7 @@ function connect(key = null, requestedMode = preferredMode) {
         if (message.type !== 'authenticated') throw new Error('Unexpected receiver response.');
         mediaMode = message.mediaMode || 'webcodecs';
         if (mediaMode === 'webcodecs' && !('VideoDecoder' in window)) throw new Error('This connection needs WebCodecs. Use the private VPN link for browser-native video.');
+        const restoring = sessionExpected;
         authenticated = true; sessionExpected = true;
         viewOnly = message.viewOnly === true;
         remembered.authenticated(viewOnly);
@@ -332,8 +339,8 @@ function connect(key = null, requestedMode = preferredMode) {
         if (autoSetting) autoSetting.hidden = !focusSupported;
         updateArrowAvailability();
         $('keyboard').hidden = !keyboardSupported;
-        touchEnabled = !viewOnly; $('touch').disabled = viewOnly; $('drag-mode').disabled = viewOnly;
-        setRailLabel('touch', viewOnly ? 'Window · view only' : 'Touch on');
+        touchEnabled = !viewOnly && (!restoring || touchEnabled); $('touch').disabled = viewOnly; $('drag-mode').disabled = viewOnly;
+        setRailLabel('touch', viewOnly ? 'Window · view only' : touchEnabled ? 'Touch on' : 'Touch off');
         $('touch').setAttribute('aria-pressed', String(touchEnabled));
         for (const id of ['volume', 'window']) $(id).hidden = viewOnly;
         $('audio').disabled = viewOnly;
@@ -507,6 +514,7 @@ function updatePause() {
   if (away()) resumeDeadline ||= Date.now() + BROWSER_RESUME_MS;
   else resumeDeadline = 0;
   if (mediaMode === 'webrtc') {
+    if (!away()) action(muted || paused ? 11 : 10);
     const mine = generation, attempt = ++playbackAttempt;
     if (away() || paused) { rtcDisplay.muted = true; rtcDisplay.pause?.(); }
     else { rtcDisplay.muted = muted; void rtcDisplay.play?.().catch(() => {
