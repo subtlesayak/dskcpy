@@ -24,6 +24,9 @@ keyboard stops consuming the available height.
 
 The native keyboard/IME helper is unchanged. Touching the framing buttons keeps
 the typing field focused; layout changes retain composition and paired keys.
+Repeated layout notifications also retain a paired click when its input mapping
+has not changed. An actual stage, frame or view-transform change still cancels
+held contacts. Selected framing icons retain contrast while hovered.
 The existing authentication, view-only, pause, background and input guards remain
 in force. This is receiver-local framing, not target-relative Mac window input.
 
@@ -43,7 +46,7 @@ replaces decoded pixels only in the test; the decoder and transport remain real.
 No actual Mac capture, phone IME, permissions or OS input are exercised.
 
 On the combined native-permission/typing source, all six scenarios pass in each
-engine. The Node suite passes 466 of 473 tests with seven optional skips and the
+engine. The Node suite passes 467 of 474 tests with seven optional skips and the
 no-capture logger fixture enabled. Both UI builds pass. Native production code is
 unchanged from the separately qualified input-permission source (30 normal,
 30 ASan/UBSan and 30 pinned-static native tests); these are software results.
@@ -51,6 +54,11 @@ unchanged from the separately qualified input-permission source (30 normal,
 The media fixture sends configuration once and treats Resume/IDR idempotently.
 Earlier header-only WebKit recovery and incorrect fixture configuration-loop
 failures are retained separately, not counted as passing decoding tests.
+The first PR CI also caught a cancelled WebKit tap after a redundant layout pass.
+A deterministic receiver regression reproduces the down/cancel result before
+the mapping guard; it now requires down/up across an unchanged layout and
+down/cancel across a changed mapping. Generated flows inject that duplicate
+notification between pointer down/up rather than hiding the failure with retries.
 
 Phone Edge/Gboard readability, native Floating placement, suggestion replacement
 and orientation changes still need physical testing on this new UI. The existing

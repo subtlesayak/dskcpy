@@ -1092,8 +1092,8 @@ function setControlsVisible(visible) {
 if (windowChooserPresent) $('close-window-choices').addEventListener('click',()=>setControlTray(null,true));
 $('hide-controls').addEventListener('click', () => setControlsVisible(false));
 $('show-controls').addEventListener('click', () => setControlsVisible(true));
+let lastInputMapping;
 function fitCanvas() {
-  releaseTouches(false); // Soft-keyboard viewport changes must not cancel typing or composition.
   $('control-panels').hidden = !(keyboardOpen || openControlTray || trackpadMode || !$('orientation-help').hidden);
   const panel = $('stream-panel'), viewport = $('receiver-viewport'), padding = getComputedStyle(viewport);
   const fullHeight = viewport.clientHeight - parseFloat(padding.paddingTop) - parseFloat(padding.paddingBottom);
@@ -1130,6 +1130,15 @@ function fitCanvas() {
   const viewGeometry = { width: stage.clientWidth, height: stage.clientHeight, contentWidth: size.width, contentHeight: size.height };
   desktopView.setGeometry(viewGeometry);
   if (typingViewPresent) typingView.layout(viewGeometry);
+  // ResizeObserver can repeat a layout that is already fitted. Keep a click
+  // paired across that no-op; cancel contacts only when its mapping changes.
+  // Paired keyboard keys/composition remain intact during keyboard resizing.
+  const bounds = stage.getBoundingClientRect(), view = desktopView.state();
+  const inputMapping = [canvas.width, canvas.height, bounds.left, bounds.top,
+    viewGeometry.width, viewGeometry.height, size.width, size.height, view.scale, view.x, view.y];
+  if (!lastInputMapping || inputMapping.some((value, index) => value !== lastInputMapping[index]))
+    releaseTouches(false);
+  lastInputMapping = inputMapping;
   updateArrowAvailability();
   if ($('view-scroll-hint')) $('view-scroll-hint').hidden = true;
   if ($('view-scroll-hint')) $('view-scroll-hint').hidden = !viewNavigationActive() || $('control-panels').scrollHeight <= $('control-panels').clientHeight + 1;

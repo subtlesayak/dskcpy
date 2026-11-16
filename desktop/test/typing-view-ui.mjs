@@ -115,8 +115,12 @@ try {
    const focused = await canvas.evaluate(element => { const r = element.getBoundingClientRect(), s = document.getElementById('stage').getBoundingClientRect(); return { x: r.x + r.width * .3, y: r.y + r.height * .65, stage: { x: s.x, y: s.y, width: s.width, height: s.height }, transform: element.style.transform }; });
    assert.ok(focused.x >= focused.stage.x - 1 && focused.x <= focused.stage.x + focused.stage.width + 1);
    assert.ok(focused.y >= focused.stage.y - 1 && focused.y <= focused.stage.y + focused.stage.height + 1);
-   const beforeTap = inputs.length; await page.mouse.click(focused.x, focused.y);
-   await until(() => inputs.slice(beforeTap).some(packet => packet[0] === 3 && packet[1] === 1));
+   const beforeTap = inputs.length;
+   await page.mouse.move(focused.x, focused.y); await page.mouse.down();
+   // A duplicate viewport/observer notification must not cancel this tap.
+   await page.evaluate(height => window.fixtureKeyboardHeight(height), variant.zoom ? 390 : variant.width > variant.height ? 160 : 460);
+   await page.mouse.up();
+   await until(() => inputs.slice(beforeTap).some(packet => packet[0] === 3 && packet[1] === 1), 'zoomed tap paired through unchanged layout');
    const tap = inputs.slice(beforeTap).find(packet => packet[0] === 3 && packet[1] === 1);
    assert.ok(Math.abs(tap.readUInt32BE(10) - 480) <= 2); assert.ok(Math.abs(tap.readUInt32BE(14) - 585) <= 2);
    await page.locator('#keyboard-input').fill('café 😊');
@@ -127,6 +131,17 @@ try {
    if (variant.width > variant.height && !variant.zoom) {
     const mode = page.getByRole('button', { name: 'Floating keyboard layout', exact: true });
     await mode.click(); await page.locator('#typing-layout-help').waitFor({ state: 'visible' });
+    await mode.evaluate(button => { button.style.transition = 'none'; });
+    await mode.hover();
+    const contrast = await mode.evaluate(button => {
+      const style = getComputedStyle(button);
+      const luminance = color => color.match(/[\d.]+/g).slice(0, 3).map(Number).map(value => {
+        value /= 255; return value <= .04045 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4;
+      }).reduce((sum, value, i) => sum + value * [.2126, .7152, .0722][i], 0);
+      const values = [luminance(style.color), luminance(style.backgroundColor)].sort((a, b) => b - a);
+      return (values[0] + .05) / (values[1] + .05);
+    });
+    assert.ok(contrast >= 3, 'Selected layout icon must retain contrast while hovered');
     assert.equal(await page.locator('#floating-keyboard-slot').isHidden(), true, 'docked keyboard gets guidance before side layout activates');
     assert.equal(await page.evaluate(() => document.activeElement.id), 'keyboard-input');
     await mode.click(); await page.locator('#typing-layout-help').waitFor({ state: 'hidden' });
@@ -155,7 +170,7 @@ try {
    const stem = `failure-${variant.width}-${!!variant.rtl}-${variant.zoom || 1}`;
    await page.screenshot({ path: path.join(output, stem + '.png'), fullPage: true });
    await writeFile(path.join(output, stem + '.json'), JSON.stringify({ error: error.message, errors, parserErrors, framesSent,
-    nativeInputs: inputs.slice(0,32).map(packet => ({type: packet[0], action: packet[0] === 5 || packet[0] === 8 ? packet[1] : null})), state: await page.evaluate(() => ({
+    nativeInputs: inputs.slice(0,32).map(packet => ({type: packet[0], action: [3, 5, 8].includes(packet[0]) ? packet[1] : null})), state: await page.evaluate(() => ({
     status: document.getElementById('status')?.textContent, visibility: document.visibilityState,
     error: document.getElementById('error')?.textContent, closes: window.fixtureSocketCloses,
     errorHistory: window.fixtureErrors,

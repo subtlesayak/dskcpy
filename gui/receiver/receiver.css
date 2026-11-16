@@ -19,7 +19,7 @@ button { min-width: 0; max-width: 100%; padding: 10px 16px; background: #182a34;
 @media (hover: hover) { button:hover:not(:disabled), summary:hover { background: #24404e; } }
 button:disabled { opacity: .55; cursor: default; }
 button[aria-pressed="true"], #join { background: #64d9fa; color: #06202a; border-color: #64d9fa; }
-@media (hover: hover) { #join:hover:not(:disabled) { background: #a1e9fc; } }
+@media (hover: hover) { #join:hover:not(:disabled), button[aria-pressed="true"]:hover:not(:disabled) { background: #a1e9fc; } }
 button:focus-visible, input:focus-visible, textarea:focus-visible, summary:focus-visible, a:focus-visible { outline: 3px solid #64d9fa; outline-offset: 4px; }
 @media (prefers-reduced-motion: no-preference) { button { transition: background-color 120ms, scale 150ms ease-out; } button:active:not(:disabled) { scale: .96; } }
 [hidden] { display: none !important; }

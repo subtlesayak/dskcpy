@@ -268,6 +268,20 @@ function pointer(h, name, id, x, y, pointerType = 'touch') {
 }
 function inputs(h) { return h.socket.sent.filter((data) => Buffer.isBuffer(data) && [3, 7].includes(data[0])); }
 
+test('an unchanged layout pass preserves a mouse click but a changed input mapping cancels it', t => {
+  const h = receiver(t);
+  h.reflow();
+  pointer(h, 'pointerdown', 11, 200, 200, 'mouse');
+  h.reflow();
+  pointer(h, 'pointerup', 11, 200, 200, 'mouse');
+  assert.deepEqual(inputs(h).map(packet => packet[1]), [0, 1]);
+  const before = inputs(h).length;
+  pointer(h, 'pointerdown', 12, 200, 200, 'mouse');
+  h.$('stage').clientWidth = 600; h.reflow();
+  pointer(h, 'pointerup', 12, 200, 200, 'mouse');
+  assert.deepEqual(inputs(h).slice(before).map(packet => packet[1]), [0, 3]);
+});
+
 test('one-finger swipe scrolls without pressing/selecting; a stationary tap still clicks', (t) => {
   const h = receiver(t);
   pointer(h, 'pointerdown', 1, 200, 200); pointer(h, 'pointermove', 1, 200, 160); pointer(h, 'pointerup', 1, 200, 160);
