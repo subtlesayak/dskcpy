@@ -20,6 +20,8 @@ app.whenReady().then(async () => {
   // Even accidental external renderer requests remain blocked in this fixture.
   session.defaultSession.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*'] }, (_details, callback) => callback({ cancel: true }));
   const { OwnedBackend } = await import(pathToFileURL(path.join(config.application, 'desktop/owned-backend.mjs')).href);
+  stage = 'owned-lifecycle-races';
+  const lifecycle = await require('./owned-backend-utility.cjs')(OwnedBackend, utilityProcess.fork, config.ownedDirectory);
   backend = new OwnedBackend({ fork: utilityProcess.fork,
     modulePath: path.join(config.application, 'desktop/service-entry.cjs'),
     environment: { ...process.env, SCRCPY_GUI_BINARY: config.fakeNative,
@@ -105,7 +107,7 @@ app.whenReady().then(async () => {
   assert.deepEqual(errors, []); assert.equal(window.isVisible(), false);
   stage = 'utility-shutdown'; await backend.shutdown(); backend = null;
   stage = 'result-write';
-  await writeFile(config.result, JSON.stringify({ ...check, utilityProcessIpc: true,
+  await writeFile(config.result, JSON.stringify({ ...check, ...lifecycle, utilityProcessIpc: true,
     bundledRuntime: process.versions.electron, hiddenWindow: true, nativeProgram: 'fake --help only',
     realInvitation: false, realDeviceEnrolled: false, screenCapture: false, permissionApis: false, tailscale: false,
     actualHostShellLaunched: false, desktopMediaQualified: false }, null, 2));
