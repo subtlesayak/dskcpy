@@ -1,11 +1,17 @@
 import { execFile } from 'node:child_process';
-import { cp, mkdir, rm, writeFile, chmod } from 'node:fs/promises';
+import { cp, mkdir, rm, readFile, writeFile, chmod } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import { repository, readIdentity, inventory } from '../tools/build-identity.mjs';
+import { stageRuntimeNotices, verifyRuntimeNotices } from '../desktop/runtime-notices.mjs';
 
 const execute = promisify(execFile);
+export async function verifyPackagedRuntimeNotices(tree) {
+  const manifest = JSON.parse(await readFile(path.join(tree, 'build-manifest.json'), 'utf8'));
+  if (manifest.product !== 'dskcpy-macos-host') throw Error('Expected the Terminal-style Mac host package');
+  return verifyRuntimeNotices(path.join(tree, 'gui'), tree, manifest, { inventoryPrefix: '' });
+}
 export function macHostArchitecture(nodeArchitecture = process.arch) {
   if (nodeArchitecture === 'arm64') return 'arm64';
   if (nodeArchitecture === 'x64') return 'x86_64';
@@ -87,6 +93,7 @@ export async function packageHost(native, adb, output) {
     await cp(path.join(repository, 'app/deps/work/sources', name, license), path.join(tree, 'licenses', `${name}.txt`));
   }
   await cp(path.join(repository, 'app/deps/work/install/adb-macos/NOTICE.txt'), path.join(tree, 'licenses/adb-NOTICE.txt'));
+  const runtimeNotices = await stageRuntimeNotices(path.join(tree, 'gui'), tree);
   await writeFile(path.join(tree, 'README.txt'),
     `dskcpy experimental Mac hosting candidate\n\n${architecture === 'arm64' ? 'Apple silicon' : 'Intel x86_64'}; build deployment target macOS 13.0. Requires Node.js 22.12+ (24 recommended).\n`
     + 'Run ./Start-dskcpy-host.command --check first, then ./Start-dskcpy-host.command.\n'
@@ -96,15 +103,20 @@ export async function packageHost(native, adb, output) {
   const build = await readIdentity();
   const files = await inventory(tree);
   const manifest = { schemaVersion: 1, product: 'dskcpy-macos-host', build, source: { commit: commit.trim(), modified: Boolean(changes.trim()) },
-    minimumOS: '13.0', architecture, dependencies,
+    minimumOS: '13.0', architecture, dependencies, runtimeNotices,
     qualification: { nativeHelp: true, linkedLibraries: 'system only', cleanMinimumOS: false, physicalMedia: false,
-      developerSigned: false, notarized: false }, files };
+      developerSigned: false, notarized: false, thirdPartyNoticesReviewed: false, publicReleaseReady: false }, files };
   await writeFile(path.join(tree, 'build-manifest.json'), JSON.stringify(manifest, null, 2) + '\n', { flag: 'wx' });
+  await verifyPackagedRuntimeNotices(tree);
   return manifest;
 }
 
 if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) {
-  if (process.argv.length !== 5) { console.error('Usage: node release/package_macos_host.mjs NATIVE ADB NEW_OUTPUT'); process.exitCode = 1; }
+  if (process.argv.length === 4 && process.argv[2] === '--check-notices') {
+    verifyPackagedRuntimeNotices(path.resolve(process.argv[3])).then(result => console.log(JSON.stringify(result)))
+      .catch(() => { console.error('Mac host runtime notice check failed.'); process.exitCode = 1; });
+  }
+  else if (process.argv.length !== 5) { console.error('Usage: node release/package_macos_host.mjs NATIVE ADB NEW_OUTPUT; or --check-notices PACKAGE'); process.exitCode = 1; }
   else packageHost(...process.argv.slice(2)).then((manifest) => console.log(`Verified ${manifest.files.length} packaged files; minimum-OS/device qualification remains open.`))
     .catch(() => { console.error('Mac hosting packaging failed; inspect the local build/dependency setup. Existing outputs were not overwritten.'); process.exitCode = 1; });
 }

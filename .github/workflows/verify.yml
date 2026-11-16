@@ -219,7 +219,9 @@ jobs:
       - name: Build and verify the separate unsigned Mac hosting candidate
         run: bash release/build_macos_host.sh "$DSKCPY_MAC_HOST_OUTPUT"
       - name: Check packaged browser/dashboard runtime without starting capture
-        run: '"$DSKCPY_MAC_HOST_OUTPUT/Start-dskcpy-host.command" --check'
+        run: |
+          node release/package_macos_host.mjs --check-notices "$DSKCPY_MAC_HOST_OUTPUT"
+          "$DSKCPY_MAC_HOST_OUTPUT/Start-dskcpy-host.command" --check
       - name: Build and smoke-test the unsigned Mac desktop shell without capture
         run: |
           npm ci --prefix desktop
