@@ -1,70 +1,101 @@
 # Project status and verification
 
-Updated **11 November 2026 (IST)**. This is a dated development snapshot.
+Updated **16 November 2026 (IST)**. This is a dated development snapshot;
+draft branches and their CI results may advance after this update.
 dskcpy requires a source build; no signed, ready-to-install desktop release is
 available. A build, simulated regression or short device test qualifies only
 the behavior it actually exercised.
 
-## Merged source
+## Merged implementation baseline
 
-The recorded master baseline is
-`2249d848cd33ca39cb6aeb043a1c6c6fc64110d5`.
+The implementation baseline is
+`8052ce8ca9a7eab48eb3f3f027369cc3af843561`, including merged PRs #16–#37.
+Documentation-only updates may postdate this commit. Merging source does not
+install a new app, replace an active receiver or qualify physical hardware.
 
 | Area | Implemented changes |
 | --- | --- |
-| Mac audio and control lifecycle | [PR #7](https://github.com/subtlesayak/dskcpy/pull/7) feeds fresh PCM through the existing bounded window and prevents active Resume/IDR requests from restarting Opus or releasing held input. Real pause/resume, mute and route cleanup remain in place. |
-| Artifact identity and upgrades | Android version code is **50002**. Fork artifact identity is separate from inherited wire version **4.1** and reverse protocol **1**. An explicit read-only preflight verifies APK package, version and signing-certificate compatibility. |
-| Mac hosting package | A separate Apple-silicon hosting build targets macOS **13.0**, with pinned static dependencies, Opus encoding, GUI/browser assets, licenses and a hashed manifest. System-link and deployment-target checks pass; clean-machine macOS 13 compatibility remains unverified. |
-| Windows runtime and regression checks | [PR #8](https://github.com/subtlesayak/dskcpy/pull/8) discovers UCRT64/legacy runtime libraries while preserving explicit overrides. It also adds bounded message-parser vectors; ordinary Mac PR verification now includes ASan/UBSan. |
+| Guided host and access | The [desktop app prototype](../desktop/README.md) guides Android USB and private-network setup. Remembered browser access, explicit invitations, an owned-receiver link check and bounded startup history are implemented. Account-free USB/LAN paths remain available. |
+| Browser input | Matching Mac and [Windows hosts](windows-browser-keyboard.md) support opt-in desktop keyboard and committed text. [Trackpad](browser-trackpad.md), [local zoom](browser-view-zoom.md) and [shortcut buttons](browser-shortcuts.md) are implemented. [Text clipboard transfer](browser-clipboard.md) requires separate invitation permission and current-viewer opt-in; remembered access excludes it. |
+| Recovery and video quality | Classified Mac display/sleep recovery, receiver audio-intent restoration, [negotiated media fallback](browser-media-recovery.md), bounded codec parameter updates and duplicate-Resume input protection are implemented. [Adaptive video](adaptive-browser-video.md), checked [Windows encoder replacement](windows-adaptive-video.md) and local video preferences remain subject to driver/device qualification. |
+| Mac windows | The owner can approve [two to eight windows](browser-window-switching.md) for temporary receiver switching. Last-viewed previews stay in receiver memory. Window sharing remains view-only with audio off in this baseline. |
+| Builds and diagnostics | Separate [Apple-silicon and Intel Mac builds](mac-host-architectures.md), pinned dependencies, runtime notices, payload manifests and startup diagnostics are implemented. Minimum-OS, installation, signing and physical media qualification remain open. |
+| Artifact identity and upgrades | Android version code is **50002**, distinct from inherited wire version **4.1** and reverse protocol **1**. A read-only preflight checks APK package, version and signing-certificate compatibility. Existing Android-to-computer operation is retained. |
 
-See [Build identity and compatible upgrades](artifact-upgrades.md) for commands,
-signing-lineage limits and the separate unsigned hosting candidate. The existing
-Android-to-computer client packaging remains available. An Android source-version
-bump cannot make a differently signed APK a compatible update.
+The integration review also fixed stale Mac audio callback admission after
+mute/re-enable, legacy SPS/PPS caching for receiver reconnects, and misleading
+receiver-port-conflict guidance. See [Build identity and compatible upgrades](artifact-upgrades.md)
+for source/artifact identity and signing-lineage limits. An Android version bump
+cannot make a differently signed APK a compatible update.
 
 ## Automated verification
 
-All six jobs passed for the merged baseline in
-[master verification run 43022713935](https://github.com/subtlesayak/dskcpy/actions/runs/43022713935):
+All **eight** jobs passed for implementation baseline `8052ce8c` in
+[master verification run 43571452662](https://github.com/subtlesayak/dskcpy/actions/runs/43571452662):
 
 - Dashboard/backend checks and production builds on Linux and Windows.
-- Native Windows tests and loading the actual UCRT64 executable.
+- Windows: 26 native tests and four required production probes, with zero skips.
 - Android debug/release packaging, actual APK identity/signature inspection,
   unit tests and the standalone server build.
-- Mac native tests, ASan/UBSan, a full isolated static-source hosting build,
-  packaged check-only readiness and CI artifact creation.
+- Apple silicon and Intel separately: 30 native tests in each normal,
+  ASan/UBSan and pinned build; unsigned package verification and fake-host IPC.
+- Generated H.264/Opus media in Chromium and WebKit: nine media scenarios,
+  six Chromium window-switching flows and five WebKit window-switching flows.
 
-The Mac suites contain 20 native test executables. Focused regressions include
-10,000 duplicate active Resume requests, 8,192 bounded native message vectors,
-and downloader connection-reset/checksum-refusal cases. These are automated or
-simulated checks; they do not establish audible quality or physical latency.
+These tests use generated media, fake native effects or software decoding where
+specified. They do not establish physical input, audible playback, real encoder
+driver behavior or touch-to-display latency. A failed or capacity-cancelled job
+is not a pass, and a pass on one architecture does not qualify another.
 
-The [PR #7 verification artifact](https://github.com/subtlesayak/dskcpy/actions/runs/43020338689)
-had all **5,937** payload sizes and SHA-256 hashes independently checked.
 CI candidates are short-lived intermediate artifacts, with no developer signing,
 notarization or release publication. Their manifests retain source identity and
-explicit qualification limits. The physically tested binary below was built
-separately; a CI artifact is not automatically the same device-tested artifact.
+explicit qualification limits. A CI artifact is not automatically the same
+artifact as a locally repaired, physically tested app. Older CI and artifact
+counts remain in the [11 November snapshot](https://github.com/subtlesayak/dskcpy/blob/8052ce8ca9a7eab48eb3f3f027369cc3af843561/doc/project-status.md).
 
-## Pending receiver work
+## Draft follow-ups outside the baseline
 
-[PR #6](https://github.com/subtlesayak/dskcpy/pull/6) remains separate from this
-master snapshot. It contains browser decoder-drain recovery, compact side
-controls/fullscreen keyboard fitting, authorized USB auto-open, bounded audio
-scheduling and fresh-document invitation navigation.
+PR #6 merged on 12 November; it is no longer pending. The following work is
+still in separate drafts at this snapshot and is outside the merged baseline.
+A separately approved local candidate installation does not merge its branch
+or qualify a release:
 
-Its source review and device tests continue in the receiver task. At checkpoint
-`c37f8631`, review reproduced a launcher preflight false-positive for a directory
-supplied as the native executable; correction and latest-head validation are
-tracked in PR #6. A newer private-route candidate is under separate physical
-testing. These pending changes must not be described as released or already
-included in the master browser receiver.
+| Draft | Candidate scope | Recorded source |
+| --- | --- | --- |
+| [#38](https://github.com/subtlesayak/dskcpy/pull/38) | Effective native Mac input-permission status, instead of relying only on the desktop shell's readiness. | `6e5aedc1` |
+| [#39](https://github.com/subtlesayak/dskcpy/pull/39) | Reversible last-tap typing framing and landscape space for a user-positioned floating keyboard. The browser cannot position the system keyboard. | `bada804d` |
+| [#40](https://github.com/subtlesayak/dskcpy/pull/40) | Explicit, off-by-default selected-application audio with Mac window sharing; window input stays denied. | `d92cca17` |
+| [#41](https://github.com/subtlesayak/dskcpy/pull/41) | Owned-service setup/Quit serialization and atomic idle-retirement veto. | `cf2483b9` |
 
-## Physical USB browser evidence
+Check each draft's latest source and terminal CI before review. Local checks,
+hosted-runner capacity cancellations and separate integration experiments are
+different evidence. The draft typing layout and application-audio behavior
+still require physical qualification.
+
+## Candidate-specific physical evidence
+
+### Locally repaired source92 Mac app
+
+The human reported visible video, working touch, committed phone text in an
+owned test window, and automatic keyboard opening with the receiver option
+enabled on a local app from source `92c49def`. This followed a combined local
+package/signature repair and app-specific permission reset/regrant. The steps
+were not isolated causal tests; the earlier native Accessibility denial despite
+shell-ready status remains relevant to permission telemetry and install identity.
+
+This is one historical local candidate's evidence. It does not qualify `8052ce8c`, a CI
+download, drafts #38–#41, audible application audio, signing/upgrade durability or
+the new landscape layout. No signed desktop release follows from this result.
+
+The `bada804d` typing candidate subsequently entered a separately approved local
+activation test. Installation and permission-grant steps alone are not a pass;
+physical results for its new layout remain pending at this snapshot.
+
+### Earlier USB browser audio and input candidate
 
 The following results were reported by the human and receiver task for **one
 Mac/Android browser candidate over USB/WebCodecs**. They apply to this identified
-combination, including pending receiver code:
+combination, including receiver code that was unmerged at that test checkpoint:
 
 ```text
 Native source: 4ec8e7fcaec7b4d558220afecdd54b494d6795aa
@@ -93,19 +124,28 @@ decode-acknowledgement RTT remains a different measurement.
 
 ## Remaining qualification gates
 
+- Effective native permission reporting, correct app-copy identity, regrant and
+  recovery behavior on the final packaged candidate.
+- Draft typing-layout usability and selected-application audio isolation,
+  audible switching/output-route recovery, plus exact target-relative window
+  input. Current merged window mode remains view-only with audio off.
 - Longer USB sessions and 30–60 minute audible workloads; repeat stop/reconnect
   and input-release checks on the final combined source.
 - Local Wi-Fi/direct IP and private VPN separately, including audio, network
   loss and recovery. Private-route preflight is not a transport/device pass.
 - Output-device changes, mute/background transitions and permission changes
   on the identified final candidate.
+- Display resolution/disconnect/reconnect and suspend/resume recovery on real
+  devices, plus Windows hardware encoder rate/resource behavior.
 - Safari/iPhone/iPad, broader IME/shortcut behavior and additional devices.
 - A same-key Android upgrade that preserves data, plus the matching private
   Android source/APK handoff needed for the historical display-socket startup stall.
 - Clean-machine testing on every declared supported Mac OS before describing
-  the hosting candidate as a portable release.
+  the hosting candidate as a portable release; actual install/upgrade/startup,
+  signing and notarization need their own qualification.
 
 Earlier source/physical records remain in [Mac testing history](testing/mac/README.md).
-The [roadmap](roadmap.md) retains later browser-engine CI, diagnostics, control,
-trust and adaptation work. A successful retry, five-minute USB result or build
-does not complete the overall hardware-verification goal.
+The [roadmap](roadmap.md) remains the full implementation and qualification plan.
+A successful retry, five-minute USB result, local repair or build does not
+complete the overall hardware-verification goal. The historical Android
+display-socket startup stall still has no reproduced cause or verified fix.
