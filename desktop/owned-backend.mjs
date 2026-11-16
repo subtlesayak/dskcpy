@@ -22,7 +22,7 @@ export class OwnedBackend {
         const status = await this.status();
         if (this.closed) throw new Error('Host closed');
         if (status.running || status.browser?.waiting || status.browser?.connected) throw new Error('Stop this app’s sharing before changing its connection.');
-        await this.retire();
+        await this.retire({ idleOnly: true });
       }
       if (this.closed) throw new Error('Host closed');
       const child = this.fork(this.modulePath, [], { env: { ...this.environment,
@@ -69,14 +69,21 @@ export class OwnedBackend {
   prepareReceiver() { return this.request('prepare-receiver'); }
   invite(args) { return this.request('invite', args); }
   stop() { return this.child ? this.request('stop') : Promise.resolve(); }
-  async retire() {
+  async retire({ idleOnly = false } = {}) {
     const child = this.child;
     if (!child) return;
     this.retiring.add(child);
-    try { await this.request('shutdown'); } finally {
+    let terminate = !idleOnly;
+    try {
+      const accepted = await this.request(idleOnly ? 'shutdown-if-idle' : 'shutdown');
+      if (idleOnly && accepted !== true) throw new Error('Stop this app’s sharing before changing its connection.');
+      terminate = true;
+    } finally {
       // This handle belongs only to this app; never terminate by name or port.
-      if (this.child === child) { this.child = null; this.configuration = null; }
-      child.kill();
+      if (terminate) {
+        if (this.child === child) { this.child = null; this.configuration = null; }
+        child.kill();
+      } else this.retiring.delete(child);
     }
   }
   shutdown() {

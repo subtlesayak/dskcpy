@@ -37,6 +37,9 @@ app.whenReady().then(async () => {
   assert.deepEqual(await backend.usbDevices(), { devices: [], error: true });
   stage = 'utility-idle';
   assert.deepEqual(await backend.status(), { running: false, browser: { waiting: false, connected: false } });
+  stage = 'utility-idle-retirement';
+  await backend.ensure({ origin: '', bind: '127.0.0.2' });
+  assert.deepEqual(await backend.status(), { running: false, browser: { waiting: false, connected: false } });
   let state = { phase: 'ready', features: { keyboard: true }, permissions: { screen: true, control: true },
     route: { connected: true, ready: true, conflict: false }, startup: { available: true, requested: false, enabled: false, requiresApproval: false, error: null }, error: null, invitation: null, canStop: false };
   const page = pathToFileURL(path.join(config.application, 'gui/dist-desktop/desktop/index.html')).href;
@@ -107,7 +110,7 @@ app.whenReady().then(async () => {
   assert.deepEqual(errors, []); assert.equal(window.isVisible(), false);
   stage = 'utility-shutdown'; await backend.shutdown(); backend = null;
   stage = 'result-write';
-  await writeFile(config.result, JSON.stringify({ ...check, ...lifecycle, utilityProcessIpc: true,
+  await writeFile(config.result, JSON.stringify({ ...check, ...lifecycle, utilityProcessIpc: true, utilityIdleRetirementIpc: true,
     bundledRuntime: process.versions.electron, hiddenWindow: true, nativeProgram: 'fake --help only',
     realInvitation: false, realDeviceEnrolled: false, screenCapture: false, permissionApis: false, tailscale: false,
     actualHostShellLaunched: false, desktopMediaQualified: false }, null, 2));
