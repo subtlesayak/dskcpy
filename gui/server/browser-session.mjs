@@ -43,7 +43,8 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
       peer.send(JSON.stringify({type:'keyboard-status',status}));
   }
   function focusHint(focused) {
-    if (!focusSupported || !focusSubscribed || !ready || closed || suspended || !peer || peer.readyState !== WebSocket.OPEN
+    if (!focusSupported || !focusSubscribed || !ready || closed || suspended || capturePaused || recovering || !native || native.destroyed
+        || !peer || peer.readyState !== WebSocket.OPEN
         || peer.bufferedAmount > MAX_PACKET || ![true, false, null].includes(focused) || Date.now() - focusAt < 100) return;
     focusAt = Date.now(); peer.send(JSON.stringify({ type: 'text-focus', focused }));
   }

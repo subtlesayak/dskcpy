@@ -591,6 +591,21 @@ test('text focus is bounded advisory metadata on an authenticated capable sessio
   f.bridge().focusHint(false);await new Promise(setImmediate);assert.equal(hints().length,1);
 });
 
+test('capture pause suppresses focus metadata and Resume restores the current subscription', async t => {
+  const f = await fixture(t, { inputPolicy: { keyboard: true, textFocus: true } });
+  const ws = await login(f);
+  let command = once(f.native(), 'data');
+  ws.send('text-focus-subscribe'); ws.send(Buffer.from([5, 7])); await command;
+  const hints = () => ws.received.filter(m => !m.binary && JSON.parse(m.data).type === 'text-focus');
+  // A pong follows any preceding server-to-client hint on the same TCP stream,
+  // so this observes the absence without a timing sleep or a suppressed frame.
+  let pong = once(ws, 'pong'); f.bridge().focusHint(true); ws.ping(); await pong;
+  assert.equal(hints().length, 0);
+  command = once(f.native(), 'data'); ws.send(Buffer.from([5, 8])); await command;
+  pong = once(ws, 'pong'); f.bridge().focusHint(true); ws.ping(); await pong;
+  assert.deepEqual(hints().map(m => JSON.parse(m.data)), [{ type: 'text-focus', focused: true }]);
+});
+
 test('focus subscriptions belong to the current socket, not a resumed session', async t => {
   const f = await fixture(t, { inputPolicy: { keyboard: true, textFocus: true } });
   const first = await login(f);
