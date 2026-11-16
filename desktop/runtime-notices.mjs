@@ -22,7 +22,16 @@ export async function stageRuntimeNotices(app, host) {
   const bytes = await readFile(new URL(`./notices/${WERIFT_NOTICE.file}`, import.meta.url));
   if (hash(bytes) !== WERIFT_NOTICE.sha256) throw Error('Pinned upstream runtime notice changed');
   await mkdir(path.join(host, 'licenses'), { recursive: true });
-  await writeFile(path.join(host, 'licenses', WERIFT_NOTICE.file), bytes, { flag: 'wx' });
+  const notice = path.join(host, 'licenses', WERIFT_NOTICE.file);
+  try { await writeFile(notice, bytes, { flag: 'wx' }); }
+  catch (error) {
+    if (error.code !== 'EEXIST') throw error;
+    // Desktop staging also consumes the Terminal package's license directory.
+    // Reuse its exact verified notice; never replace a conflicting file/link.
+    const info = await lstat(notice);
+    if (!info.isFile() || info.isSymbolicLink() || hash(await readFile(notice)) !== WERIFT_NOTICE.sha256)
+      throw Error('Changed existing runtime notice');
+  }
   return [{ ...WERIFT_NOTICE }];
 }
 export async function verifyRuntimeNotices(app, host, manifest, { inventoryPrefix = 'host/' } = {}) {

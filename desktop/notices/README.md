@@ -13,6 +13,9 @@ check the installed package name, version and license;
 a dependency upgrade requires a fresh source/notice review. No build or runtime
 network fetch is added. Bundle verification checks the pinned bytes and manifest
 entry, independently of the manifest's supplied hash.
+When desktop staging consumes the Terminal package's license directory, it
+reuses only the exact regular-file notice with the pinned hash. A conflicting
+file or link is preserved and rejected rather than replaced.
 For the Terminal-style package, run
 `node release/package_macos_host.mjs --check-notices PACKAGE_DIRECTORY` to
 repeat that notice-only check without launching any native program, capture,
