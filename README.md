@@ -11,8 +11,8 @@ reverse direction. The original Android-to-computer mode remains available.
 [Mac setup](doc/macos-host.md) · [Browser receiving](doc/browser-receiver.md) ·
 [Troubleshooting](FAQ.md) · [Documentation](#documentation)
 
-[Current project status and verification](doc/project-status.md) records merged
-upgrades, pending receiver work and the exact scope of physical-device results.
+[Current project status and verification](doc/project-status.md) separates the
+merged implementation, unmerged follow-ups and candidate-specific physical results.
 
 For source/artifact identity, Android upgrade checks and the separate unsigned
 Mac hosting candidate, see [Build identity and compatible upgrades](doc/artifact-upgrades.md).
