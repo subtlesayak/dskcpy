@@ -66,6 +66,7 @@ struct mac_state {
     CGPoint mouse_point, scroll_point;
     uint32_t window_id;
     uint32_t window_owner;
+    bool window_audio_allowed; // Invitation opt-in; SC window filter captures its entire owning app audio.
     bool keyboard_enabled, keys[256]; // Input-thread ownership.
     bool clipboard_enabled, clipboard_pending; // Request protected by keyboard_mutex.
     struct sc_reverse_clipboard_request clipboard_request;
@@ -846,14 +847,15 @@ static void mac_action(struct sc_receiver *receiver, const struct sc_device_msg 
         sc_reverse_macos_pause(atomic_load(&s->paused), paused, &callbacks, s);
         return;
     }
-    if (s->window_id) return; // Window capture is view-only, including host audio/volume/window actions.
     if (action == SC_REVERSE_SYSTEM_ACTION_AUDIO_ENABLE || action == SC_REVERSE_SYSTEM_ACTION_AUDIO_DISABLE) {
+        if (s->window_id && !s->window_audio_allowed) return;
         sc_mutex_lock(&s->mutex);
         bool enabled = action == SC_REVERSE_SYSTEM_ACTION_AUDIO_ENABLE;
         if (atomic_exchange(&s->audio_enabled, enabled) != enabled) mac_audio_transition(s);
         sc_mutex_unlock(&s->mutex);
         return;
     }
+    if (s->window_id) return; // App audio opt-in never grants volume, window or input actions.
     if (atomic_load(&s->paused)) return;
     dispatch_async(dispatch_get_main_queue(), ^{
         // This runs later on the main queue. A capture failure, explicit user
@@ -969,6 +971,8 @@ sc_reverse_display_macos_run(sc_socket video_socket, sc_socket control_socket, c
             s->display_pixels_high = CGDisplayPixelsHigh(display.displayID);
             s->window_id = options->reverse_window;
             s->window_owner = window ? (uint32_t)window.owningApplication.processID : 0;
+            s->window_audio_allowed = window && options->reverse_window_audio && options->reverse_audio
+                && options->reverse_window_owner && s->window_owner == options->reverse_window_owner;
             s->keyboard_enabled = options->reverse_keyboard && !window;
             s->clipboard_enabled = options->reverse_clipboard && s->keyboard_enabled;
             double scale = s->display_pixels_wide / s->display_bounds.size.width;
@@ -1006,13 +1010,15 @@ sc_reverse_display_macos_run(sc_socket video_socket, sc_socket control_socket, c
             configuration.pixelFormat = kCVPixelFormatType_32BGRA;
             configuration.minimumFrameInterval = CMTimeMake(1, s->fps);
             configuration.queueDepth = 3; configuration.showsCursor = YES;
-            bool capture_audio = options->reverse_audio && !window;
+            bool capture_audio = options->reverse_audio && (!window || s->window_audio_allowed);
             configuration.capturesAudio = capture_audio;
             configuration.scalesToFit = YES;
             if (@available(macOS 14.0, *)) configuration.preservesAspectRatio = YES;
             configuration.sampleRate = 48000; configuration.channelCount = 2;
             configuration.excludesCurrentProcessAudio = YES;
             // No microphone output is requested. --no-audio disables capture too.
+            // Apple defines window-filter audio at APPLICATION scope. Retain
+            // this exact filter on failure: video-only is the only fallback.
             SCContentFilter *filter = window ? [[SCContentFilter alloc] initWithDesktopIndependentWindow:window]
                 : [[SCContentFilter alloc] initWithDisplay:display excludingWindows:@[]];
             SCStream *stream = [[SCStream alloc] initWithFilter:filter configuration:configuration delegate:output];

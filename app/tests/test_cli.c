@@ -248,6 +248,23 @@ static void test_reverse_socket(void) {
 }
 
 static void test_mac_capture_options(void) {
+    char *app_audio[] = {"scrcpy", "--reverse-display", "--reverse-socket=1234", "--reverse-window=17", "--reverse-window-owner=42", "--reverse-window-audio"};
+    struct scrcpy_cli_args audio_args = {.opts = scrcpy_options_default};
+#ifdef HAVE_REVERSE_MACOS
+    assert(scrcpy_parse_args(&audio_args, ARRAY_LEN(app_audio), app_audio));
+    assert(audio_args.opts.reverse_window_audio && audio_args.opts.reverse_audio && !audio_args.opts.reverse_keyboard);
+#else
+    assert(!scrcpy_parse_args(&audio_args, ARRAY_LEN(app_audio), app_audio));
+#endif
+    for (unsigned omit = 1; omit < 5; ++omit) {
+        audio_args.opts = scrcpy_options_default;
+        char *missing[ARRAY_LEN(app_audio)-1]; unsigned at = 0;
+        for (unsigned i = 0; i < ARRAY_LEN(app_audio); ++i) if (i != omit) missing[at++] = app_audio[i];
+        assert(!scrcpy_parse_args(&audio_args, ARRAY_LEN(missing), missing));
+    }
+    char *no_audio[] = {"scrcpy", "--reverse-display", "--reverse-socket=1234", "--reverse-window=17", "--reverse-window-owner=42", "--reverse-window-audio", "--no-audio"};
+    audio_args.opts = scrcpy_options_default;
+    assert(!scrcpy_parse_args(&audio_args, ARRAY_LEN(no_audio), no_audio));
     struct scrcpy_cli_args args = {.opts = scrcpy_options_default};
     char *window[] = {"scrcpy", "--reverse-display", "--reverse-window=17"};
 #ifdef HAVE_REVERSE_MACOS

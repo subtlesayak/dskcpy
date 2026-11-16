@@ -26,8 +26,10 @@ close metadata to resume this same session. A failed or expired window session
 never silently requests remembered full-desktop access. Older cached receivers
 receive no new window-state messages unless they explicitly subscribe.
 
-This candidate remains **view-only with audio off**. Interactive target-relative
-input and app-specific audio are separate open requirements. Matching a window's
+Window switching remains **view-only**, with audio off by default. The host can
+separately approve [application-wide audio](browser-window-audio.md), which then
+follows the application of the selected approved window. Interactive target-relative
+input remains an open requirement. Matching a window's
 process, title or bounds does not prove exact accessibility/input ownership,
 particularly after focus, occlusion, replacement or movement. This implementation
 does not enable those inputs or claim that requirement is complete. Closing,

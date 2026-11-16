@@ -12,14 +12,15 @@ const browser=await chromium.launch({headless:true,channel:'chromium',args:['--d
 const state={running:false,stopping:false,reconnecting:false,reconnectAttempt:0,reconnectLimit:3,nextRetryAt:null,config:null,pid:null,encoder:null,latencyMs:null,command:null,startedAt:null,lastExitCode:null,error:null,logs:[],hostPlatform:'macOS',binaryAvailable:true,reverseDisplaySupported:true,
  browser:{waiting:false,connected:false,mode:'local',remoteAvailable:false},readiness:{checks:[{id:'binary',ready:true}],features:{browserKeyboard:true,macWindowCapture:true,browserCaptureRecovery:true},transports:Object.fromEntries(['usb','wifi','ip','internet','browser'].map(k=>[k,{ready:true,message:'Ready',required:[]}]))}};
 const windows=Array.from({length:9},(_,i)=>({id:i+11,ownerPid:i+41,application:'Editor',title:'Projektübersicht mit ausführlicher Dokumentation '+(i+1)}));
-try{for(const variant of [{width:1080,height:800},{width:320,height:900},{width:320,height:900,rtl:true},{width:640,height:900,zoom:2}]){
+try{for(const variant of [{width:1080,height:800},{width:320,height:900},{width:320,height:900,rtl:true},{width:640,height:900,zoom:2},{width:1080,height:800,audio:false}]){
+ const uiState=structuredClone(state);uiState.readiness.features.browserWindowAudio=variant.audio!==false;
  const page=await browser.newPage({viewport:{width:variant.width,height:variant.height}}),errors=[],invitations=[];
  page.on('pageerror',e=>errors.push(e.message));page.setDefaultTimeout(8000);
- await page.addInitScript(s=>{window.EventSource=class{constructor(){queueMicrotask(()=>this.onmessage?.({data:JSON.stringify(s)}));}close(){}};},state);
+ await page.addInitScript(s=>{window.EventSource=class{constructor(){queueMicrotask(()=>this.onmessage?.({data:JSON.stringify(s)}));}close(){}};},uiState);
  await page.route('**/api/**',async route=>{const pathname=new URL(route.request().url()).pathname;
-  let body=pathname==='/api/status'?state:pathname==='/api/devices'?{devices:[],error:null}:{ready:false,peers:[]};
+  let body=pathname==='/api/status'?uiState:pathname==='/api/devices'?{devices:[],error:null}:{ready:false,peers:[]};
   if(pathname==='/api/browser/windows'){assert.equal(route.request().method(),'POST');body={windows};}
-  else if(pathname==='/api/browser/invite'){invitations.push(route.request().postDataJSON());body={url:'http://example.invalid/',key:'x'.repeat(32),expiresAt:new Date(Date.now()+300000).toISOString(),status:{...state,browser:{...state.browser,waiting:true}}};}
+  else if(pathname==='/api/browser/invite'){invitations.push(route.request().postDataJSON());body={url:'http://example.invalid/',key:'x'.repeat(32),expiresAt:new Date(Date.now()+300000).toISOString(),status:{...uiState,browser:{...uiState.browser,waiting:true}}};}
   else assert.equal(route.request().method(),'GET');
   await route.fulfill({contentType:'application/json',body:JSON.stringify(body)});
  });
@@ -28,21 +29,33 @@ try{for(const variant of [{width:1080,height:800},{width:320,height:900},{width:
   await page.locator('html').evaluate((e,v)=>{e.dir=v.rtl?'rtl':'ltr';if(v.zoom)e.style.zoom=v.zoom;},variant);
   await page.getByRole('button',{name:'Refresh windows',exact:true}).click();
   await page.locator('#browser-capture-target').selectOption('11:41');
+  const audio=page.getByRole('checkbox',{name:'Allow audio from the selected window’s app',exact:true});
+  if(variant.audio!==false){
+   assert.equal(await audio.isChecked(),false);await audio.check();
+   await page.locator('#browser-capture-target').selectOption('12:42');assert.equal(await audio.isChecked(),false,'Changing target clears audio consent');
+   await page.locator('#browser-capture-target').selectOption('11:41');assert.equal(await audio.isChecked(),false);
+   assert.match(await page.locator('#window-audio-consent').textContent(),/all audio from that application, even its other windows and tabs/);
+   assert.match(await page.locator('#window-audio-consent').textContent(),/audio follows the app/);
+   await audio.check();
+  }else assert.equal(await audio.count(),0,'Older hosts expose no app-audio consent');
   const toggle=page.getByRole('checkbox',{name:'Allow receiver to switch windows',exact:true});assert.equal(await toggle.isChecked(),false);
-  await toggle.check();assert.equal(await page.getByRole('button',{name:'Create link and code',exact:true}).isDisabled(),true);const choices=page.locator('.browser-window-choices input');assert.equal(await choices.count(),10);
+  const switching=page.getByRole('group',{name:'Window switching',exact:true});
+  await toggle.check();assert.equal(await page.getByRole('button',{name:'Create link and code',exact:true}).isDisabled(),true);const choices=switching.locator('input');assert.equal(await choices.count(),10);
   assert.equal(await choices.nth(1).isChecked(),true);assert.equal(await choices.nth(1).isDisabled(),true);
   for(let i=2;i<=8;i++)await choices.nth(i).check();assert.equal(await choices.nth(9).isDisabled(),true);
   await choices.nth(3).uncheck();assert.equal(await choices.nth(9).isEnabled(),true);await choices.nth(9).check();
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1),false);
-  await page.locator('.browser-window-choices').screenshot({path:path.join(output,variant.width+'-'+!!variant.rtl+'-'+!!variant.zoom+'.png')});
+  await page.locator('.browser-host-panel').screenshot({path:path.join(output,variant.width+'-'+!!variant.rtl+'-'+!!variant.zoom+'-'+(variant.audio!==false)+'.png')});
   await page.getByRole('button',{name:'Create link and code',exact:true}).click();
   assert.equal(invitations.length,1);assert.equal(invitations[0].browserWindows.length,8);
   assert.equal(invitations[0].windowId,11);assert.equal(invitations[0].windowOwnerPid,41);
   assert.equal(invitations[0].browserClipboard,false);
+  assert.equal(invitations[0].browserWindowAudio,variant.audio!==false);
+  if(variant.audio!==false)assert.equal(await audio.isDisabled(),true,'Invitation consent is fixed while active');
   assert.ok(invitations[0].browserWindows.every(w=>Object.keys(w).sort().join(',')==='id,label,ownerPid'&&w.label.length<=80&&w.id!==0));
   assert.ok(!invitations[0].browserWindows.some(w=>w.id===13));
-  assert.match(await page.locator('#browser-code-help').textContent(),/view the selected windows/);assert.deepEqual(errors,[]);
-  results.push({...variant,explicitSelection:true,maximumEight:true,initialRequired:true,viewOnlyCopy:true,syntheticOnly:true});
+  assert.match(await page.locator('#browser-code-help').textContent(),/view selected windows/);assert.deepEqual(errors,[]);
+  results.push({...variant,explicitSelection:true,maximumEight:true,initialRequired:true,viewOnlyCopy:true,audioExplicitOptIn:variant.audio!==false,audioResetOnTargetChange:variant.audio!==false,syntheticOnly:true});
  }catch(error){await page.screenshot({path:path.join(output,variant.width+'-'+!!variant.rtl+'-'+!!variant.zoom+'-failure.png'),fullPage:true});await writeFile(path.join(output,'failure.json'),JSON.stringify({variant,error:error.message,overflow:await page.evaluate(()=>[...document.querySelectorAll('body *')].filter(e=>e.getBoundingClientRect().right>innerWidth+1).map(e=>({tag:e.tagName,id:e.id,class:e.className,width:e.getBoundingClientRect().width,right:e.getBoundingClientRect().right})).slice(0,20))},null,2));throw error;}finally{await page.close();}
 }}
 finally{await browser.close();await new Promise(r=>server.close(r));await writeFile(path.join(output,'results.json'),JSON.stringify(results,null,2));}

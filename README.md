@@ -60,7 +60,7 @@ operation uses an external VPN such as Tailscale and its access controls.
 | --- | --- |
 | Windows → Android | Video, native touch and system audio implemented; physical USB/VPN results are recorded in the validation notes. |
 | Mac → Android | Experimental Apple-silicon and Intel source builds. Earlier snapshots have physical video/input/recovery results; sustained audio and final-candidate qualification remain open. |
-| Windows/Mac → browser | Experimental private WebRTC and WebCodecs paths, desktop typing, bounded adaptive video and media recovery. Mac window sharing stays view-only with audio off. Physical device/driver qualification remains open. |
+| Windows/Mac → browser | Experimental private WebRTC and WebCodecs paths, desktop typing, bounded adaptive video and media recovery. Mac window sharing stays view-only; app audio requires a separate opt-in. Physical device/driver qualification remains open. |
 | Desktop → iPhone/iPad browser | Safari/iOS compatibility needs physical qualification; no native iOS receiver or iPhone USB tunnel is provided. |
 | Linux desktop hosting | Not implemented. Linux can still use the inherited Android-to-computer mode. |
 
@@ -179,7 +179,7 @@ options and encoder/monitor selection are in the
   older binaries do not advertise those capabilities.
 - Start with **1920 / 60 FPS / 12 Mbps**, then tune for your device and connection.
   Performance changes apply to the next stream.
-- Mac window mode is view-only with audio off. Select the entire desktop for input/audio.
+- Mac window mode is view-only. Audio starts off; a capable host can explicitly allow the selected window's entire application audio. See [application-audio scope and qualification](doc/browser-window-audio.md). Select the entire desktop for input.
 - Computer volume and receiver playback mute are separate controls.
 - Decode-acknowledgement round trip is not physical touch-to-display latency.
   WebRTC send acknowledgements are not browser decode measurements either.

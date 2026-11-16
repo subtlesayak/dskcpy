@@ -11,10 +11,11 @@ import { publicWindowState } from './window-targets.mjs';
 // retain video frames: only the wire header and codec parameter sets are replayed.
 export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lifetimeMs,
   mediaMode = 'webcodecs', rtcBind, keyboard = false, viewOnly = false, textFocus = false, clipboard = false,
-  captureRecovery = false, adaptiveVideo = false, nativeEndGraceMs = 15000, rtcMediaFactory = createRtcMedia, onChange = () => {}, windowGroup = null, onRetireWindow }) {
+  captureRecovery = false, adaptiveVideo = false, windowAudio = false, nativeEndGraceMs = 15000, rtcMediaFactory = createRtcMedia, onChange = () => {}, windowGroup = null, onRetireWindow }) {
   let native, peer, closed = false, ready = false, nativeTimer, awayTimer;
   let listener, nativeEndTimer, recovering = false, restarting = false;
   let restartTimes = [];
+  const canHearWindow = viewOnly && windowAudio;
   const canRecover = captureRecovery && !viewOnly;
   const canSwitchWindow = viewOnly && windowGroup && typeof onRetireWindow === 'function';
   const ownerToken = Object.freeze({});
@@ -156,7 +157,7 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
   function announce() {
     if (!ready || !peer) return;
     peer.send(JSON.stringify({ type: 'authenticated', mediaMode, keyboard, viewOnly, textFocus: focusSupported, keyboardStatus: keyboard && !viewOnly, clipboard: clipboardSupported,
-      windowSwitch: Boolean(canSwitchWindow),
+      windowSwitch: Boolean(canSwitchWindow), windowAudio:Boolean(canHearWindow),
       adaptiveVideo: adaptiveSupported,
       mediaFallback: mediaMode === 'webrtc' && !fallbackUsed && peer.protocol === MEDIA_FALLBACK_PROTOCOL }));
     if (wireHeader) forward(wireHeader);
@@ -255,7 +256,7 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
       if (recovering) return;
       if (!native || !validBrowserInput(message, width, height, { keyboard, clipboard: clipboardSupported })) { close(); return; }
       if (viewOnly && ![4, 6].includes(message[0])
-          && !(message[0] === 5 && [7, 8, 9, 11].includes(message[1]))) { close(); return; }
+          && !(message[0] === 5 && ([7, 8, 9, 11].includes(message[1]) || canHearWindow && message[1] === 10))) { close(); return; }
       if ([4, 6].includes(message[0])) {
         const pending = message[0] === 4 ? video : audio;
         const pts = message.readBigUInt64BE(1);
@@ -352,6 +353,7 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
         if (suspended) command(7);
       } else {
         const flags = packet.readUInt32BE(12);
+        if (viewOnly && !canHearWindow && [4,8].includes(flags)) { close(); return; }
         if (flags === 32) { clipboardBroker.reply(packet.subarray(16)); return; }
         if ((flags & 1) || flags === 2) {
           let parameters;
@@ -437,7 +439,7 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
       if (closed) { listener.close(); return; }
       ready = true; nativeTimer = setTimeout(close, 10000); announce();
       await onConnect({ port: listener.address().port, keyboard, viewOnly, textFocus: focusSupported, focusHint, keyboardStatus, clipboard: clipboardSupported,
-        windowSwitch: Boolean(canSwitchWindow), windowOwner: ownerToken, windowTarget: pendingWindow || currentWindow,
+        windowAudio:Boolean(canHearWindow), windowSwitch: Boolean(canSwitchWindow), windowOwner: ownerToken, windowTarget: pendingWindow || currentWindow,
         adaptiveVideo: adaptiveSupported, videoQuality,
         captureRecovery: canRecover, restartNative, close, get closed() { return closed; } });
     } catch { close(); }

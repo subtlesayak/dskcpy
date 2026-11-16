@@ -403,6 +403,8 @@ export function createControlService({
       if (config.windowId && !config.windowOwnerPid) throw new Error('Refresh and select the window again before sharing.');
       if (rawConfig.browserWindows !== undefined && (!config.windowId || !readiness.features?.browserCaptureRecovery || grant))
         throw new Error('Window switching is unavailable on this host. Share one window or update the host.');
+      if (config.browserWindowAudio && (grant || !readiness.features?.browserWindowAudio))
+        throw new Error('This host does not support approved application audio. Leave it off or update the host.');
       browserConfig = config;
       const mode = rawConfig.browserTransport || 'local';
       let usbDevice;
@@ -415,7 +417,7 @@ export function createControlService({
       }
       if (attempt.signal.aborted) throw new Error('Connection cancelled.');
       const invitation = await browserReceiver.invite(mode, { viewOnly: Boolean(config.windowId),
-        windowTargets: rawConfig.browserWindows,
+        windowTargets: rawConfig.browserWindows, windowAudio:config.browserWindowAudio === true,
         initialWindow: {windowId:config.windowId,windowOwnerPid:config.windowOwnerPid},
         adaptiveVideo: ['darwin','win32'].includes(platform) && !config.windowId && config.browserAdaptiveVideo === true && readiness.features?.browserAdaptiveVideo === true,
         captureRecovery: platform === 'darwin' && !config.windowId && readiness.features?.browserCaptureRecovery === true,
@@ -545,6 +547,8 @@ export function createControlService({
       const session = reconnectSession;
       if (config.windowId && (platform !== 'darwin' || !state.readiness?.features?.macWindowCapture))
         throw new Error('This native host cannot capture a selected Mac window.');
+      if (config.browserWindowAudio && !state.readiness?.features?.browserWindowAudio)
+        throw new Error('Application audio is unavailable on this host. Create a new invitation with it off.');
       const args = buildScrcpyArgs({ ...config, browserKeyboard: browserBridge?.keyboard === true, browserTextFocus: browserBridge?.textFocus === true,
         browserClipboard: browserBridge?.clipboard === true, browserAdaptiveVideo: browserBridge?.adaptiveVideo === true }, internetBridge?.port);
       state.command = formatCommand(path.basename(runtime.executable), args);
