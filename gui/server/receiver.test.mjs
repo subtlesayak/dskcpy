@@ -22,7 +22,7 @@ const parameters = new Uint8Array([0, 0, 1, 0x67, 0x64, 0, 0x28, 0, 0, 1, 0x68, 
 
 // Deterministic lifecycle tests against the actual receiver script. These model
 // delayed browser callbacks; rendered/device QA is separate from this harness.
-function receiver(t, { portrait = false, lockFails = false, webRtc = false, webCodecs = true, qrKey = '', keyboard = false, viewOnly = false, visualHeight = 0, webAudio = false, textFocus = false, keyboardStatus = false, clipboard = false, clipboardAPI = undefined, virtualKeyboard = null, now = () => Date.now(), resumable = false, mediaFallback = false, adaptiveVideo = false, windowSwitch = false, rtcOffer = async () => {} } = {}) {
+function receiver(t, { portrait = false, lockFails = false, webRtc = false, webCodecs = true, qrKey = '', keyboard = false, viewOnly = false, visualHeight = 0, webAudio = false, textFocus = false, keyboardStatus = false, clipboard = false, clipboardAPI = undefined, virtualKeyboard = null, now = () => Date.now(), resumable = false, mediaFallback = false, adaptiveVideo = false, windowSwitch = false, windowAudio = false, rtcOffer = async () => {} } = {}) {
   const timers = new Set(), sockets = [], decoders = [], orientation = [], rtcReceivers = [];
   let resize;
   const animationFrames = [];
@@ -138,7 +138,7 @@ function receiver(t, { portrait = false, lockFails = false, webRtc = false, webC
   t.after(() => { for (const timer of timers) clearTimeout(timer); });
   if (!qrKey) { $('session-key').value = 'x'.repeat(32); $('join-form').emit('submit'); }
   const socket = sockets[0]; socket.emit('open');
-  socket.emit('message', { data: JSON.stringify({ type: 'authenticated', keyboard, viewOnly, textFocus, keyboardStatus, clipboard, mediaFallback, adaptiveVideo, windowSwitch, mediaMode: webRtc ? 'webrtc' : 'webcodecs' }) });
+  socket.emit('message', { data: JSON.stringify({ type: 'authenticated', keyboard, viewOnly, textFocus, keyboardStatus, clipboard, mediaFallback, adaptiveVideo, windowSwitch, windowAudio, mediaMode: webRtc ? 'webrtc' : 'webcodecs' }) });
   const header = new ArrayBuffer(16), view = new DataView(header);
   view.setUint32(0, 0x53524431); view.setUint32(4, 1); view.setUint32(8, 640); view.setUint32(12, 480);
   socket.emit('message', { data: header });
@@ -1195,4 +1195,16 @@ test('unacknowledged 1005 remains terminal and an unsolicited window catalog gra
  await new Promise(r=>setTimeout(r,300));assert.equal(h.sockets.length,1);assert.equal(h.$('join-panel').hidden,false);
  const other=receiver(t,{viewOnly:true});other.socket.emit('message',{data:JSON.stringify({type:'window-state',grant:'g'.repeat(16),current:'a'.repeat(16),switching:true,windows:[{key:'a'.repeat(16),label:'Editor'},{key:'b'.repeat(16),label:'Notes'}]})});
  assert.equal(other.$('join-panel').hidden,false);assert.match(other.$('error').textContent,/Unexpected window/);
+});
+
+test('window application audio capability exposes a scoped speaker without keyboard/clipboard/input permission',async t=>{
+ const h=receiver(t,{viewOnly:true,windowAudio:true,webAudio:true});
+ assert.equal(h.$('keyboard').hidden,true);assert.equal(h.$('audio').disabled,false);assert.equal(h.$('window-audio-scope').hidden,false);
+ assert.equal(h.$('audio-label').textContent,'App audio off');
+ await h.$('audio').emit('click');assert.ok(h.socket.sent.filter(Buffer.isBuffer).some(p=>p.equals(Buffer.from([5,10]))));
+ assert.equal(h.$('audio-label').textContent,'App audio on');
+ assert.equal(h.$('touch').disabled,true);assert.equal(h.$('clipboard-tools').hidden,true);
+ h.$('disconnect').emit('click');assert.equal(h.$('window-audio-scope').hidden,true);
+ const denied=receiver(t,{viewOnly:true,webAudio:true});await denied.$('audio').emit('click');
+ assert.ok(!denied.socket.sent.filter(Buffer.isBuffer).some(p=>p.equals(Buffer.from([5,10]))));
 });

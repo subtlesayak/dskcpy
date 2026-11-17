@@ -100,6 +100,8 @@ jobs:
           node desktop/test/typing-view-ui.mjs webkit
           node desktop/test/window-switch-ui.mjs chromium
           node desktop/test/window-switch-ui.mjs webkit
+          node desktop/test/window-audio-ui.mjs chromium
+          node desktop/test/window-audio-ui.mjs webkit
       - name: Preserve sanitized synthetic-media results
         if: always()
         uses: actions/upload-artifact@v7
@@ -110,6 +112,7 @@ jobs:
             desktop/out/video-preference-ui-*/
             desktop/out/window-switch-*/
             desktop/out/typing-view-*/
+            desktop/out/window-audio-*/
           if-no-files-found: ignore
 
   native-windows:

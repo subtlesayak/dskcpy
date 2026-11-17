@@ -1,6 +1,6 @@
 // Ephemeral choices and thumbnails from already received frames only. No URLs,
 // storage, native identifiers, additional capture or background preview polling.
-export function createWindowChooser({document,trigger,list,status,canSelect,send,snapshot}) {
+export function createWindowChooser({document,trigger,list,status,canSelect,send,snapshot,audioScope=()=>false}) {
  let enabled=false,state=null;
  const previews=new Map(),buttons=new Map();
  const validKey=k=>typeof k==='string'&&/^[A-Za-z0-9_-]{16}$/.test(k);
@@ -48,7 +48,7 @@ export function createWindowChooser({document,trigger,list,status,canSelect,send
    if(!state||state.grant!==message.grant)discard();
    state=message;
    status.textContent=message.error==='busy'?'Window switching is busy. Try again shortly.':message.error==='wait'?'Wait two seconds between window switches, then try again.'
-     :message.switching?'Switching window…':'View only · audio off. Select a window to view it.';
+     :message.switching?'Switching window…':audioScope()?'View only · audio is from the selected window’s entire app, including its other windows. Switching changes the app audio source.':'View only · audio off. Select a window to view it.';
    render();
   },
   refresh,

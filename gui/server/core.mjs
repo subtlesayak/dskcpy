@@ -53,6 +53,8 @@ export function sanitizeStreamConfig(input = {}) {
   }
   const wirelessSerial = serial.includes(':') || serial.includes('adb-tls-connect');
   const windowId = input.windowId;
+  if (input.browserWindowAudio !== undefined && typeof input.browserWindowAudio !== 'boolean') throw new Error('Application audio requires an explicit on/off choice.');
+  if (input.browserWindowAudio === true && (connection !== 'browser' || !windowId || !input.windowOwnerPid)) throw new Error('Select a window before allowing application audio.');
   const windowOwnerPid = input.windowOwnerPid;
   if (windowId !== undefined && (!Number.isInteger(windowId) || windowId < 1 || windowId > 0xffffffff || connection !== 'browser')) {
     throw new Error('Choose a current window from the local browser window picker.');
@@ -73,6 +75,7 @@ export function sanitizeStreamConfig(input = {}) {
   return {
     connection,
     ...(windowId === undefined ? {} : { windowId }),
+    ...(connection === 'browser' && windowId && input.browserWindowAudio === true ? {browserWindowAudio:true} : {}),
     ...(windowOwnerPid === undefined ? {} : { windowOwnerPid }),
     address,
     ...(serial && !['ip', 'internet'].includes(connection) ? { serial } : {}),
@@ -134,7 +137,10 @@ export function buildScrcpyArgs(config, bridgePort) {
   if (config.encoder !== 'auto') {
     args.push(`--video-encoder=${config.encoder}`);
   }
-  if (config.windowId) args.push(`--reverse-window=${config.windowId}`, '--no-audio');
+  if (config.windowId) {
+    args.push(`--reverse-window=${config.windowId}`);
+    args.push(config.browserWindowAudio === true && config.windowOwnerPid ? '--reverse-window-audio' : '--no-audio');
+  }
   else if (config.connection === 'browser' && config.browserKeyboard === true) { args.push('--reverse-keyboard'); if (config.browserTextFocus === true) args.push('--reverse-text-focus'); }
   if (config.connection === 'browser' && !config.windowId && config.browserKeyboard === true && config.browserClipboard === true) args.push('--reverse-clipboard');
   if (config.connection === 'browser' && !config.windowId && config.browserAdaptiveVideo === true) args.push('--reverse-adaptive-video');

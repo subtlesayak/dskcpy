@@ -53,6 +53,7 @@ enum {
     OPT_REVERSE_DISPLAY_INDEX,
     OPT_REVERSE_WINDOW,
     OPT_REVERSE_WINDOW_OWNER,
+    OPT_REVERSE_WINDOW_AUDIO,
     OPT_LIST_REVERSE_WINDOWS,
     OPT_REVERSE_KEYBOARD,
     OPT_REVERSE_TEXT_FOCUS,
@@ -985,7 +986,7 @@ static const struct sc_option options[] = {
         .longopt_id = OPT_REVERSE_WINDOW,
         .longopt = "reverse-window",
         .argdesc = "id",
-        .text = "Capture one explicit Mac window, view-only with audio off. "
+        .text = "Capture one explicit Mac window, view-only with audio off by default. "
                 "Requires --reverse-display and an experimental Mac host.",
     },
     {
@@ -993,6 +994,12 @@ static const struct sc_option options[] = {
         .longopt = "reverse-window-owner",
         .argdesc = "pid",
         .text = "Revalidate a local window picker selection against its owning process. Requires --reverse-window.",
+    },
+    {
+        .longopt_id = OPT_REVERSE_WINDOW_AUDIO,
+        .longopt = "reverse-window-audio",
+        .text = "Opt in to window-app-audio-v1: all audio from the selected window's application, including its other windows. "
+                "Requires an experimental Mac host, --reverse-display, --reverse-socket, --reverse-window and --reverse-window-owner. No system-audio fallback.",
     },
     {
         .longopt_id = OPT_LIST_REVERSE_WINDOWS,
@@ -3101,6 +3108,9 @@ parse_args_with_getopt(struct scrcpy_cli_args *args, int argc, char *argv[],
             case OPT_REVERSE_WINDOW_OWNER:
                 if (!parse_display_id(optarg, &opts->reverse_window_owner) || !opts->reverse_window_owner) return false;
                 break;
+            case OPT_REVERSE_WINDOW_AUDIO:
+                opts->reverse_window_audio = true;
+                break;
             case OPT_LIST_REVERSE_WINDOWS:
                 opts->list_reverse_windows = true;
                 break;
@@ -3143,13 +3153,18 @@ parse_args_with_getopt(struct scrcpy_cli_args *args, int argc, char *argv[],
     if (opts->reverse_text_focus && !opts->reverse_keyboard) {
         LOGE("--reverse-text-focus requires --reverse-keyboard"); return false;
     }
+    if (opts->reverse_window_audio && (!opts->reverse_display || !opts->reverse_socket
+            || !opts->reverse_window || !opts->reverse_window_owner || !opts->reverse_audio)) {
+        LOGE("--reverse-window-audio requires a selected window/owner, reverse socket and audio enabled");
+        return false;
+    }
     if ((opts->reverse_window_owner && !opts->reverse_window) || (opts->reverse_window && !opts->reverse_display)
             || (opts->reverse_keyboard && (!opts->reverse_display || !opts->reverse_socket || opts->reverse_window))) {
         LOGE("Window capture requires reverse display; browser keyboard requires a full-desktop reverse socket");
         return false;
     }
 #ifndef HAVE_REVERSE_MACOS
-    if (opts->reverse_window || opts->list_reverse_windows || opts->reverse_text_focus) {
+    if (opts->reverse_window || opts->reverse_window_audio || opts->list_reverse_windows || opts->reverse_text_focus) {
         LOGE("These capture/input options require the experimental Mac host");
         return false;
     }

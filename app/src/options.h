@@ -343,6 +343,7 @@ struct scrcpy_options {
     uint32_t reverse_display_index;
     uint32_t reverse_window; // Explicit Mac window ID; 0 selects a display.
     uint32_t reverse_window_owner;
+    bool reverse_window_audio; // Explicit owner consent: entire selected application, never system fallback.
     bool list_reverse_windows;
     bool reverse_text_focus; // Optional stdout metadata; requires browser keyboard.
     bool reverse_adaptive_video; // Experimental capable browser-host fixed levels.
