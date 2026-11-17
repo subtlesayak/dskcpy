@@ -94,6 +94,17 @@ sc_device_msg_deserialize(const uint8_t *buf, size_t len,
 
             return 32;
         }
+        case DEVICE_MSG_TYPE_REVERSE_POINTER: {
+            if (len < 14) return 0;
+            uint32_t x = sc_read32be(buf + 2), y = sc_read32be(buf + 6);
+            uint16_t width = sc_read16be(buf + 10), height = sc_read16be(buf + 12);
+            if (buf[1] || !width || !height || width > 16384 || height > 16384 || x >= width || y >= height) return -1;
+            msg->reverse_pointer.position = (struct sc_position) {
+                .point = {.x = (int32_t)x, .y = (int32_t)y},
+                .screen_size = {.width = width, .height = height},
+            };
+            return 14;
+        }
         case DEVICE_MSG_TYPE_REVERSE_KEY:
             if (len < 5) return 0;
             msg->reverse_key.action = buf[1];

@@ -23,7 +23,7 @@ const parameters = new Uint8Array([0, 0, 1, 0x67, 0x64, 0, 0x28, 0, 0, 1, 0x68, 
 
 // Deterministic lifecycle tests against the actual receiver script. These model
 // delayed browser callbacks; rendered/device QA is separate from this harness.
-function receiver(t, { portrait = false, lockFails = false, webRtc = false, webCodecs = true, qrKey = '', keyboard = false, viewOnly = false, visualHeight = 0, webAudio = false, textFocus = false, keyboardStatus = false, clipboard = false, clipboardAPI = undefined, virtualKeyboard = null, now = () => Date.now(), resumable = false, mediaFallback = false, adaptiveVideo = false, windowSwitch = false, windowAudio = false, touchScrollSpeed = 1, scrollStorage = undefined, rtcOffer = async () => {} } = {}) {
+function receiver(t, { portrait = false, lockFails = false, webRtc = false, webCodecs = true, qrKey = '', keyboard = false, pointerButtons = false, viewOnly = false, visualHeight = 0, webAudio = false, textFocus = false, keyboardStatus = false, clipboard = false, clipboardAPI = undefined, virtualKeyboard = null, now = () => Date.now(), resumable = false, mediaFallback = false, adaptiveVideo = false, windowSwitch = false, windowAudio = false, touchScrollSpeed = 1, scrollStorage = undefined, rtcOffer = async () => {} } = {}) {
   const timers = new Set(), sockets = [], decoders = [], orientation = [], rtcReceivers = [];
   let resize;
   const animationFrames = [];
@@ -144,7 +144,7 @@ function receiver(t, { portrait = false, lockFails = false, webRtc = false, webC
   t.after(() => { for (const timer of timers) clearTimeout(timer); });
   if (!qrKey) { $('session-key').value = 'x'.repeat(32); $('join-form').emit('submit'); }
   const socket = sockets[0]; socket.emit('open');
-  socket.emit('message', { data: JSON.stringify({ type: 'authenticated', keyboard, viewOnly, textFocus, keyboardStatus, clipboard, mediaFallback, adaptiveVideo, windowSwitch, windowAudio, mediaMode: webRtc ? 'webrtc' : 'webcodecs' }) });
+  socket.emit('message', { data: JSON.stringify({ type: 'authenticated', keyboard, pointerButtons, viewOnly, textFocus, keyboardStatus, clipboard, mediaFallback, adaptiveVideo, windowSwitch, windowAudio, mediaMode: webRtc ? 'webrtc' : 'webcodecs' }) });
   const header = new ArrayBuffer(16), view = new DataView(header);
   view.setUint32(0, 0x53524431); view.setUint32(4, 1); view.setUint32(8, 640); view.setUint32(12, 480);
   socket.emit('message', { data: header });
@@ -443,6 +443,36 @@ test('scroll framing validates signed deltas, dimensions and bounds; secondary t
   packet.writeInt32BE(-121, 17); assert.equal(validBrowserInput(packet, 640, 480), false);
   packet.writeInt32BE(0, 17); packet.writeUInt32BE(640, 1); assert.equal(validBrowserInput(packet, 640, 480), false);
   for (const action of [5, 6]) assert.equal(validBrowserInput(Buffer.from(protocol.touchPacket(action, 1, 20, 20, 640, 480)), 640, 480), true);
+});
+
+test('secondary click requires explicit capability and strict current geometry, without changing touch packets', () => {
+  const packet = Buffer.from(protocol.secondaryClickPacket(30, 40, 640, 480));
+  assert.equal(packet.length, 14); assert.equal(packet[0], 11); assert.equal(packet[1], 0);
+  assert.equal(validBrowserInput(packet, 640, 480), false);
+  assert.equal(validBrowserInput(packet, 640, 480, {keyboard:true}), false);
+  assert.equal(validBrowserInput(packet, 640, 480, {pointerButtons:true}), true);
+  for (let n = 0; n < packet.length; ++n) assert.equal(validBrowserInput(packet.subarray(0,n),640,480,{pointerButtons:true}),false);
+  assert.equal(validBrowserInput(Buffer.concat([packet,Buffer.from([0])]),640,480,{pointerButtons:true}),false);
+  assert.equal(validBrowserInput(packet, 800, 480, {pointerButtons:true}), false);
+  packet[1]=1; assert.equal(validBrowserInput(packet,640,480,{pointerButtons:true}),false); packet[1]=0;
+  packet.writeUInt32BE(640,2); assert.equal(validBrowserInput(packet,640,480,{pointerButtons:true}),false);
+  assert.throws(()=>protocol.secondaryClickPacket(NaN,2,640,480)); assert.throws(()=>protocol.secondaryClickPacket(1,2,16385,480));
+});
+
+test('receiver secondary click is explicit, trackpad-only, capability-gated and paused with input', t => {
+  const h = receiver(t,{keyboard:true,pointerButtons:true});
+  assert.equal(h.$('secondary-click').hidden,true);
+  h.$('trackpad-mode').emit('click'); assert.equal(h.$('secondary-click').hidden,false);
+  h.$('secondary-click').emit('click');
+  const clicks=()=>h.socket.sent.filter(packet=>Buffer.isBuffer(packet)&&packet[0]===11);
+  assert.equal(clicks().length,1); assert.equal(clicks()[0].length,14);
+  h.$('pause').emit('click'); h.$('secondary-click').emit('click'); assert.equal(clicks().length,1);
+  const old=receiver(t,{keyboard:true}); old.$('trackpad-mode').emit('click'); old.$('secondary-click').emit('click');
+  assert.equal(old.$('secondary-click').hidden,true);
+  assert.equal(old.socket.sent.some(packet=>Buffer.isBuffer(packet)&&packet[0]===11),false);
+  const window=receiver(t,{keyboard:true,pointerButtons:true,viewOnly:true});
+  window.$('trackpad-mode').emit('click'); window.$('secondary-click').emit('click');
+  assert.equal(window.socket.sent.some(packet=>Buffer.isBuffer(packet)&&packet[0]===11),false);
 });
 
 test('browser-native mode connects without WebCodecs and forwards explicit audio mute intent', async (t) => {

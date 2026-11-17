@@ -10,7 +10,7 @@ import { publicWindowState } from './window-targets.mjs';
 // Keep the native transport alive across a bounded browser suspension. Never
 // retain video frames: only the wire header and codec parameter sets are replayed.
 export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lifetimeMs,
-  mediaMode = 'webcodecs', rtcBind, keyboard = false, viewOnly = false, textFocus = false, textFocusGeometry = false, clipboard = false,
+  mediaMode = 'webcodecs', rtcBind, keyboard = false, pointerButtons = false, viewOnly = false, textFocus = false, textFocusGeometry = false, clipboard = false,
   captureRecovery = false, adaptiveVideo = false, windowAudio = false, presentationControl = false,
   onControllerLeave = () => {}, nativeEndGraceMs = 15000, rtcMediaFactory = createRtcMedia, onChange = () => {}, windowGroup = null, onRetireWindow }) {
   let native, peer, closed = false, ready = false, nativeTimer, awayTimer;
@@ -34,6 +34,7 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
   let suspended = false, capturePaused = false, alive = true, rateAt = Date.now(), events = 0;
   const video = new Set(), audio = new Set(), touches = new Map();
   const focusSupported = textFocus && keyboard && !viewOnly;
+  const pointerSupported = pointerButtons === true && keyboard && !viewOnly;
   const geometrySupported = focusSupported && textFocusGeometry;
   let geometrySubscribed = false, geometryAt = -Infinity;
   let focusAt = -Infinity, focusSubscribed = false;
@@ -140,6 +141,7 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
   }
   function releaseTouches() {
     clipboardBroker.disable();
+    if (pointerSupported && !touches.size) native?.write(touchPacket(3, 0, 0, 0, width, height));
     for (const [id, point] of touches) native?.write(touchPacket(3, id, point.x, point.y, width, height));
     touches.clear();
     if (keyboard) native?.write(Buffer.from([8, 2, 0, 0, 0]));
@@ -210,6 +212,7 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
     publishPresentation(); return true;
   }
   function writeInput(ws, message) {
+    if (message[0] === 11) touches.clear(); // Native atomic click cancels the old primary gesture.
     if (message[0] === 10) return clipboardBroker.request(ws, message);
     if (message[0] === 3) {
       const id = message.readBigUInt64BE(2).toString();
@@ -248,12 +251,13 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
         detachController(true); return;
       }
       // A controller never acknowledges/controls media or submits RTC feedback.
-      if (![3, 7, 8, 9, 10].includes(message[0])) { detachController(true); return; }
+      if (![3, 7, 8, 9, 10, 11].includes(message[0])) { detachController(true); return; }
       if (!controllerActive || !presentationAvailable()) return;
-      if (!validBrowserInput(message, width, height, { keyboard, clipboard: clipboardSupported })) { detachController(true); return; }
+      if (!validBrowserInput(message, width, height, { keyboard, pointerButtons: pointerSupported, clipboard: clipboardSupported })) { detachController(true); return; }
       if (!writeInput(ws, message)) detachController(true);
     });
     ws.send(JSON.stringify({ type: 'controller-authenticated', role: 'controller', keyboard,
+      pointerButtons: pointerSupported,
       clipboard: clipboardSupported, textFocus: focusSupported, textFocusGeometry: Boolean(geometrySupported), keyboardStatus: keyboard,
       width, height, ...presentationState() }));
     publishPresentation(); return true;
@@ -292,6 +296,7 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
   function announce() {
     if (!ready || !peer) return;
     peer.send(JSON.stringify({ type: 'authenticated', mediaMode, keyboard: keyboard && !splitControl, viewOnly,
+      pointerButtons: pointerSupported && !splitControl,
       textFocus: focusSupported && !splitControl, textFocusGeometry: Boolean(geometrySupported) && !splitControl,
       keyboardStatus: keyboard && !viewOnly && !splitControl, clipboard: clipboardSupported && !splitControl,
       ...(canSplitControl ? { presentationControl: true, role: splitControl ? 'presentation' : 'combined' } : {}),
@@ -401,7 +406,7 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
       }
       // Never apply old geometry, ACKs or text to a new capture epoch.
       if (recovering) return;
-      if (!native || !validBrowserInput(message, width, height, { keyboard, clipboard: clipboardSupported })) { close(); return; }
+      if (!native || !validBrowserInput(message, width, height, { keyboard, pointerButtons: pointerSupported, clipboard: clipboardSupported })) { close(); return; }
       // Queued input from the old combined page cannot cross the ownership
       // transfer. Its media ACKs and explicit playback controls still work.
       if (splitControl && ![4, 6].includes(message[0])
@@ -594,7 +599,7 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
       });
       if (closed) { listener.close(); return; }
       ready = true; nativeTimer = setTimeout(close, 10000); announce();
-      await onConnect({ port: listener.address().port, keyboard, viewOnly, textFocus: focusSupported, focusHint,
+      await onConnect({ port: listener.address().port, keyboard, pointerButtons: pointerSupported, viewOnly, textFocus: focusSupported, focusHint,
         textFocusGeometry: Boolean(geometrySupported), focusGeometryHint, keyboardStatus, clipboard: clipboardSupported,
         windowSwitch: Boolean(canSwitchWindow), windowAudio: Boolean(canHearWindow), windowOwner: ownerToken, windowTarget: pendingWindow || currentWindow,
         adaptiveVideo: adaptiveSupported, videoQuality,

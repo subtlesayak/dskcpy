@@ -49,7 +49,11 @@ export class SrdParser {
   }
 }
 
-export function validBrowserInput(data, width, height, { keyboard = false, clipboard = false } = {}) {
+export function validBrowserInput(data, width, height, { keyboard = false, clipboard = false, pointerButtons = false } = {}) {
+  if (data[0] === 11) return pointerButtons && data.length === 14 && data[1] === 0
+    && data.readUInt16BE(10) === width && data.readUInt16BE(12) === height
+    && width > 0 && height > 0 && width <= 16384 && height <= 16384
+    && data.readUInt32BE(2) < width && data.readUInt32BE(6) < height;
   if (data[0] === 10) { try { if (!clipboard || !keyboard) return false; readClipboardRequest(data); return true; } catch { return false; } }
   if (data[0] === 8) {
     if (!keyboard || data.length !== 5 || data[1] > 2) return false;

@@ -5,7 +5,7 @@ import { createDesktopView } from './view.mjs';
 import { createTypingView } from './typing-view.mjs';
 import { createRelativeTrackpad } from './trackpad.mjs';
 import { receiverIsAway } from './lifecycle.mjs';
-import { BROWSER_RESUME_MS, MEDIA_FALLBACK_PROTOCOL, focusGeometry, createTouchScroll, avcCodec, avcParameters, touchPacket, scrollPacket, takeDecodedTimestamps, fitDisplay, createMediaAcknowledger, needsControlsRow, parseJoinFragment } from './protocol.mjs';
+import { BROWSER_RESUME_MS, MEDIA_FALLBACK_PROTOCOL, focusGeometry, createTouchScroll, avcCodec, avcParameters, touchPacket, scrollPacket, secondaryClickPacket, takeDecodedTimestamps, fitDisplay, createMediaAcknowledger, needsControlsRow, parseJoinFragment } from './protocol.mjs';
 import { createRtcReceiver } from './rtc.mjs';
 import { createVideoReceiver } from './video.mjs';
 import { createVideoFeedback } from './video-feedback.mjs';
@@ -35,6 +35,7 @@ const away = () => receiverIsAway({ hidden: document.hidden, pictureInPictureEle
   presentationPlayback: presentationRole && presentationUI?.backgroundPlayback === true });
 const remembered = rememberedBrowser({ reconnect: () => { resumeAllowed = true; void resumeSession(); } });
 let rtcReceiver, mediaMode = 'webcodecs';
+let pointerButtonsSupported = false;
 let keyboardSupported = false, keyboardOpen = false, viewOnly = false, windowAudioAllowed = false, windowAudioUnavailable = false;
 const audioLabel = (state) => windowAudioAllowed ? `App audio ${state}` : `Audio ${state}`;
 const streamingStatus = () => windowAudioAllowed ? `Viewing window · app audio ${windowAudioUnavailable ? 'unavailable' : muted ? 'off' : 'on'}` : 'Streaming';
@@ -207,6 +208,8 @@ function paintTrackpad() {
   if (!trackpadPresent) return;
   $('trackpad-mode').disabled = !canSendPointer(); $('trackpad-mode').hidden = viewOnly;
   $('trackpad-mode').setAttribute('aria-pressed', String(trackpadMode));
+  $('secondary-click').hidden = !pointerButtonsSupported || !trackpadMode || presentationRole;
+  $('secondary-click').disabled = !canSendPointer();
   $('trackpad-help').hidden = !trackpadMode || keyboardOpen || !!openControlTray;
   document.body.classList.toggle('trackpad-help-only', trackpadMode && !keyboardOpen && !openControlTray);
   canvas.tabIndex = trackpadMode ? 0 : -1;
@@ -487,7 +490,7 @@ function disconnect({ stopSession = false, keepSession = false } = {}) {
   ws?.close(keepSession ? 4001 : 4000, 'Disconnected by viewer'); ws = null;
   clearMedia();
   trackpadMode = false; trackpad.reset(); desktopView.reset();
-  hideKeyboard(); keyboardSupported = false; viewOnly = false; windowAudioAllowed = false; windowAudioUnavailable = false; $('keyboard').hidden = true;
+  hideKeyboard(); keyboardSupported = false; pointerButtonsSupported = false; viewOnly = false; windowAudioAllowed = false; windowAudioUnavailable = false; $('keyboard').hidden = true;
   if (audioContext) void audioContext.close().catch(() => {}); audioContext = null;
   authenticated = false; header = false; muted = true; paused = false; mediaSwitching = false; updateArrowAvailability();
   videoConfig = null; configBytes = null; audioConfig = null; frames = 0;
@@ -767,6 +770,7 @@ function connect(key = null, requestedMode = preferredMode) {
         else windowChooser?.clear();
         remembered.authenticated(viewOnly || presentationRole);
         keyboardSupported = message.keyboard === true && !viewOnly && !presentationRole;
+        pointerButtonsSupported = keyboardSupported && message.pointerButtons === true;
         clipboardTools?.setSupported(keyboardSupported && message.clipboard === true);
         keyboardStatusSupported = keyboardSupported && message.keyboardStatus === true;
         if (keyboardStatusSupported) socket.send('keyboard-status-subscribe');
@@ -1123,6 +1127,11 @@ canvas.addEventListener('keydown', event => {
   if (directions[event.key]) { event.preventDefault(); trackpad.move(...directions[event.key]); }
   else if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); if (!event.repeat) trackpad.click(); }
   else if (event.key === 'PageUp' || event.key === 'PageDown') { event.preventDefault(); trackpad.scroll(0, event.key === 'PageUp' ? -80 : 80); }
+});
+$('secondary-click').addEventListener('click', () => {
+  if (!pointerButtonsSupported || !trackpadMode || !canSendPointer()) return;
+  const point = trackpad.position(); if (!point) return;
+  releaseTouches(); send(secondaryClickPacket(point.x, point.y, canvas.width, canvas.height));
 });
 $('disconnect').addEventListener('click', () => {
   releaseTouches();

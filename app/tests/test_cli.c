@@ -301,6 +301,19 @@ static void test_mac_capture_options(void) {
     args.opts = scrcpy_options_default;
     char *keyboard_without_socket[] = {"scrcpy", "--reverse-display", "--reverse-keyboard"};
     assert(!scrcpy_parse_args(&args, ARRAY_LEN(keyboard_without_socket), keyboard_without_socket));
+    args.opts = scrcpy_options_default;
+    char *pointer[] = {"scrcpy", "--reverse-display", "--reverse-socket=1234", "--reverse-keyboard", "--reverse-pointer-buttons"};
+#if defined(_WIN32) || defined(HAVE_REVERSE_MACOS)
+    assert(scrcpy_parse_args(&args, ARRAY_LEN(pointer), pointer)); assert(args.opts.reverse_pointer_buttons);
+#else
+    assert(!scrcpy_parse_args(&args, ARRAY_LEN(pointer), pointer));
+#endif
+    args.opts = scrcpy_options_default;
+    char *pointer_no_keyboard[] = {"scrcpy", "--reverse-display", "--reverse-socket=1234", "--reverse-pointer-buttons"};
+    assert(!scrcpy_parse_args(&args, ARRAY_LEN(pointer_no_keyboard), pointer_no_keyboard));
+    args.opts = scrcpy_options_default;
+    char *pointer_window[] = {"scrcpy", "--reverse-display", "--reverse-socket=1234", "--reverse-keyboard", "--reverse-pointer-buttons", "--reverse-window=17"};
+    assert(!scrcpy_parse_args(&args, ARRAY_LEN(pointer_window), pointer_window));
 #ifndef HAVE_REVERSE_MACOS
     args.opts = scrcpy_options_default;
     char *mac_focus[] = {"scrcpy", "--reverse-display", "--reverse-socket=1234", "--reverse-keyboard", "--reverse-text-focus"};

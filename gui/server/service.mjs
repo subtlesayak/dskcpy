@@ -428,6 +428,7 @@ export function createControlService({
         textFocus: mode !== 'local' && !config.windowId && readiness.features?.browserTextFocus === true,
         textFocusGeometry: mode !== 'local' && !config.windowId && readiness.features?.browserTextFocusGeometry === true,
         keyboard: mode !== 'local' && !config.windowId && readiness.features?.browserKeyboard === true,
+        pointerButtons: mode !== 'local' && !config.windowId && readiness.features?.browserPointerButtons === true,
         clipboard: mode !== 'local' && !config.windowId && config.browserClipboard === true && readiness.features?.browserClipboard === true,
         rememberProfile: mode === 'internet' && !config.windowId ? { maxSize: config.maxSize, maxFps: config.maxFps, bitRateMbps: config.bitRateMbps } : null }, grant);
       if (usbDevice) {
@@ -553,6 +554,7 @@ export function createControlService({
       if (config.browserWindowAudio && !state.readiness?.features?.browserWindowAudio)
         throw new Error('Application audio is unavailable on this host. Create a new invitation with it off.');
       const args = buildScrcpyArgs({ ...config, browserKeyboard: browserBridge?.keyboard === true, browserTextFocus: browserBridge?.textFocus === true,
+        browserPointerButtons: browserBridge?.pointerButtons === true,
         browserTextFocusGeometry: browserBridge?.textFocusGeometry === true,
         browserClipboard: browserBridge?.clipboard === true, browserAdaptiveVideo: browserBridge?.adaptiveVideo === true }, internetBridge?.port);
       state.command = formatCommand(path.basename(runtime.executable), args);

@@ -26,7 +26,7 @@ const decodedFrames = page => page.evaluate(async () => {
     .reduce((count, value) => count + (value.framesDecoded || 0), 0);
 });
 try {
- for (const variant of [{ width: 390, height: 844 }, { width: 844, height: 390 }, { width: 320, height: 700, rtl: true }, { width: 640, height: 780, zoom: 2 }]) {
+ for (const variant of [{ width: 390, height: 844 }, { width: 844, height: 390 }, { width: 320, height: 700, rtl: true }, { width: 640, height: 780, zoom: 2 }, {width:390,height:844,pointerButtons:false}]) {
   let native, pending = Buffer.alloc(0), nativeCalls = 0, frames = 0, acks = 0, pointerDowns = 0, scrolls = 0, typed = '';
   const held = new Set(), errors = [], inputs = [], pendingVideo = new Set();
   let bridge;
@@ -37,7 +37,7 @@ try {
       pending = Buffer.concat([pending, chunk]);
       while (pending.length) {
         const type = pending[0]; if (type === 9 && pending.length < 3) break;
-        const size = type === 3 ? 32 : type === 7 ? 21 : [4, 6].includes(type) ? 9 : type === 5 ? 2 : type === 8 ? 5 : type === 9 ? 3 + pending.readUInt16BE(1) : 0;
+        const size = type === 11 ? 14 : type === 3 ? 32 : type === 7 ? 21 : [4, 6].includes(type) ? 9 : type === 5 ? 2 : type === 8 ? 5 : type === 9 ? 3 + pending.readUInt16BE(1) : 0;
         assert.ok(size, 'unexpected owned fixture packet'); if (pending.length < size) break;
         const packet = Buffer.from(pending.subarray(0, size)); pending = pending.subarray(size); inputs.push(packet);
         if (type === 4) { acks++; const pts = packet.readBigUInt64BE(1); for (const old of pendingVideo) if (old <= pts) pendingVideo.delete(old); }
@@ -80,7 +80,7 @@ try {
       const getter = Object.getOwnPropertyDescriptor(Document.prototype, 'hidden')?.get;
       Object.defineProperty(document, 'hidden', { get: () => window.__testHidden ?? getter?.call(document) ?? false });
     });
-    const invitation = await broker.invite('local', { keyboard: true, textFocus: true });
+    const invitation = await broker.invite('local', { keyboard: true, pointerButtons: variant.pointerButtons !== false, textFocus: true });
     picture = await pictureContext.newPage(); picture.setDefaultTimeout(7000); picture.on('pageerror', e => errors.push(e.message));
     await picture.goto(browserJoinUrl(invitation.url, invitation.key));
     await until(() => picture.locator('#status').textContent().then(text => text === 'Streaming'), 'initial generated picture');
@@ -103,6 +103,18 @@ try {
     if (variant.zoom) await controller.evaluate(zoom => document.body.style.zoom = String(zoom), variant.zoom);
     await controller.locator('#controller-pad').click(); await until(() => pointerDowns === 1, 'one balanced controller tap');
     await until(() => held.size === 0, 'tap released');
+    if (variant.pointerButtons === false) {
+      assert.equal(await controller.getByRole('button',{name:'Secondary click',exact:true}).isDisabled(),true);
+      assert.match(await controller.locator('#controller-secondary-help').textContent(),/unavailable/);
+      assert.equal(inputs.some(packet=>packet[0]===11),false);
+    } else {
+      await controller.getByRole('button', {name:'Secondary click',exact:true}).click();
+      await until(() => inputs.filter(packet=>packet[0]===11).length===1,'one explicit secondary click');
+      const secondary=inputs.find(packet=>packet[0]===11);
+      assert.equal(secondary.length,14); assert.equal(secondary[1],0);
+      assert.equal(secondary.readUInt16BE(10),640); assert.equal(secondary.readUInt16BE(12),360);
+      assert.ok(secondary.readUInt32BE(2)<640 && secondary.readUInt32BE(6)<360 && held.size===0);
+    }
     if (engine === 'chromium') {
       const box = await controller.locator('#controller-pad').boundingBox(), cdp = await controllerContext.newCDPSession(controller), before = scrolls;
       const points = offset => [{ id: 1, x: box.x + box.width * .4, y: box.y + box.height * .4 + offset }, { id: 2, x: box.x + box.width * .6, y: box.y + box.height * .4 + offset }];
@@ -122,11 +134,11 @@ try {
     }, 'typing field above simulated keyboard');
     const closeRect = await controller.getByRole('button', { name: 'Close keyboard', exact: true }).boundingBox();
     assert.ok(closeRect.y >= 0 && closeRect.y + closeRect.height <= controller.viewportSize().height, 'close stays reachable');
-    await controller.screenshot({ path: path.join(output, `controller-${variant.width}-${Boolean(variant.rtl)}-${variant.zoom || 1}.png`), fullPage: true });
+    await controller.screenshot({ path: path.join(output, `controller-${variant.width}-${Boolean(variant.rtl)}-${variant.zoom || 1}${variant.pointerButtons === false ? '-old-host' : ''}.png`), fullPage: true });
     await controller.getByRole('button', { name: 'Close keyboard', exact: true }).click();
     if (variant.width > variant.height) await controller.setViewportSize({ width: variant.width, height: variant.height });
     await controller.locator('#controller-pad').focus();
-    for (const id of ['controller-keyboard', 'controller-click', 'controller-drag', null]) {
+    for (const id of ['controller-keyboard', 'controller-click', ...(variant.pointerButtons === false ? [] : ['controller-secondary']), 'controller-drag', null]) {
       await controller.keyboard.press(engine === 'webkit' ? 'Alt+Tab' : 'Tab');
       const focused = await controller.evaluate(() => ({ id: document.activeElement.id, tag: document.activeElement.tagName,
         outline: getComputedStyle(document.activeElement).outlineStyle, width: parseFloat(getComputedStyle(document.activeElement).outlineWidth) }));
@@ -177,7 +189,7 @@ try {
     assert.equal(held.size, 0); assert.deepEqual(errors, []);
     results.push({ ...variant, generatedVideo: true, independentBrowserContexts: true, roleFragmentCleared: true,
       tapAndDrag: true, twoFingerScroll: engine === 'chromium' ? 'actual Chromium touch input' : 'not exercised in WebKit', committedUnicode: true, keyboardOpenLayout: true,
-      keyboardFocusVisible: true, nativeFocusTraversal: engine === 'webkit' ? 'Option+Tab' : 'Tab', pointerPreferenceKeyboardAndReload: true, explicitModifierShortcut: true,
+      keyboardFocusVisible: true, nativeFocusTraversal: engine === 'webkit' ? 'Option+Tab' : 'Tab', pointerPreferenceKeyboardAndReload: true, explicitModifierShortcut: true, secondaryClickPacket: variant.pointerButtons !== false, oldHostSecondaryClickDenied: variant.pointerButtons === false,
       autoKeyboardWithoutOptionsFocusSteal: true, suggestionReplacementAfterRepeatedFocus: true, simulatedVisibilityLifecycle: true,
       presentationContinued: true, controllerReload: true, noControllerMediaOrAudioContext: true,
       cancelEndPreservedSession: true, separateEndPresentation: true, confirmedStop: true,

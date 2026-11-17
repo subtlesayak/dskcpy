@@ -20,8 +20,9 @@ desktop service negotiates it only when its own environment explicitly sets
 local preview and hosts without browser keyboard support cannot mint controller
 access. No installed application or running service has been changed.
 
-This needs matching server and receiver modules. Do not copy its browser assets
-into an older running application. Negotiated secondary click, actual casting
+This needs matching server, receiver and native modules. Do not copy its browser
+assets into an older running application. Negotiated secondary click is now
+implemented in source; Windows native compilation, actual clicking, casting
 and physical background/audio qualification remain open. The current human
 decision is to preserve the working session and prepare candidates only.
 
@@ -160,11 +161,49 @@ Pointer sensitivity ranges from 0.25× to 4×; finger scroll speed ranges from
 receiver origin. The dedicated pad uses uniform horizontal/vertical pointer
 scaling, including a tall portrait pad. Sensitivity never changes scroll gain.
 
-Secondary click remains unavailable and is labelled accordingly. It needs an
-explicitly negotiated host capability and corresponding
-Mac/Windows validation; do not reinterpret an existing SRD1 field or emulate it
-as an undocumented long press. Coordinate that shared input change before
-implementation and preserve denial on older hosts.
+Secondary click uses an explicit button and a separately negotiated host
+capability. It stays disabled with an explanation on older hosts. The ordinary
+receiver offers its icon in Trackpad mode. There is no long-press heuristic or
+reinterpretation of Android touch fields. Mac/Windows hardware qualification is
+still required.
+
+### Optional pointer-button protocol
+
+`--reverse-pointer-buttons` advertises `browser-pointer-buttons-v1` and requires
+the full-desktop browser keyboard/socket opt-in. Readiness requires the exact
+flag, capability and supported host backend before a browser invitation can
+enable it. Local preview, window/view-only and Android routes cannot enable it.
+The controller authorization and input-owner checks apply to every packet.
+
+| Byte | Meaning |
+| --- | --- |
+| 0 | Device-message type 11 |
+| 1 | Action 0: one atomic secondary click; other values rejected |
+| 2–5, 6–9 | Big-endian unsigned x and y in current captured-frame pixels |
+| 10–11, 12–13 | Big-endian unsigned width and height, 1–16384 |
+
+The message is exactly 14 bytes at the browser boundary. Coordinates must be
+inside the exact current geometry. Native parsing supports fragmented transport
+and validates the action, sizes and bounds again. SRD1 media framing, existing
+system-action value 11 (audio disable) and all Android packet shapes are
+unchanged. Type 11 was unused in the checked native enum and Java sender and
+not reserved by the latest shared handoff; the native-input owner reported no
+overlapping work. Later protocol owners must preserve this allocation.
+
+Windows serializes admission, mapping and cleanup with its input mutex. A
+partial SendInput result retains only the pending right-button release; it
+never retries the press or moves to an old coordinate during cleanup. New
+pointer input is blocked while release is pending, including across geometry
+changes. Existing touch/keyboard cleanup and the regular native loop retry that
+release. This uses the API's ordered batch and returned delivery count; actual
+OS delivery and UIPI behavior remain hardware checks. [Microsoft SendInput
+reference](https://learn.microsoft.com/windows/win32/api/winuser/nf-winuser-sendinput)
+
+Mac prepares both right-button events before posting either; allocation failure
+produces no half-click. State, geometry, full-desktop and Accessibility checks
+guard posting, and a physically held secondary button prevents a new click.
+Event construction is tested without CGEventPost or permission calls; this does
+not prove OS delivery. [Apple mouse-event constructor](https://developer.apple.com/documentation/coregraphics/cgevent/init(mouseeventsource:mousetype:mousecursorposition:mousebutton:))
 
 The presentation uses the display's viewport and preserves desktop aspect ratio
 through orientation/resolution changes. It has no phone keyboard or normal
@@ -199,16 +238,22 @@ Focus hints cannot interrupt Options or clear the preview during Gboard edits.
 
 ## Source and generated-browser checks
 
-The source check includes 538 Node cases: 531 pass and seven optional skips.
+The source check includes 544 Node cases: 537 pass and seven optional skips.
+Mac native tests pass 34 normally and 34 with address/undefined sanitizers.
+The Windows production admission/coordinate/SendInput callback bodies also
+compile against fake effects, exercising denied states and partial-release
+cleanup; this is separate from compiling or running a real Windows host.
 Both React UI builds pass. `desktop/test/presentation-ui.mjs` uses two separate
 browser contexts, generated video and an owned fake native input collector.
-Four flows each pass in Chromium and WebKit: portrait, landscape with a
-simulated 220px keyboard viewport, 320px RTL and 200% CSS zoom. These verify:
+Five flows each pass in Chromium and WebKit: portrait, landscape with a
+simulated 220px keyboard viewport, 320px RTL, 200% CSS zoom and an older-host
+capability case. These verify:
 
 - one-use role pairing, fragment removal, distinct resume cookies and one native
   capture across controller reload;
 - tap, drag cancellation, Unicode text, shortcut/modifier packets, arrow keys,
-  adjustable/persisted gains and keyboard-only controls;
+  adjustable/persisted gains, negotiated secondary click and keyboard-only
+  controls; the older-host case keeps secondary click unavailable;
 - focus restoration, repeated focus hints during suggestion replacement,
   reachable typing/Close controls and no Options overlap;
 - controller background input release while actual presentation decode counts
@@ -234,8 +279,9 @@ filtering page errors, forcing clicks or weakening continuity assertions.
 | Severity | Location | Before | After | Why |
 | --- | --- | --- | --- | --- |
 | HIGH, fixed | `gui/receiver/controller.css:9`, Options | Pad children covered the summary when its flex box shrank | Minimum content height keeps Options reachable | Complete the Options task; WCAG 2.4.11 focus visibility |
-| MEDIUM, fixed | `gui/receiver/controller.mjs:252`, geometry observer | WebKit repeatedly resized after zoom | RAF scheduling and changed-size writes | Stable keyboard-open interaction |
-| LOW, fixed | `gui/receiver/controller.html:41` and `gui/receiver/controller.css:19` | Mixed-direction preview and mirrored physical arrows | Automatic text direction and LTR physical arrow row | Predictable RTL typing/navigation |
+| MEDIUM, fixed | `gui/receiver/controller.mjs:262`, geometry observer | WebKit repeatedly resized after zoom | RAF scheduling and changed-size writes | Stable keyboard-open interaction |
+| LOW, fixed | `gui/receiver/controller.html:42` and `gui/receiver/controller.css:21` | Mixed-direction preview and mirrored physical arrows | Automatic text direction and LTR physical arrow row | Predictable RTL typing/navigation |
+| LOW, fixed | `gui/receiver/controller.css:18`, action buttons | Four narrow columns broke words at 320px | Two columns on small screens, four on wider screens | Readable labels with the keyboard open |
 
 Approve the inspected generated layout and keyboard scope. Screen-reader,
 physical-device and casting acceptance remain unverified.
@@ -251,9 +297,8 @@ physical-device and casting acceptance remain unverified.
 3. Add presentation/controller pages and beginner setup, reusing current input
    modules. Use generated Chromium/WebKit flows for keyboard-open layouts,
    aspect changes, isolated audio and denied/busy/expired states.
-4. Coordinate and implement negotiated secondary click; sensitivity is now in
-   the browser prototype.
-   Qualify Mac and Windows behavior, including held-button cancellation.
+4. Qualify the implemented negotiated secondary click and pointer sensitivity
+   on Mac and Windows, including held-button cancellation and denied input.
 5. On real Samsung hardware, record model, Android/One UI, browser versions,
    display/cast model and casting method. Demonstrate external desktop video,
    pointer, secondary click, typing/IME, dragging, scrolling, keyboard-open use,

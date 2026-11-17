@@ -148,6 +148,13 @@ test('explicit window selection is strict, browser-only and never silently becom
 });
 
 
+test('secondary-click native opt-in is limited to negotiated full-desktop browser input', () => {
+  const base = { connection: 'browser', maxSize: 1600, maxFps: 30, bitRateMbps: 8, encoder:'auto', browserKeyboard:true, browserPointerButtons:true };
+  assert.ok(buildScrcpyArgs(base,1234).includes('--reverse-pointer-buttons'));
+  for (const config of [{...base,browserPointerButtons:false},{...base,browserKeyboard:false},{...base,windowId:17},{...base,connection:'usb'},{...base,connection:'internet'}])
+    assert.equal(buildScrcpyArgs(config,1234).includes('--reverse-pointer-buttons'),false);
+});
+
 test('native focus reporting is browser keyboard only and omitted for window/Android routes',()=>{
   const base=sanitizeStreamConfig({connection:'browser'});
   assert.ok(buildScrcpyArgs({...base,browserKeyboard:true,browserTextFocus:true},1234).includes('--reverse-text-focus'));

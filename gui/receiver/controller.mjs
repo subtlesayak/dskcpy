@@ -1,4 +1,4 @@
-import { BROWSER_RESUME_MS, parseControllerFragment, touchPacket, scrollPacket } from './protocol.mjs';
+import { BROWSER_RESUME_MS, parseControllerFragment, touchPacket, scrollPacket, secondaryClickPacket } from './protocol.mjs';
 import { createRelativeTrackpad } from './trackpad.mjs';
 import { createBrowserKeyboard, keyPacket } from './keyboard.mjs';
 import { SHORTCUT_KEYS, shortcutKeyLabel, createKeyboardShortcuts } from './shortcuts.mjs';
@@ -8,6 +8,7 @@ let scannedKey = parseControllerFragment(location.hash);
 if (location.hash.startsWith('#controller=')) history.replaceState(null, '', location.pathname + location.search);
 let ws, authenticated = false, active = false, available = false, ended = false, expected = false;
 let keyboardSupported = false, keyboardOpen = false, focusSupported = false, focused = document.hasFocus();
+let pointerButtons = false;
 let width = 0, height = 0, generation = 0, retryTimer, connectTimer, deadline = 0, probing = false;
 let moving, moveTimer;
 let pendingAction = null;
@@ -87,6 +88,8 @@ function paint() {
   const usable = canControl(); pad.setAttribute('aria-disabled', String(!usable));
   $('controller-keyboard').disabled = !usable || !keyboardSupported;
   for (const id of ['controller-click', 'controller-drag']) $(id).disabled = !usable;
+  $('controller-secondary').disabled = !usable || !pointerButtons;
+  $('controller-secondary-help').textContent = pointerButtons ? 'Secondary click opens the computer’s context menu at the pointer.' : 'Secondary click is unavailable on this host. Update the host to enable it.';
   for (const button of keyButtons) button.disabled = !usable || !keyboardSupported;
   $('controller-send-shortcut').disabled = !usable || !keyboardSupported;
   $('controller-auto-keyboard').disabled = !keyboardSupported || !focusSupported;
@@ -112,6 +115,7 @@ function stopLocal(message = 'Controller disconnected') {
   expected = false; generation++; clearTimeout(retryTimer); clearTimeout(connectTimer);
   releaseInput(); hideKeyboard(); ws?.close(4000, 'Controller left'); ws = null;
   authenticated = active = available = false; keyboardSupported = focusSupported = false; deadline = 0;
+  pointerButtons = false;
   $('controller-workspace').hidden = true; $('controller-join').hidden = false;
   document.body.classList.remove('controller-connected'); say(message);
 }
@@ -167,6 +171,7 @@ function connect(key) {
       const message = JSON.parse(event.data);
       if (message.type === 'controller-authenticated' && !authenticated && message.role === 'controller') {
         authenticated = expected = true; keyboardSupported = message.keyboard === true; focusSupported = message.textFocus === true;
+        pointerButtons = keyboardSupported && message.pointerButtons === true;
         clearTimeout(connectTimer); deadline = 0; showError(''); $('controller-key').value = '';
         $('controller-join').hidden = true; $('controller-workspace').hidden = false; document.body.classList.add('controller-connected');
         applyState(message); fit(); return;
@@ -192,6 +197,11 @@ $('controller-form').addEventListener('submit', event => {
 $('controller-keyboard').addEventListener('click', () => keyboardOpen ? hideKeyboard() : openKeyboard());
 $('controller-close-keyboard').addEventListener('click', () => { hideKeyboard(); $('controller-keyboard').focus(); });
 $('controller-click').addEventListener('click', () => { if (canControl()) trackpad.click(); });
+$('controller-secondary').addEventListener('click', () => {
+  if (!pointerButtons || !canControl()) return;
+  const point = trackpad.position(); if (!point) return;
+  releaseInput(); send(secondaryClickPacket(point.x, point.y, width, height));
+});
 $('controller-drag').addEventListener('click', () => { if (canControl()) trackpad.toggleDrag(); });
 $('controller-resume').addEventListener('click', () => { focused = true; resumeControl(); });
 for (const button of keyButtons) {

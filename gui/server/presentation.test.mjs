@@ -4,7 +4,7 @@ import { once } from 'node:events';
 import net from 'node:net';
 import { WebSocket } from 'ws';
 import { createBrowserReceiver } from './browser.mjs';
-import { touchPacket, scrollPacket, ack, controllerJoinUrl, parseControllerFragment } from '../receiver/protocol.mjs';
+import { touchPacket, scrollPacket, secondaryClickPacket, ack, controllerJoinUrl, parseControllerFragment } from '../receiver/protocol.mjs';
 import { clipboardRequest } from '../receiver/clipboard.mjs';
 
 const header = Buffer.from('535244310000000100000280000001e0', 'hex');
@@ -69,6 +69,26 @@ async function fixture(t, options = {}) {
     native: () => native, bridge: () => bridge, calls: () => calls, bytes: () => Buffer.concat(chunks),
     clear: () => { chunks.length = 0; } };
 }
+
+test('secondary click belongs to the sole negotiated input owner and is denied on older hosts', async t => {
+  const f = await fixture(t, { policy: {keyboard:true,pointerButtons:true} });
+  assert.equal(texts(f.presentation)[0].pointerButtons, true); assert.equal(f.bridge().pointerButtons,true);
+  const control = await f.pair(); assert.equal(texts(control.ws)[0].pointerButtons,true);
+  control.ws.send('resume'); control.ws.ping(); await once(control.ws,'pong');
+  const packet=Buffer.from(secondaryClickPacket(100,200,640,480));
+  f.clear(); f.presentation.send(packet); f.presentation.ping(); await once(f.presentation,'pong');
+  assert.equal(f.bytes().includes(packet),false);
+  control.ws.send(packet); await until(()=>f.bytes().includes(packet));
+  control.ws.send('suspend'); control.ws.ping(); await once(control.ws,'pong'); f.clear();
+  control.ws.send(packet); control.ws.ping(); await once(control.ws,'pong'); assert.equal(f.bytes().includes(packet),false);
+  const old=await fixture(t); assert.equal(old.bridge().pointerButtons,false);
+  const denied=await old.pair(); assert.equal(texts(denied.ws)[0].pointerButtons,false);
+  denied.ws.send('resume'); denied.ws.ping(); await once(denied.ws,'pong'); old.clear();
+  const closed=once(denied.ws,'close'); denied.ws.send(packet); await closed;
+  assert.equal(old.presentation.readyState,WebSocket.OPEN); assert.equal(old.bytes().includes(packet),false);
+  const window=await fixture(t,{policy:{viewOnly:true,keyboard:true,pointerButtons:true}});
+  assert.equal(texts(window.presentation)[0].pointerButtons,false); assert.equal(window.bridge().pointerButtons,false);
+});
 
 test('controller creation is opt-in, same-origin, explicit and full-desktop only', async t => {
   const defaults = await fixture(t, { presentationControl: false });

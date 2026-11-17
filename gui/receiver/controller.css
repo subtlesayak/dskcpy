@@ -15,6 +15,8 @@
 #controller-pad-help { max-width: 38ch; margin: 0; align-self: end; text-align: center; color: #a1b5c0; font-size: .875rem; pointer-events: none; }
 #controller-marker { position: absolute; inset-inline-start: 50%; top: 50%; width: 16px; height: 16px; border: 2px solid #64d9fa; border-radius: 50%; transform: translate(-50%, -50%); pointer-events: none; }
 .controller-actions, .controller-arrows { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.controller-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (min-width: 560px) { .controller-actions { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
 .controller-arrows { grid-template-columns: repeat(4, minmax(0, 1fr)); margin-block-start: 6px; }
 .controller-arrows { direction: ltr; } /* Physical key directions do not mirror. */
 .controller-actions:has(#controller-resume:not([hidden])) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
