@@ -18,6 +18,7 @@ const assets = new Map([
   ['/video.mjs', ['video.mjs', 'text/javascript; charset=utf-8']],
   ['/shortcuts.mjs', ['shortcuts.mjs', 'text/javascript; charset=utf-8']],
   ['/view.mjs', ['view.mjs', 'text/javascript; charset=utf-8']],
+  ['/typing-view.mjs', ['typing-view.mjs', 'text/javascript; charset=utf-8']],
   ['/trackpad.mjs', ['trackpad.mjs', 'text/javascript; charset=utf-8']],
   ['/keyboard.mjs', ['keyboard.mjs', 'text/javascript; charset=utf-8']],
   ['/clipboard.mjs', ['clipboard.mjs', 'text/javascript; charset=utf-8']],

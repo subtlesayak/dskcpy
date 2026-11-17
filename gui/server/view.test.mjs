@@ -2,6 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createDesktopView } from '../receiver/view.mjs';
 const geometry = { width: 400, height: 300, contentWidth: 400, contentHeight: 225 };
+test('typing framing is bounded separately from ordinary gesture zoom and rejects invalid targets', () => {
+  const view = createDesktopView(); view.setGeometry(geometry);
+  view.frameAt(.6, .6, 100); assert.equal(view.state().scale, 10);
+  const before = view.state(); view.frameAt(NaN, .5, 2); view.frameAt(1.2, .5, 2); assert.deepEqual(view.state(), before);
+  view.reset(); view.zoomBy(100); assert.equal(view.state().scale, 4);
+});
 function fixture() { const view = createDesktopView(); view.setGeometry(geometry); return view; }
 test('local zoom preserves its anchor and clamps pan without revealing new gutters', () => {
   const v = fixture(); v.zoomBy(2, 100, 150);
