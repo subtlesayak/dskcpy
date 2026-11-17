@@ -11,8 +11,14 @@ import { publicWindowState } from './window-targets.mjs';
 // retain video frames: only the wire header and codec parameter sets are replayed.
 export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lifetimeMs,
   mediaMode = 'webcodecs', rtcBind, keyboard = false, viewOnly = false, textFocus = false, textFocusGeometry = false, clipboard = false,
-  captureRecovery = false, adaptiveVideo = false, windowAudio = false, nativeEndGraceMs = 15000, rtcMediaFactory = createRtcMedia, onChange = () => {}, windowGroup = null, onRetireWindow }) {
+  captureRecovery = false, adaptiveVideo = false, windowAudio = false, presentationControl = false,
+  onControllerLeave = () => {}, nativeEndGraceMs = 15000, rtcMediaFactory = createRtcMedia, onChange = () => {}, windowGroup = null, onRetireWindow }) {
   let native, peer, closed = false, ready = false, nativeTimer, awayTimer;
+  const canSplitControl = presentationControl && !viewOnly;
+  let splitControl = false, controller, controllerActive = false, controllerAlive = true;
+  let controllerAwayTimer, controllerRateAt = 0, controllerEvents = 0;
+  const inputPeer = () => splitControl ? controller : peer;
+  const inputActive = () => !splitControl || controllerActive;
   let listener, nativeEndTimer, recovering = false, restarting = false;
   let restartTimes = [];
   const canHearWindow = viewOnly && windowAudio;
@@ -34,30 +40,33 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
   let keyboardStatusSubscribed = false, lastKeyboardStatus = null;
   const clipboardSupported = clipboard && keyboard && !viewOnly;
   const clipboardBroker = createClipboardBroker({ capable: clipboardSupported,
-    allowed: () => ready && !closed && !suspended && !capturePaused && !recovering && Boolean(native),
+    allowed: () => ready && !closed && !suspended && !capturePaused && !recovering && inputActive() && Boolean(native),
     sendNative: packet => { if (!native || native.destroyed) return false; native.write(packet); return true; },
-    respond: (target, result) => { if (target === peer && target.readyState === WebSocket.OPEN && target.bufferedAmount < 65536) target.send(JSON.stringify(result)); },
+    respond: (target, result) => { if (target === inputPeer() && target.readyState === WebSocket.OPEN && target.bufferedAmount < 65536) target.send(JSON.stringify(result)); },
   });
   function keyboardStatus(status) {
     if (!keyboard || viewOnly || !['ready','blocked','unsupported'].includes(status) || closed) return;
     lastKeyboardStatus = status;
     if (status === 'blocked') clipboardBroker.disable();
-    if (ready && keyboardStatusSubscribed && !suspended && peer?.readyState === WebSocket.OPEN && peer.bufferedAmount <= MAX_PACKET)
-      peer.send(JSON.stringify({type:'keyboard-status',status}));
+    const target = inputPeer();
+    if (ready && keyboardStatusSubscribed && !suspended && inputActive() && target?.readyState === WebSocket.OPEN && target.bufferedAmount <= MAX_PACKET)
+      target.send(JSON.stringify({type:'keyboard-status',status}));
   }
   function focusHint(focused) {
+    const target = inputPeer();
     if (!focusSupported || !focusSubscribed || !ready || closed || suspended || capturePaused || recovering || !native || native.destroyed
-        || !peer || peer.readyState !== WebSocket.OPEN
-        || peer.bufferedAmount > MAX_PACKET || ![true, false, null].includes(focused) || Date.now() - focusAt < 100) return;
-    focusAt = Date.now(); peer.send(JSON.stringify({ type: 'text-focus', focused }));
+        || !inputActive() || !target || target.readyState !== WebSocket.OPEN
+        || target.bufferedAmount > MAX_PACKET || ![true, false, null].includes(focused) || Date.now() - focusAt < 100) return;
+    focusAt = Date.now(); target.send(JSON.stringify({ type: 'text-focus', focused }));
   }
   function focusGeometryHint(value) {
+    const destination = inputPeer();
     if (!geometrySupported || !geometrySubscribed || !ready || !wireHeader || closed || suspended || capturePaused || recovering
-        || !native || native.destroyed || lastKeyboardStatus === 'blocked' || !peer || peer.readyState !== WebSocket.OPEN
-        || peer.bufferedAmount > MAX_PACKET || Date.now() - geometryAt < 100) return;
+        || !inputActive() || !native || native.destroyed || lastKeyboardStatus === 'blocked' || !destination || destination.readyState !== WebSocket.OPEN
+        || destination.bufferedAmount > MAX_PACKET || Date.now() - geometryAt < 100) return;
     const target = value === null ? null : focusGeometry(value);
     if (value !== null && !target) return;
-    geometryAt = Date.now(); peer.send(JSON.stringify({ type: 'text-focus-geometry', target }));
+    geometryAt = Date.now(); destination.send(JSON.stringify({ type: 'text-focus-geometry', target }));
   }
   let rtc, rtcGeneration = 0, negotiating = false;
   let fallbackUsed = false;
@@ -135,10 +144,113 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
     touches.clear();
     if (keyboard) native?.write(Buffer.from([8, 2, 0, 0, 0]));
   }
+  function resetInputSubscriptions() {
+    focusSubscribed = keyboardStatusSubscribed = geometrySubscribed = false;
+    focusAt = geometryAt = -Infinity;
+    clipboardBroker.disable();
+  }
+  function presentationAvailable() {
+    return !closed && ready && Boolean(wireHeader) && !recovering && !suspended && !capturePaused
+      && Boolean(native && !native.destroyed && peer?.readyState === WebSocket.OPEN);
+  }
+  function presentationState() {
+    return { presentation: splitControl, presentationAvailable: presentationAvailable(),
+      controllerConnected: Boolean(controller?.readyState === WebSocket.OPEN), controllerActive };
+  }
+  function publishPresentation() {
+    if (!splitControl) return;
+    const state = presentationState();
+    if (peer?.readyState === WebSocket.OPEN && peer.bufferedAmount < 65536)
+      peer.send(JSON.stringify({ type: 'presentation-state', ...state }));
+    if (controller?.readyState === WebSocket.OPEN && controller.bufferedAmount < 65536)
+      controller.send(JSON.stringify({ type: 'controller-state', ...state, width, height }));
+    onChange();
+  }
+  function suspendController() {
+    if (!splitControl) return;
+    controllerActive = false;
+    releaseTouches(); resetInputSubscriptions();
+    clearTimeout(controllerAwayTimer);
+    // Controller expiry never ends presentation playback or extends its grant.
+    controllerAwayTimer = setTimeout(() => detachController(true), resumeMs);
+    publishPresentation();
+  }
+  function detachController(revoke = false) {
+    const previous = controller; controller = null;
+    controllerActive = false; releaseTouches(); resetInputSubscriptions();
+    clearTimeout(controllerAwayTimer);
+    if (previous) {
+      previous.close(revoke ? 1008 : 1012, revoke ? 'controller-ended' : 'controller-away');
+      setTimeout(() => previous.terminate(), 1000).unref();
+    }
+    if (revoke) onControllerLeave();
+    else if (!closed && splitControl) controllerAwayTimer = setTimeout(() => detachController(true), resumeMs);
+    publishPresentation();
+  }
+  function beginPresentation() {
+    if (!canSplitControl || closed || !presentationAvailable() || controller) return false;
+    if (!splitControl) {
+      // Retire the old input epoch before the second role can be authenticated.
+      releaseTouches(); resetInputSubscriptions(); splitControl = true;
+      peer.send(JSON.stringify({ type: 'presentation-mode', role: 'presentation' }));
+      publishPresentation();
+    }
+    return true;
+  }
+  function writeInput(ws, message) {
+    if (message[0] === 10) return clipboardBroker.request(ws, message);
+    if (message[0] === 3) {
+      const id = message.readBigUInt64BE(2).toString();
+      if (message[1] === 3) touches.clear();
+      else if ([1, 6].includes(message[1])) touches.delete(id);
+      else touches.set(id, { x: message.readUInt32BE(10), y: message.readUInt32BE(14) });
+    }
+    native.write(message); return true;
+  }
+  function attachController(ws) {
+    if (!splitControl || closed || controller) { ws.close(1008, 'controller-busy'); return false; }
+    clearTimeout(controllerAwayTimer);
+    controller = ws; controllerActive = false; controllerAlive = true;
+    controllerAwayTimer = setTimeout(() => detachController(true), resumeMs);
+    controllerRateAt = Date.now(); controllerEvents = 0; resetInputSubscriptions();
+    ws.on('pong', () => { if (controller === ws) controllerAlive = true; });
+    ws.on('close', code => { if (controller === ws) detachController([1000, 1008, 4000].includes(code)); });
+    ws.on('message', (message, binary) => {
+      if (closed || controller !== ws) return;
+      if (Date.now() - controllerRateAt >= 1000) { controllerRateAt = Date.now(); controllerEvents = 0; }
+      if (++controllerEvents > 1000 || ws.bufferedAmount > 65536 || native?.writableLength > 65536) { detachController(true); return; }
+      if (!binary) {
+        const text = message.toString();
+        if (text === 'suspend') { suspendController(); return; }
+        if (text === 'resume') {
+          controllerActive = presentationAvailable();
+          clearTimeout(controllerAwayTimer); publishPresentation(); return;
+        }
+        if (!controllerActive || !presentationAvailable()) return;
+        if (text === 'keyboard-status-subscribe' && keyboard) { keyboardStatusSubscribed = true; if (lastKeyboardStatus) keyboardStatus(lastKeyboardStatus); return; }
+        if (text === 'text-focus-subscribe' && focusSupported) { focusSubscribed = true; return; }
+        if (text === 'text-focus-geometry-subscribe' && geometrySupported) { geometrySubscribed = true; geometryAt = -Infinity; return; }
+        if (text === 'text-focus-geometry-unsubscribe') { geometrySubscribed = false; return; }
+        if (text === 'clipboard-enable' && clipboardBroker.enable(ws)) return;
+        if (text === 'clipboard-disable') { clipboardBroker.disable(); return; }
+        detachController(true); return;
+      }
+      // A controller never acknowledges/controls media or submits RTC feedback.
+      if (![3, 7, 8, 9, 10].includes(message[0])) { detachController(true); return; }
+      if (!controllerActive || !presentationAvailable()) return;
+      if (!validBrowserInput(message, width, height, { keyboard, clipboard: clipboardSupported })) { detachController(true); return; }
+      if (!writeInput(ws, message)) detachController(true);
+    });
+    ws.send(JSON.stringify({ type: 'controller-authenticated', role: 'controller', keyboard,
+      clipboard: clipboardSupported, textFocus: focusSupported, textFocusGeometry: Boolean(geometrySupported), keyboardStatus: keyboard,
+      width, height, ...presentationState() }));
+    publishPresentation(); return true;
+  }
   function suspend() {
     adaptive.reset();
     command(7); releaseTouches();
     if (!suspended) { suspended = true; awayTimer = setTimeout(close, resumeMs); }
+    if (splitControl) suspendController();
   }
   function drain(pending, type) {
     if (pending.size) acknowledgeNative(type, [...pending].reduce((a, b) => BigInt(a) > BigInt(b) ? a : b));
@@ -167,7 +279,10 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
   }
   function announce() {
     if (!ready || !peer) return;
-    peer.send(JSON.stringify({ type: 'authenticated', mediaMode, keyboard, viewOnly, textFocus: focusSupported, textFocusGeometry: Boolean(geometrySupported), keyboardStatus: keyboard && !viewOnly, clipboard: clipboardSupported,
+    peer.send(JSON.stringify({ type: 'authenticated', mediaMode, keyboard: keyboard && !splitControl, viewOnly: viewOnly || splitControl,
+      textFocus: focusSupported && !splitControl, textFocusGeometry: Boolean(geometrySupported) && !splitControl,
+      keyboardStatus: keyboard && !viewOnly && !splitControl, clipboard: clipboardSupported && !splitControl,
+      ...(canSplitControl ? { presentationControl: true, role: splitControl ? 'presentation' : 'combined' } : {}),
       windowSwitch: Boolean(canSwitchWindow), windowAudio: Boolean(canHearWindow),
       adaptiveVideo: adaptiveSupported,
       mediaFallback: mediaMode === 'webrtc' && !fallbackUsed && peer.protocol === MEDIA_FALLBACK_PROTOCOL }));
@@ -191,7 +306,7 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
     ws.on('pong', () => { if (peer === ws) alive = true; });
     ws.on('close', (code) => {
       if (peer !== ws || closed) return;
-      if ([4000, 1000, 1005, 1008].includes(code)) close();
+      if (!splitControl && [4000, 1000, 1005, 1008].includes(code)) close();
       else detach(ws);
     });
     ws.on('message', (message, binary) => {
@@ -199,6 +314,8 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
       if (Date.now() - rateAt >= 1000) { rateAt = Date.now(); events = 0; }
       if (++events > 1000 || native?.writableLength > 65536) { close(); return; }
       if (!binary) {
+        if (splitControl && ['clipboard-enable', 'clipboard-disable', 'text-focus-subscribe', 'text-focus-geometry-subscribe',
+          'text-focus-geometry-unsubscribe', 'keyboard-status-subscribe'].includes(message.toString())) return;
         if (message.toString() === 'window-select-subscribe') {
           if (!canSwitchWindow || !ready) { close(); return; }
           windowSubscribed = true; publishWindows(); return;
@@ -255,6 +372,7 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
           suspended = false; clearTimeout(awayTimer);
           if (keyboardStatusSubscribed && lastKeyboardStatus) keyboardStatus(lastKeyboardStatus);
           publishQuality();
+          publishPresentation();
           return;
         }
         if (mediaMode === 'webrtc' && rtc && message.length <= 32768) {
@@ -271,6 +389,10 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
       // Never apply old geometry, ACKs or text to a new capture epoch.
       if (recovering) return;
       if (!native || !validBrowserInput(message, width, height, { keyboard, clipboard: clipboardSupported })) { close(); return; }
+      // Queued input from the old combined page cannot cross the ownership
+      // transfer. Its media ACKs and explicit playback controls still work.
+      if (splitControl && ![4, 6].includes(message[0])
+          && !(message[0] === 5 && [7, 8, 9, 10, 11].includes(message[1]))) return;
       if (viewOnly && ![4, 6].includes(message[0])
           && !(message[0] === 5 && ([7, 8, 9, 11].includes(message[1]) || canHearWindow && message[1] === 10))) { close(); return; }
       if ([4, 6].includes(message[0])) {
@@ -284,16 +406,12 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
         return;
       }
       if (capturePaused && ![4,6,5].includes(message[0])) return;
-      if (message[0] === 10) { if (!clipboardBroker.request(ws, message)) close(); return; }
       if (message[0] === 5 && [7,8].includes(message[1])) { capturePaused = message[1] === 7; if (capturePaused) adaptive.reset(); }
       if (capturePaused) clipboardBroker.disable();
-      if (message[0] === 3) {
-        const id = message.readBigUInt64BE(2).toString();
-        if (message[1] === 3) touches.clear();
-        else if ([1, 6].includes(message[1])) touches.delete(id);
-        else touches.set(id, { x: message.readUInt32BE(10), y: message.readUInt32BE(14) });
+      if (splitControl && message[0] === 5 && [7,8].includes(message[1])) {
+        if (capturePaused) suspendController(); else publishPresentation();
       }
-      native.write(message);
+      if (!writeInput(ws, message)) close();
     });
     announce();
   }
@@ -306,6 +424,7 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
     listener?.close();
     releaseTouches(); stopRtc(); video.clear(); audio.clear(); nativeAcks.clear();
     suspended = capturePaused = true; awayTimer = setTimeout(close, resumeMs);
+    if (splitControl) suspendController();
     wireHeader = videoConfig = audioConfig = null; width = height = 0;
     lastKeyboardStatus = null; focusSubscribed = keyboardStatusSubscribed = geometrySubscribed = false;
     const previous = native; native = null;
@@ -367,6 +486,7 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
         wireHeader = packet;
         width = packet.readUInt32BE(8); height = packet.readUInt32BE(12);
         if (suspended) command(7);
+        publishPresentation();
       } else {
         const flags = packet.readUInt32BE(12);
         if (viewOnly && !canHearWindow && [4,8].includes(flags)) { close(); return; }
@@ -429,6 +549,8 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
     closed = true;
     stopRtc();
     clearTimeout(nativeTimer); clearTimeout(awayTimer); clearTimeout(nativeEndTimer); clearTimeout(lifetimeTimer); clearInterval(pingTimer);
+    if (splitControl) detachController(true);
+    clearTimeout(controllerAwayTimer);
     releaseTouches(); listener?.close(); native?.destroy();
     const target = peer; peer = null;
     const category = ['capture-permission', 'capture-recovery'].includes(reason) ? reason : 'capture-ended';
@@ -441,9 +563,14 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
   }
   const lifetimeTimer = setTimeout(close, lifetimeMs);
   const pingTimer = setInterval(() => {
-    if (!peer) return;
-    if (!alive) detach(peer);
-    else { alive = false; peer.ping(); }
+    if (peer) {
+      if (!alive) detach(peer);
+      else { alive = false; peer.ping(); }
+    }
+    if (controller) {
+      if (!controllerAlive) detachController();
+      else { controllerAlive = false; controller.ping(); }
+    }
   }, 5000);
   attach(socket);
   async function start() {
@@ -461,5 +588,7 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
         captureRecovery: canRecover, restartNative, close, get closed() { return closed; } });
     } catch { close(); }
   }
-  return { start, attach, close, get mediaMode() { return mediaMode; }, get recovering() { return recovering; }, get cleanup() { return rtcCleanup; } };
+  return { start, attach, close, beginPresentation, attachController, detachController,
+    get presentation() { return splitControl; }, get controllerConnected() { return Boolean(controller); },
+    get mediaMode() { return mediaMode; }, get recovering() { return recovering; }, get cleanup() { return rtcCleanup; } };
 }

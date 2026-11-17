@@ -1,8 +1,23 @@
 # External display and phone controller
 
-Status: implementation plan, not an available casting feature. No phone, TV or
+Status: isolated backend prototype and implementation plan, not an available casting feature. No phone, TV or
 casting device is available for physical qualification as of 17 November 2026.
 The existing receiver, trackpad, keyboard and private transport remain the base.
+
+The prototype adds a disabled-by-default `presentationControl` receiver
+capability, an independently authenticated controller socket and one input owner.
+The ordinary receiver defaults are preserved. Owned loopback/fake-native tests
+exercise role-bound one-use pairing, distinct HttpOnly cookies, no implicit
+controller replacement, media isolation, input release, independent controller
+expiry/leave, explicit whole-session Stop and native/media recovery. WebRTC
+offers and frame/audio delivery remain with the presentation while the controller
+is hidden. These are server/software checks, not a phone or casting test.
+
+The desktop service does not enable this prototype. Presentation/controller
+pages, a beginner setup flow, separate presentation-ending action, adjustable
+pointer sensitivity and negotiated secondary click remain to implement. Do not
+enable the backend in an installed app until those clients and lifecycle checks
+are complete; existing receivers do not handle its new role messages.
 
 ## Intended flow
 

@@ -1,7 +1,7 @@
 import http from 'node:http';
 import https from 'node:https';
 import net from 'node:net';
-import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { randomBytes, timingSafeEqual, createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
@@ -45,7 +45,10 @@ export function receiverOrigin(value) {
 // Remote access is opt-in via a user-managed Tailscale Serve HTTPS proxy.
 export function createBrowserReceiver({ configuredPort = 27180, origin,
   tls, rtcBind = '127.0.0.1', onConnect, onChange = () => {}, invitationMs = 300000, authMs = 5000,
-  resumeMs = BROWSER_RESUME_MS, lifetimeMs = 12 * 60 * 60 * 1000, nativeEndGraceMs = 15000, rtcMediaFactory, trustedDevices, onTrustedConnect, onRetireWindow } = {}) {
+  resumeMs = BROWSER_RESUME_MS, lifetimeMs = 12 * 60 * 60 * 1000, nativeEndGraceMs = 15000, rtcMediaFactory, trustedDevices, onTrustedConnect, onRetireWindow,
+  presentationControl = false, controllerInvitationMs = 300000 } = {}) {
+  if (presentationControl === true && (!Number.isInteger(controllerInvitationMs) || controllerInvitationMs < 1 || controllerInvitationMs > 300000))
+    throw Error('Controller invitation lifetime must be between one millisecond and five minutes.');
   const remoteOrigin = receiverOrigin(origin);
   const healthInstance = randomBytes(16).toString('hex'); // launch marker, never an access credential
   let port, closed = false;
@@ -54,6 +57,7 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
   let mode = 'local';
   let invitation = null;
   let session = null;
+  let controllerGrant = null, controllerExpiry;
   let expiresAt = null;
   let trustedTicket = null, enrollment = null, trustedConnecting = false, accessGeneration = 0;
   let rememberProfile = null;
@@ -69,6 +73,28 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
     || Boolean(remoteOrigin && new URL(remoteOrigin).host === host);
   const allowedOrigin = (value) => localOrigins().includes(value) || Boolean(remoteOrigin && value === remoteOrigin);
   const cookieName = () => `dskcpy_resume_${port}`;
+  const controllerCookieName = () => `dskcpy_controller_${port}`;
+  const digest = value => createHash('sha256').update(value).digest();
+  function clearControllerGrant() {
+    clearTimeout(controllerExpiry);
+    controllerGrant?.keyDigest?.fill(0); controllerGrant?.tokenDigest?.fill(0);
+    controllerGrant = null;
+  }
+  function controllerContext(req) {
+    return presentationControl === true && session && controllerGrant?.session === session
+      && req.headers.host === new URL(session.origin).host
+      && (!req.headers.origin || req.headers.origin === session.origin)
+      && req.headers['sec-fetch-site'] !== 'cross-site'
+      && (!session.deviceId || trustedDevices?.enabled(session.deviceId));
+  }
+  function mayResumeController(req) {
+    if (!controllerContext(req) || !controllerGrant.tokenDigest) return false;
+    const value = (req.headers.cookie || '').split(';').map(part => part.trim())
+      .find(part => part.startsWith(`${controllerCookieName()}=`))?.slice(controllerCookieName().length + 1);
+    if (!value || !/^[A-Za-z0-9_-]{43}$/.test(value)) return false;
+    const candidate = digest(value), accepted = timingSafeEqual(candidate, controllerGrant.tokenDigest);
+    candidate.fill(0); return accepted;
+  }
   function mayResume(req) {
     if (session?.deviceId && !trustedDevices?.enabled(session.deviceId)) return false;
     if (!session?.token || req.headers.host !== new URL(session.origin).host) return false;
@@ -164,12 +190,78 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
       } finally { trustedConnecting = false; }
     } catch (error) { json(400, { error: error.message }); }
   }
+  async function controllerRequest(req, res) {
+    const json = (code, value) => res.writeHead(code, { 'Content-Type': 'application/json' }).end(JSON.stringify(value));
+    if (presentationControl !== true) { json(404, {}); return; }
+    if (req.url === '/stream/controller/session' && req.method === 'GET') {
+      const resumable = mayResumeController(req);
+      json(200, { resumable, connected: resumable && session.controllerConnected }); return;
+    }
+    if (req.method !== 'POST' || !session || req.headers.origin !== session.origin
+        || req.headers['sec-fetch-site'] === 'cross-site') { json(403, { error: 'Controller authorization required.' }); return; }
+    if (req.url === '/stream/controller/invite') {
+      const active = session;
+      if (!mayResume(req) || inputPolicy.viewOnly || !presentationControl) { json(403, { error: 'Use the full-desktop receiver to authorize a controller.' }); return; }
+      let body; try { body = await readTrustBody(req); } catch { json(400, { error: 'Expected a controller invitation request.' }); return; }
+      if (Object.keys(body).length !== 1 || body.action !== 'create') { json(400, { error: 'Explicit controller invitation action required.' }); return; }
+      // Authentication and session identity must still hold after reading I/O.
+      if (session !== active || !mayResume(req)) { json(403, { error: 'The desktop session ended.' }); return; }
+      if (active.controllerConnected || controllerGrant?.tokenDigest) { json(409, { error: 'A controller already owns this session. Leave it before pairing another.' }); return; }
+      if (!active.beginPresentation()) { json(409, { error: 'Resume the desktop picture before pairing a controller.' }); return; }
+      if (session !== active || !mayResume(req)) { json(403, { error: 'The desktop session ended.' }); return; }
+      clearControllerGrant();
+      const key = randomBytes(32).toString('base64url');
+      const duration = Math.min(invitationMs, controllerInvitationMs, 300000);
+      controllerGrant = { session: active, keyDigest: digest(key), tokenDigest: null, failures: 0,
+        expiresAt: Date.now() + duration };
+      controllerExpiry = setTimeout(clearControllerGrant, duration);
+      json(201, { key, expiresAt: new Date(controllerGrant.expiresAt).toISOString(), role: 'controller' }); return;
+    }
+    if (!mayResumeController(req)) { json(403, { error: 'Controller authorization required.' }); return; }
+    if (req.url === '/stream/controller/stop') cancel();
+    else if (req.url === '/stream/controller/leave') { clearControllerGrant(); session.detachController(true); }
+    else { json(404, {}); return; }
+    res.setHeader('Set-Cookie', `${controllerCookieName()}=; HttpOnly; SameSite=Strict; Path=/stream/controller; Max-Age=0${req.headers.origin.startsWith('https:') ? '; Secure' : ''}`);
+    res.writeHead(204).end();
+  }
+  function upgradeController(req, socket, head) {
+    const mine = controllerGrant, resume = mayResumeController(req);
+    if (closed || !controllerContext(req) || req.headers.origin !== session.origin || !allowedOrigin(req.headers.origin)
+        || session.controllerConnected || sockets.size >= 4
+        || (!resume && (!mine.keyDigest || mine.expiresAt <= Date.now() || mine.failures >= 10))) {
+      socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n'); return;
+    }
+    if (!resume) req.controllerToken = randomBytes(32);
+    wss.handleUpgrade(req, socket, head, ws => {
+      sockets.add(ws); ws.on('error', () => {});
+      const timer = setTimeout(() => ws.terminate(), authMs);
+      ws.on('close', () => { sockets.delete(ws); clearTimeout(timer); req.controllerToken?.fill(0); });
+      if (resume) { clearTimeout(timer); session.attachController(ws); return; }
+      ws.once('message', (message, binary) => {
+        clearTimeout(timer);
+        const value = !binary && /^[A-Za-z0-9_-]{43}$/.test(message.toString()) ? message.toString() : '';
+        const candidate = digest(value);
+        const accepted = controllerGrant === mine && mine.session === session && mine.expiresAt > Date.now()
+          && mine.keyDigest && value && timingSafeEqual(candidate, mine.keyDigest);
+        candidate.fill(0);
+        if (!accepted || session.controllerConnected) {
+          if (controllerGrant === mine && ++mine.failures >= 10) clearControllerGrant();
+          ws.close(1008, 'Controller key rejected or expired.'); return;
+        }
+        mine.keyDigest.fill(0); mine.keyDigest = null; clearTimeout(controllerExpiry);
+        mine.tokenDigest = digest(req.controllerToken.toString('base64url')); req.controllerToken.fill(0);
+        session.attachController(ws);
+      });
+    });
+  }
   function status() {
     return { waiting: Boolean(invitation), connected: Boolean(session), clipboardAllowed: Boolean((invitation || session) && inputPolicy.clipboard),
       url: port ? viewerUrl() : null, remote: !['local', 'usb'].includes(mode),
-      remoteAvailable: Boolean(remoteOrigin), mode, expiresAt, mediaMode: session?.mediaMode ?? null, recovering: Boolean(session?.recovering) };
+      remoteAvailable: Boolean(remoteOrigin), mode, expiresAt, mediaMode: session?.mediaMode ?? null, recovering: Boolean(session?.recovering),
+      ...(presentationControl === true ? { presentation: session?.presentation === true, controllerConnected: session?.controllerConnected === true } : {}) };
   }
   function cancel() {
+    clearControllerGrant();
     clearTimeout(expiryTimer);
     invitation?.fill(0);
     invitation = null;
@@ -197,6 +289,9 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
       return;
     }
     if (['/stream/remember', '/stream/remember/status', '/stream/trusted/connect'].includes(req.url)) { await trustedRequest(req, res); return; }
+    if (['/stream/controller/invite', '/stream/controller/session', '/stream/controller/leave', '/stream/controller/stop'].includes(req.url)) {
+      await controllerRequest(req, res); return;
+    }
     if (req.url === '/stream/session' && req.method === 'GET') {
       const resumable = mayResume(req);
       res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ resumable,
@@ -222,12 +317,17 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
   // SDP answers are bounded separately; native input remains fixed-size.
   const wss = new WebSocketServer({ noServer: true, maxPayload: 32768, perMessageDeflate: false });
   wss.on('headers', (headers, req) => {
+    if (req.controllerToken) {
+      headers.push(`Set-Cookie: ${controllerCookieName()}=${req.controllerToken.toString('base64url')}; HttpOnly; SameSite=Strict; Path=/stream/controller; Max-Age=${Math.floor(lifetimeMs / 1000)}${req.headers.origin.startsWith('https:') ? '; Secure' : ''}`);
+      return;
+    }
     if (!req.resumeToken) return;
     // Provisional until the one-use code is accepted. Never exposed to JS,
     // query strings, localStorage, sessionStorage, status or diagnostics.
     headers.push(`Set-Cookie: ${cookieName()}=${req.resumeToken.toString('base64url')}; HttpOnly; SameSite=Strict; Path=/stream; Max-Age=${Math.floor(lifetimeMs / 1000)}${req.headers.origin.startsWith('https:') ? '; Secure' : ''}`);
   });
   const upgrade = (req, socket, head) => {
+    if (req.url === '/stream/controller') { upgradeController(req, socket, head); return; }
     const resume = mayResume(req);
     const mediaMode = req.url === '/stream/webrtc' && mode !== 'usb' ? 'webrtc' : 'webcodecs';
     if (closed || !['/stream', '/stream/webrtc'].includes(req.url)
@@ -265,10 +365,13 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
         const deviceId = trustedTicket?.id; trustedTicket = null;
         const token = Buffer.from(req.resumeToken);
         const active = createBrowserSession({ socket: ws, onConnect, resumeMs, lifetimeMs, nativeEndGraceMs, rtcMediaFactory,
+          presentationControl: presentationControl === true,
+          onControllerLeave: () => { if (controllerGrant?.session === active) clearControllerGrant(); },
           mediaMode, rtcBind, ...inputPolicy, onRetireWindow, onChange, onClose: () => {
           token.fill(0);
           pendingCleanup = Promise.all([pendingCleanup, active.cleanup]).then(() => {});
           if (session === active) session = null;
+          if (controllerGrant?.session === active) clearControllerGrant();
           onChange();
         } });
         session = Object.assign(active, { token, origin: req.headers.origin, deviceId,
