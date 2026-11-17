@@ -39,11 +39,15 @@ Mac hosting candidate, see [Build identity and compatible upgrades](doc/artifact
 - **Browser receiving:** authenticated WebRTC H.264/Opus and one-use QR
   invitations, plus a WebCodecs path for Android USB browser tunnels.
 - **Mac window sharing:** select one window, or explicitly approve a small
-  [window-switching list](doc/browser-window-switching.md). Sharing stays view-only
-  with audio off; hiding, minimizing or closing the current target ends capture.
+  [window-switching list](doc/browser-window-switching.md). Sharing stays view-only.
+  Audio starts off; optional [application audio](doc/browser-window-audio.md)
+  includes the selected app's other windows and tabs. Hiding, minimizing or
+  closing the current target ends capture.
 - **Browser typing:** opt-in full-desktop keyboard and committed Unicode/IME input
   on matching Mac and [Windows hosts](doc/windows-browser-keyboard.md), gated by
-  native capability and OS input permissions.
+  native capability and OS input permissions. Optional Mac
+  [typing framing](doc/browser-typing-view.md) follows a bounded caret/field hint,
+  with last-tap framing for older hosts.
 - **Receiver tools:** trackpad control, local pinch zoom, shortcut buttons and
   separately authorized [text clipboard transfer](doc/browser-clipboard.md).
 - **Desktop app prototype:** guided private-network and account-free Android USB
