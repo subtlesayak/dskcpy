@@ -5,6 +5,7 @@ import vm from 'node:vm';
 import { createBrowserClipboard } from '../receiver/clipboard.mjs';
 import { createKeyboardShortcuts, shortcutLabel } from '../receiver/shortcuts.mjs';
 import { createDesktopView } from '../receiver/view.mjs';
+import { createTypingView } from '../receiver/typing-view.mjs';
 import { createRelativeTrackpad } from '../receiver/trackpad.mjs';
 import { rememberedBrowser } from '../receiver/remembered.mjs';
 import { receiverIsAway } from '../receiver/lifecycle.mjs';
@@ -114,7 +115,7 @@ function receiver(t, { portrait = false, lockFails = false, webRtc = false, webC
   const context = vm.createContext({ ...protocol,
     createWindowChooser, createVideoPreference,
     createVideoFeedback: options => createVideoFeedback({...options,setTimer:(fn,ms)=>{const timer=setInterval(fn,ms);timers.add(timer);return timer},clearTimer:clearInterval}),
-    createKeyboardShortcuts, shortcutLabel, createDesktopView, createRelativeTrackpad, createBrowserKeyboard, keyboardUsage, keyPacket, receiverIsAway,
+    createKeyboardShortcuts, shortcutLabel, createDesktopView, createTypingView, createRelativeTrackpad, createBrowserKeyboard, keyboardUsage, keyPacket, receiverIsAway,
     createBrowserClipboard: options => createBrowserClipboard({ ...options, setTimer: (fn, ms) => { const timer = setTimeout(fn, ms); timers.add(timer); return timer; }, clearTimer: clearTimeout }),
     rememberedBrowser: options => rememberedBrowser({ ...options, document, location: locationState,
       fetch: (...args) => context.fetch(...args),
@@ -266,6 +267,20 @@ function pointer(h, name, id, x, y, pointerType = 'touch') {
   h.$('display').emit(name, { pointerId: id, clientX: x, clientY: y, pointerType, button: 0 });
 }
 function inputs(h) { return h.socket.sent.filter((data) => Buffer.isBuffer(data) && [3, 7].includes(data[0])); }
+
+test('an unchanged layout pass preserves a mouse click but a changed input mapping cancels it', t => {
+  const h = receiver(t);
+  h.reflow();
+  pointer(h, 'pointerdown', 11, 200, 200, 'mouse');
+  h.reflow();
+  pointer(h, 'pointerup', 11, 200, 200, 'mouse');
+  assert.deepEqual(inputs(h).map(packet => packet[1]), [0, 1]);
+  const before = inputs(h).length;
+  pointer(h, 'pointerdown', 12, 200, 200, 'mouse');
+  h.$('stage').clientWidth = 600; h.reflow();
+  pointer(h, 'pointerup', 12, 200, 200, 'mouse');
+  assert.deepEqual(inputs(h).slice(before).map(packet => packet[1]), [0, 3]);
+});
 
 test('one-finger swipe scrolls without pressing/selecting; a stationary tap still clicks', (t) => {
   const h = receiver(t);

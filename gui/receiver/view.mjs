@@ -34,6 +34,14 @@ export function createDesktopView({ changed = () => {} } = {}) {
   }
   return {
     state, cancel, reset, zoomBy, panBy,
+    // Typing can need stronger magnification than ordinary navigation when a
+    // docked phone keyboard leaves only a thin strip. No remote input is sent.
+    frameAt(u, v, nextScale) {
+      if (!geometry || ![u, v, nextScale].every(Number.isFinite) || u < 0 || u > 1 || v < 0 || v > 1) return;
+      cancel(); scale = Math.max(1, Math.min(10, nextScale));
+      x = (.5 - u) * geometry.contentWidth * scale;
+      y = (.5 - v) * geometry.contentHeight * scale; paint();
+    },
     setGeometry(next) {
       cancel();
       if (!next || !['width', 'height', 'contentWidth', 'contentHeight'].every(k => Number.isFinite(next[k]) && next[k] > 0)) {
