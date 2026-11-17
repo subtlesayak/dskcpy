@@ -47,7 +47,8 @@ user's agreement.
 ## Touch scroll speed
 
 Open **Options → Touch and scrolling → Touch scroll speed**. The new control
-defaults to 2× and ranges from 0.5× to 3× in quarter steps. It changes the distance
+defaults to 2× and ranges from 0.5× to 8× in quarter steps, allowing more travel
+on dense desktop views. It changes the distance
 produced by finger gestures in direct-touch and trackpad modes. Pointer movement,
 mouse-wheel events and keyboard scrolling retain their existing behavior.
 Adjustments apply without a capture restart. Only an explicit numeric choice is

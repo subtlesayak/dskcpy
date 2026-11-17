@@ -148,7 +148,7 @@ const viewNavigationActive = () => viewPresent && openControlTray === 'view';
 let selectDrag = false, touchGesture = null, trackpadMode = false;
 const scrollSpeedControl = $('touch-scroll-speed'), scrollSpeedReadout = $('touch-scroll-speed-value');
 const scrollSpeedKey = 'dskcpy.touch-scroll-speed.v1';
-const validScrollSpeed = value => Number.isFinite(value) && value >= .5 && value <= 3 && Number.isInteger(value * 4);
+const validScrollSpeed = value => Number.isFinite(value) && value >= .5 && value <= 8 && Number.isInteger(value * 4);
 let touchScrollGain = scrollSpeedControl ? 2 : 1;
 try {
   const saved = Number(window.localStorage?.getItem(scrollSpeedKey));

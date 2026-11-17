@@ -48,7 +48,9 @@ try { for (const variant of [{ width: 390, height: 844 }, { width: 844, height: 
     assert.equal(await speed.getAttribute('aria-valuetext'), '2.25 times');
     assert.equal(await page.locator('#touch-scroll-speed-value').textContent(), '2.25×');
     await page.keyboard.press('End');
-    for (let i = 0; i < 4; i++) await page.keyboard.press(variant.rtl ? 'ArrowRight' : 'ArrowLeft');
+    assert.equal(await speed.inputValue(), '8');
+    await page.keyboard.press('Home');
+    for (let i = 0; i < 6; i++) await page.keyboard.press(variant.rtl ? 'ArrowLeft' : 'ArrowRight');
     assert.equal(await speed.inputValue(), '2');
     assert.equal(await page.evaluate(() => localStorage.getItem('dskcpy.touch-scroll-speed.v1')), '2');
     assert.equal(allInputs.slice(beforeSpeed).some(p => p[0] === 8 && p[1] !== 2), false, 'Range keys stay on the phone');

@@ -348,10 +348,13 @@ test('touch scrolling defaults to 2× and accepts bounded live adjustments witho
   assert.equal(swipe(1), 80);
   h.$('touch-scroll-speed').value = '1.5'; h.$('touch-scroll-speed').emit('input');
   assert.equal(h.$('touch-scroll-speed-value').textContent, '1.5×'); assert.equal(swipe(2), 60);
-  for (const invalid of ['0', '4', '1.3', 'Infinity', 'bad']) {
+  for (const invalid of ['0', '9', '1.3', 'Infinity', 'bad']) {
     h.$('touch-scroll-speed').value = invalid; h.$('touch-scroll-speed').emit('input');
     assert.equal(h.$('touch-scroll-speed').value, '1.5');
   }
+  h.$('touch-scroll-speed').value = '8'; h.$('touch-scroll-speed').emit('input');
+  assert.equal(swipe(4), 120, 'High sensitivity retains the existing packet bound');
+  assert.equal(inputs(h).some(p => p[0] === 7 && Math.abs(p.readInt32BE(17)) > 120), false);
   const before = inputs(h).length;
   h.$('display').emit('wheel', { clientX: 200, clientY: 200, deltaX: 0, deltaY: 40, deltaMode: 0 });
   assert.equal(inputs(h).slice(before).at(-1).readInt32BE(17), 40);

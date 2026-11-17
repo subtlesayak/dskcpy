@@ -129,7 +129,7 @@ export function createTouchScroll({ gain = () => 1 } = {}) {
     move(dx, dy) {
       if (![dx, dy].every(Number.isFinite)) return null;
       const requested = gain();
-      const scale = Number.isFinite(requested) && requested >= .5 && requested <= 3 ? requested : 1;
+      const scale = Number.isFinite(requested) && requested >= .5 && requested <= 8 ? requested : 1;
       if (scale !== previousGain) { x = y = 0; previousGain = scale; }
       const nextX = x + dx * scale, nextY = y + dy * scale;
       if (![nextX, nextY].every(Number.isFinite)) return null;
