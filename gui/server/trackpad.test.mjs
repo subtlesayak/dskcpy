@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRelativeTrackpad } from '../receiver/trackpad.mjs';
-function fixture() {
+function fixture({ scrollGain = () => 1 } = {}) {
   const packets = []; let time = 0;
   const geometry = { width: 1920, height: 1080, cssWidth: 400, cssHeight: 225 };
-  const pad = createRelativeTrackpad({ geometry: () => geometry, emit: p => packets.push(p), now: () => time });
+  const pad = createRelativeTrackpad({ geometry: () => geometry, emit: p => packets.push(p), now: () => time, scrollGain });
   const event = (pointerId, clientX, clientY) => ({ pointerId, clientX, clientY });
   return { pad, packets, geometry, event, time: n => time = n };
 }
@@ -43,4 +43,19 @@ test('invalid geometry, stale pointers, excessive contacts and non-finite deltas
   geometry.cssWidth = 400; pad.toggleDrag(); pad.down(event(1, 1, 1)); pad.down(event(2, 2, 2)); pad.down(event(3, 3, 3));
   assert.equal(pad.dragging, false); assert.equal(pad.hasPointer(1), false); assert.equal(pad.hasPointer(3), false);
   pad.reset(); assert.equal(pad.position().x, 1919 / 2);
+});
+
+test('finger scroll gain does not alter relative pointer movement or explicit wheel scrolling', () => {
+  const positions = [];
+  for (const gain of [1, 3]) {
+    const { pad, packets, event } = fixture({ scrollGain: () => gain });
+    pad.down(event(1, 20, 20)); pad.pointerMove(event(1, 40, 20)); pad.up(event(1));
+    positions.push(pad.position());
+    const before = packets.length;
+    pad.down(event(2, 20, 100)); pad.down(event(3, 40, 100));
+    pad.pointerMove(event(2, 20, 80)); pad.pointerMove(event(3, 40, 80)); pad.up(event(3)); pad.up(event(2));
+    assert.equal(packets.slice(before).reduce((sum, p) => sum + (p.dy || 0), 0), 20 * gain);
+    pad.scroll(0, 40); assert.equal(packets.at(-1).dy, 40);
+  }
+  assert.deepEqual(positions[0], positions[1]);
 });
