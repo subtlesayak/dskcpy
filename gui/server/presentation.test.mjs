@@ -341,6 +341,28 @@ test('End presentation revokes only the picture role and cannot silently restart
   }
 });
 
+test('ended presentation status reconnect cannot restore input, renew expiry or replay a grant', async t => {
+  // Shortened only for this actual expiry test; ordinary fixtures retain the
+  // normal recovery budget. Reattach immediately, then await server retirement.
+  const f=await fixture(t,{resumeMs:1000,policy:{keyboard:true,captureRecovery:true}}),c=await f.pair();
+  c.ws.send('resume'); c.ws.ping(); await once(c.ws,'pong');
+  const ended=await f.post('stream/controller/end-presentation',c.cookie,{});
+  assert.equal(ended.status,200); assert.deepEqual(await ended.json(),{ended:true});
+  await until(()=>texts(c.ws).some(m=>m.type==='controller-state'&&m.presentationEnded));
+  const lost=once(c.ws,'close'); c.ws.close(4001,'Owned transient status loss'); await lost;
+  const restored=await f.open('stream/controller',c.cookie);
+  await until(()=>texts(restored).some(m=>m.type==='controller-authenticated'));
+  const state=texts(restored).find(m=>m.type==='controller-authenticated');
+  assert.equal(state.presentationEnded,true); assert.equal(state.presentationAvailable,false); assert.equal(state.controllerActive,false);
+  const input=Buffer.from(touchPacket(0,9,432,321,640,480)); f.clear();
+  restored.send('resume'); restored.send(input); restored.ping(); await once(restored,'pong');
+  assert.equal(f.bytes().includes(input),false); assert.equal(await f.bridge().restartNative(),false); assert.equal(f.calls(),1);
+  await once(restored,'close',{signal:AbortSignal.timeout(3000)});
+  assert.equal(f.receiver.status().connected,false); assert.equal(f.calls(),1);
+  assert.equal((await f.controllerStatus(c.cookie)).resumable,false);
+  assert.equal(await f.rejected('stream/controller',c.cookie),403);
+});
+
 test('controller navigation uses an independent public path and a strict role fragment', () => {
   const key = 'x'.repeat(43), url = new URL(controllerJoinUrl('https://receiver.test/', key));
   assert.match(url.pathname, /^\/controller\/[a-f0-9]{32}$/); assert.equal(url.search, '');
