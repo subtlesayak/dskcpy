@@ -1,5 +1,6 @@
 // The production mac_action implementation is compiled in this TU. Only fixed
-// audio/pause actions are invoked. No capture, permission query or OS input.
+// audio/pause actions and input-status ticks are invoked. All permission queries
+// and OS input are intercepted; no capture or real permission API is used.
 #import <Cocoa/Cocoa.h>
 #import <ScreenCaptureKit/ScreenCaptureKit.h>
 #import <VideoToolbox/VideoToolbox.h>
@@ -22,7 +23,8 @@ static ssize_t fake_send_all(sc_socket socket,const void *data,size_t length) {
     (void)socket;(void)data;++fake_socket_writes;return (ssize_t)length;
 }
 static unsigned permission_checks, posted_events;
-static bool fake_accessibility(void) { ++permission_checks; return true; }
+static bool accessibility_trusted = true;
+static bool fake_accessibility(void) { ++permission_checks; return accessibility_trusted; }
 static void fake_post(CGEventTapLocation location, CGEventRef event) {
     (void)location; (void)event; ++posted_events;
 }
@@ -63,6 +65,19 @@ int main(void) {
  @autoreleasepool {
     SCMacState *owner=[SCMacState new];assert(owner);
     struct mac_state *s=&owner->state;
+    int previous_permission = -1;
+    accessibility_trusted = false;
+    assert(mac_input_permission_tick(s, &previous_permission) && previous_permission == 0);
+    assert(!mac_input_permission_tick(s, &previous_permission));
+    accessibility_trusted = true;
+    assert(mac_input_permission_tick(s, &previous_permission) && previous_permission == 1);
+    assert(!mac_input_permission_tick(s, &previous_permission));
+    s->window_id = 42; unsigned checks_before = permission_checks;
+    assert(!mac_input_permission_tick(s, &previous_permission));
+    assert(permission_checks == checks_before); s->window_id = 0;
+    atomic_store(&s->disconnected, true);
+    assert(!mac_input_permission_tick(s, &previous_permission));
+    assert(permission_checks == checks_before); atomic_store(&s->disconnected, false);
     CMSampleBufferRef sample=synthetic_sample();
     assert(!atomic_load(&s->audio_enabled)&&s->audio_epoch==0);
     action(owner,SC_REVERSE_SYSTEM_ACTION_AUDIO_ENABLE);

@@ -79,6 +79,38 @@ async function waitFor(predicate) {
   assert.fail('Expected state transition did not occur');
 }
 
+test('actual Mac input permission follows only current full-desktop native stdout without interrupting capture', async t => {
+  const f = await fixture(t, { platform: 'darwin' });
+  await f.request('/api/stream/start', { connection: 'usb' });
+  const child = f.children[0].child;
+  assert.equal(f.publicState().nativeInputPermission, 'unreported');
+  child.stdout.write('DSKCPY_INPUT_PER'); child.stdout.write('MISSION blocked\n');
+  assert.equal(f.publicState().nativeInputPermission, 'blocked');
+  assert.equal(f.publicState().running, true); assert.equal(child.input, '');
+  child.stderr.write('DSKCPY_INPUT_PERMISSION ready\n');
+  child.stdout.write('DSKCPY_INPUT_PERMISSION PRIVATE_DIAGNOSTIC\n');
+  assert.equal(f.publicState().nativeInputPermission, 'blocked');
+  assert.ok(!JSON.stringify(f.publicState().logs).includes('PRIVATE_DIAGNOSTIC'));
+  child.stdout.write('DSKCPY_INPUT_PERMISSION ready\n');
+  assert.equal(f.publicState().nativeInputPermission, 'ready');
+  await f.request('/api/stream/stop', {}); await waitFor(() => !f.publicState().running);
+  assert.equal(f.publicState().nativeInputPermission, null);
+  await f.request('/api/stream/start', { connection: 'usb' });
+  assert.equal(f.publicState().nativeInputPermission, 'unreported');
+  child.stdout.emit('data', Buffer.from('DSKCPY_INPUT_PERMISSION ready\n'));
+  assert.equal(f.publicState().nativeInputPermission, 'unreported');
+});
+
+test('Mac input-permission metadata never labels a Windows capture', async t => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'dskcpy-input-win-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const binary = path.join(directory, 'fixture.exe'); await writeFile(binary, 'fake executable, never launched', { mode: 0o755 });
+  const f = await fixture(t, { platform: 'win32', environment: { ...process.env, SCRCPY_GUI_BINARY: binary } });
+  await f.request('/api/stream/start', { connection: 'usb' });
+  f.children[0].child.stdout.write('DSKCPY_INPUT_PERMISSION blocked\n');
+  assert.equal(f.publicState().nativeInputPermission, null);
+});
+
 test('phone startup history survives raw-log overflow and preserves a final partial phase', async t => {
   const f = await fixture(t);
   const started = await f.request('/api/stream/start', { connection: 'wifi', serial: 'fixture._adb-tls-connect._tcp' });
@@ -976,6 +1008,14 @@ async function switchingFixture(t,options={}) {
  await waitFor(()=>messages.some(m=>m.type==='window-state'));
  return {...f,ws,native,cookie,body,messages,select:()=>ws.send(JSON.stringify({type:'window-select',key:messages.find(m=>m.type==='window-state').windows[1].key}))};
 }
+test('selected-window view-only capture never advertises a Mac input permission', async t => {
+ const f = await switchingFixture(t);
+ assert.equal(f.publicState().nativeInputPermission, null);
+ f.children[0].child.stdout.write('DSKCPY_INPUT_PERMISSION blocked\nDSKCPY_INPUT_PERMISSION ready\n');
+ assert.equal(f.publicState().nativeInputPermission, null);
+ assert.equal(f.publicState().running, true);
+ assert.ok(!JSON.stringify(f.publicState().logs).includes('DSKCPY_INPUT_PERMISSION'));
+});
 test('explicit window switch waits for exact drained child close and uses only approved target arguments',async t=>{
  const f=await switchingFixture(t);const old=f.children[0].child,ended=once(f.ws,'close');f.select();await ended;
  old.exitCode=2;old.emit('exit',2);assert.equal(f.children.length,1);assert.equal(f.publicState().running,true);
