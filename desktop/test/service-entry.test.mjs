@@ -1,9 +1,51 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Worker } from 'node:worker_threads';
-import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, writeFile, rm, mkdir, copyFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+
+test('production service IPC carries only role status and rejects malformed presentation state', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'dskcpy-role-ipc-'));
+  await mkdir(path.join(directory, 'desktop'));
+  await mkdir(path.join(directory, 'gui/server'), { recursive: true });
+  for (const file of ['service-entry.cjs', 'presentation-state.mjs', 'usb-devices.mjs'])
+    await copyFile(path.resolve('desktop', file), path.join(directory, 'desktop', file));
+  // Production entry/serializer, fake service effects. No socket, invitation,
+  // capture, native input, OS permission or private route is opened.
+  await writeFile(path.join(directory, 'gui/server/service.mjs'), `export function createControlService() { return {
+    listen: async () => 0, publicState: () => globalThis.fixtureStatus,
+    shutdown: async () => {}, shutdownIfIdle: async () => true }; }`);
+  const worker = new Worker(`const { parentPort, workerData } = require('node:worker_threads');
+    globalThis.fixtureStatus = { running: true, browser: {} };
+    globalThis.fetch = async () => new Response(JSON.stringify({ mode:'internet', url:'https://example.invalid', key:'invitation',
+      expiresAt:1, status:globalThis.fixtureStatus }));
+    process.parentPort = { on: (_event, fn) => parentPort.on('message', data => {
+      if (data.fixtureStatus) globalThis.fixtureStatus = data.fixtureStatus;
+      fn({data}); }), postMessage: data => parentPort.postMessage(data) };
+    require(workerData);`, { eval: true, workerData: path.join(directory, 'desktop/service-entry.cjs') });
+  let id = 0;
+  const request = (action, fixtureStatus) => new Promise((resolve, reject) => {
+    const current = ++id;
+    const timeout = setTimeout(() => { worker.off('message', listener); reject(Error('Role IPC timeout')); }, 5000);
+    const listener = value => { if (value.id !== current) return; clearTimeout(timeout); worker.off('message', listener); resolve(value); };
+    worker.on('message', listener); worker.postMessage({ id: current, action, fixtureStatus });
+  });
+  try {
+    const browser = { waiting:false, connected:true, presentation:true, presentationEnded:true, presentationAvailable:false,
+      controllerConnected:true, controllerActive:false, controllerAuthorized:true, privateDiagnostic:'PRIVATE-DIAGNOSTIC' };
+    const fixtureStatus = { running:true, browser, nativeInputPermission:'blocked', privateDiagnostic:'PRIVATE-DIAGNOSTIC' };
+    const result = await request('status', fixtureStatus);
+    assert.deepEqual(result.value, { running:true, browser:{ waiting:false, connected:true, presentation:{ ended:true,
+      available:false, controllerConnected:true, controllerActive:false, controllerAuthorized:true } }, nativeInputPermission:'blocked' });
+    assert.ok(!JSON.stringify(result).includes('PRIVATE-DIAGNOSTIC'));
+    const invitation = await request('invite', fixtureStatus);
+    assert.deepEqual(invitation.value.status.browser, result.value.browser);
+    assert.ok(!JSON.stringify(invitation).includes('PRIVATE-DIAGNOSTIC'));
+    const malformed = await request('status', { running:true, browser:{ ...browser, controllerActive:'PRIVATE-DIAGNOSTIC' } });
+    assert.deepEqual(malformed, { id:3, ok:false });
+  } finally { await worker.terminate(); await rm(directory, { recursive:true, force:true }); }
+});
 
 test('service IPC runs the existing backend on its own ephemeral controller without capture', { skip: process.platform === 'win32' }, async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'dskcpy-host-ipc-'));

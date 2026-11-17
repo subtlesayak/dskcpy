@@ -29,6 +29,8 @@ h1 { font-size: clamp(27px, 5vw, 34px); line-height: 1.17; font-weight: 650; let
 .hint { color: #b7c9d2; font-size: 13px; margin: 0; }
 .sharing-card { display: flex; align-items: flex-start; gap: 13px; border: 1px solid #538f68; background: #102b21; border-radius: 16px; padding: 18px; margin-block-end: 28px; }
 .sharing-card svg { flex-shrink: 0; color: #9de3b4; }
+.sharing-card.is-ended { border-color: #304a58; background: #101f27; }
+.sharing-card.is-ended svg { color: #b7c9d2; }
 .notice { color: #dbe8ee; min-block-size: 24px; margin-block: 14px; font-size: 14px; overflow-wrap: anywhere; }
 footer { display: flex; gap: 10px; align-items: flex-start; padding: 20px 28px 24px; border-block-start: 1px solid #253e4b; color: #a8bdc8; font-size: 12px; }
 footer svg { flex-shrink: 0; margin-block-start: 2px; }

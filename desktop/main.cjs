@@ -5,7 +5,7 @@ const { pathToFileURL } = require('node:url');
 app.setName('dskcpy Host');
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
-  let window, tray, host, backend, privateRoute, startup, timer, quitting = false, refreshing = false;
+  let window, tray, host, backend, privateRoute, startup, requestStop, timer, quitting = false, refreshing = false;
   const hostRoot = app.isPackaged ? path.join(process.resourcesPath, 'host') : path.join(__dirname, 'stage/host');
   const page = pathToFileURL(path.join(__dirname, '../gui/dist-desktop/desktop/index.html')).href;
   const importLocal = name => import(pathToFileURL(path.join(__dirname, name)).href);
@@ -24,11 +24,14 @@ else {
     snapshot = { ...snapshot, startup: startup?.snapshot() };
     if (window && !window.isDestroyed()) window.webContents.send('host:changed', snapshot);
     if (!tray) return;
-    tray.setToolTip(snapshot.phase === 'sharing' ? 'dskcpy — sharing your screen' : 'dskcpy Host');
+    const sharingLabel = snapshot.presentation?.ended ? 'Presentation ended'
+      : snapshot.presentation ? snapshot.presentation.available ? 'Presentation connected' : 'Waiting for presentation'
+      : snapshot.phase === 'sharing' ? 'Sharing your screen' : 'dskcpy Host';
+    tray.setToolTip(sharingLabel === 'dskcpy Host' ? sharingLabel : `dskcpy — ${sharingLabel}`);
     tray.setContextMenu(Menu.buildFromTemplate([
-      { label: snapshot.phase === 'sharing' ? 'Sharing your screen' : 'dskcpy Host', enabled: false },
+      { label: sharingLabel, enabled: false },
       { label: 'Open dskcpy', click: show },
-      { label: 'Stop sharing', enabled: snapshot.canStop, click: () => host.stop().catch(() => show()) },
+      { label: 'Stop sharing', enabled: snapshot.canStop, click: () => requestStop().catch(() => show()) },
       { type: 'separator' }, { label: 'Quit dskcpy', click: () => app.quit() },
     ]));
   }
@@ -58,8 +61,8 @@ else {
     Promise.resolve(host?.close()).catch(() => {}).finally(() => app.quit());
   });
   app.whenReady().then(async () => {
-    const [{ HostController }, { OwnedBackend }, { createPrivateRoute }, { StartupPreference }] = await Promise.all([
-      importLocal('host-controller.mjs'), importLocal('owned-backend.mjs'), importLocal('private-route.mjs'), importLocal('startup-preference.mjs'),
+    const [{ HostController }, { OwnedBackend }, { createPrivateRoute }, { StartupPreference }, { createStopAction }] = await Promise.all([
+      importLocal('host-controller.mjs'), importLocal('owned-backend.mjs'), importLocal('private-route.mjs'), importLocal('startup-preference.mjs'), importLocal('stop-action.mjs'),
     ]);
     startup = new StartupPreference({ platform: process.platform, executable: app.getPath('exe'),
       available: app.isPackaged && ['darwin', 'win32'].includes(process.platform) && (process.platform !== 'darwin' || app.isInApplicationsFolder()),
@@ -84,6 +87,15 @@ else {
       const usb = connection === 'usb' ? { available: readiness.adb, ...(readiness.adb ? await backend.usbDevices() : { devices: [], error: false }) } : undefined;
       return { route, usb, permissions: permissions(), runtimeReady: readiness.ready, features: { keyboard: readiness.keyboard, clipboard: readiness.clipboard } };
     } });
+    requestStop = createStopAction({ snapshot: () => ({ ...host.snapshot(), canStop: !quitting && host.snapshot().canStop }),
+      stop: () => host.stop(), confirm: async snapshot => {
+        const { response } = await dialog.showMessageBox(window, { type: 'question', title: 'Stop sharing?',
+          message: 'Stop sharing this desktop?',
+          detail: snapshot.presentation?.ended ? 'This closes the remaining phone controller session and ends access to this computer.'
+            : 'This ends desktop video, audio and remote mouse and keyboard control.',
+          buttons: ['Cancel', 'Stop sharing'], defaultId: 0, cancelId: 0, noLink: true });
+        return response === 1;
+      } });
     window = new BrowserWindow({ width: 620, height: 740, minWidth: 360, minHeight: 420,
       title: 'dskcpy Host', backgroundColor: '#0a1419', show: false,
       webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true,
@@ -109,7 +121,7 @@ else {
     handle('connection', connection => host.setConnection(connection));
     handle('usb-device', id => host.selectUsbDevice(id));
     handle('clipboard-allowed', allowed => host.setClipboardAllowed(allowed));
-    handle('stop', () => host.stop());
+    handle('stop', () => requestStop());
     handle('refresh', () => refresh());
     handle('screen-permission', async () => {
       if (process.platform !== 'darwin') return;

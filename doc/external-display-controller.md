@@ -132,6 +132,37 @@ and is not enabled merely by pairing a controller.
 
 ## Independent lifecycle
 
+The native Host app receives only fixed presentation/controller status booleans
+through its utility-process IPC. It distinguishes a connected presentation,
+an unavailable presentation and an ended presentation. Phone-control status
+separately reports connected, paused, disconnected or not yet paired. These
+states describe browser connectivity; they never claim that a physical TV is
+casting. Ending the presentation leaves the remaining session stoppable without
+asking for unnecessary mouse/keyboard permissions or claiming video continues.
+
+Explicit **Stop sharing** in the Host window or menu-bar/system-tray menu asks
+**Stop sharing this desktop?** with **Cancel** as the default and **Stop sharing**
+as the confirming action. Cancel preserves the current session. Repeated clicks
+share one pending question. Cancelling an unused invitation remains immediate;
+programmatic cleanup and permission/native-stop handling do not wait for a
+dialog. The existing browser power action also asks before ending the session.
+
+### Host status and action copy review
+
+| Severity | Location | Before | After | Why |
+| --- | --- | --- | --- | --- |
+| High, fixed | `gui/src/desktop/main.tsx` | Your screen is being shared after End presentation | Presentation ended; remaining session can be stopped | Distinguish ended media from remaining authorization. |
+| High, fixed | `desktop/main.cjs`, `desktop/stop-action.mjs` | Explicit Host Stop immediately ends access | Cancel / Stop sharing confirmation | Avoid accidental termination from the window or tray. |
+| Medium, fixed | `gui/src/desktop/main.tsx` | No phone-role status in the Host app | Phone controls connected, paused, disconnected or unpaired | Give a specific next action without claiming physical casting support. |
+
+Copy decision: **Approve** for these inspected English status and action strings.
+Chromium/WebKit generated flows cover keyboard traversal, visible Stop focus,
+Cancel/Confirm, narrow/RTL and 200% CSS zoom layouts. A hidden packaged Electron
+fixture exercises the real preload/IPC and packaged Stop helper with a synthetic
+prompt. Actual native OS dialog behavior, assistive-technology announcements,
+translation and physical casting remain **Not verified**; these checks do not
+qualify an installed app or live device.
+
 | Event/action | Controller effect | Presentation/session effect |
 | --- | --- | --- |
 | Controller blur, hidden, socket loss or leave | Immediately release held input; discard queued motion/text and clipboard work; retire input ownership as appropriate | Continue media if the platform permits; show controller-away status |

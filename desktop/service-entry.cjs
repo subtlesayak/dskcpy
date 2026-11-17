@@ -2,10 +2,11 @@
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const parent = process.parentPort;
-let service, origin, usbDevices;
+let service, origin, usbDevices, browserSummary;
 const startup = (async () => {
   const { createControlService } = await import(pathToFileURL(path.join(__dirname, '../gui/server/service.mjs')).href);
   const { UsbDevices } = await import(pathToFileURL(path.join(__dirname, 'usb-devices.mjs')).href);
+  ({ browserSummary } = await import(pathToFileURL(path.join(__dirname, 'presentation-state.mjs')).href));
   usbDevices = new UsbDevices();
   service = createControlService({ configuredPort: 0, browserPort: 27180, trustedDevicesPath: process.env.DSKCPY_TRUST_STORE || null });
   origin = `http://127.0.0.1:${await service.listen()}`;
@@ -34,7 +35,7 @@ parent.on('message', async ({ data }) => {
       case 'ready': await api('/api/status'); value = true; break;
       case 'status': {
         const status = service.publicState();
-        value = { running: status.running, browser: { waiting: status.browser.waiting, connected: status.browser.connected },
+        value = { running: status.running, browser: browserSummary(status.browser),
           nativeInputPermission: ['ready', 'blocked', 'unreported'].includes(status.nativeInputPermission) ? status.nativeInputPermission : null }; break;
       }
       case 'readiness': {
@@ -81,7 +82,7 @@ parent.on('message', async ({ data }) => {
     if (data.action === 'invite') value = { mode: value.mode, url: value.url, key: value.key,
       openedOnPhone: value.openedOnPhone === true,
       expiresAt: value.expiresAt, status: { running: value.status.running,
-        browser: { waiting: value.status.browser.waiting, connected: value.status.browser.connected } } };
+        browser: browserSummary(value.status.browser) } };
     if (data.action === 'stop') value = true;
     parent.postMessage({ id: data.id, ok: true, value });
   } catch (error) { parent.postMessage({ id: data.id, ok: false,
