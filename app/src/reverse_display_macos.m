@@ -1096,12 +1096,24 @@ sc_reverse_display_macos_run(sc_socket video_socket, sc_socket control_socket, c
                         display_check_us = display_now + 250000;
                         mac_input_permission_tick(s, &previous_input_permission);
                         if (options->reverse_text_focus && s->keyboard_enabled) {
-                            int focused = atomic_load(&s->paused) || mac_session_ended(s) ? -1 : sc_reverse_macos_editable_focus();
+                            struct sc_reverse_macos_focus_geometry geometry = {0};
+                            int focused = atomic_load(&s->paused) || mac_session_ended(s) ? -1
+                                : options->reverse_text_focus_geometry ? sc_reverse_macos_editable_focus_geometry(s->display_bounds, &geometry)
+                                : sc_reverse_macos_editable_focus();
                             bool clicked = atomic_exchange(&s->focus_probe_pending, false);
                             if (focused != previous_focus || clicked) {
                                 // Fixed one-bit/unknown IPC, not field contents or app identity.
                                 printf("DSKCPY_TEXT_FOCUS %c\n", focused < 0 ? '?' : focused ? '1' : '0'); fflush(stdout);
                                 previous_focus = focused;
+                            }
+                            if (options->reverse_text_focus_geometry) {
+                                // Current geometry only, bounded to this display. The
+                                // controller consumes it as metadata, never a user log.
+                                if (focused == 1 && geometry.valid)
+                                    printf("DSKCPY_FOCUS_GEOMETRY %c %u %u %u %u\n", geometry.caret ? 'C' : 'F',
+                                           (unsigned)geometry.x, (unsigned)geometry.y, (unsigned)geometry.width, (unsigned)geometry.height);
+                                else printf("DSKCPY_FOCUS_GEOMETRY ?\n");
+                                fflush(stdout);
                             }
                         }
                         if (s->keyboard_enabled && (!AXIsProcessTrusted() || atomic_load(&s->keyboard_release_pending))) mac_cancel_keyboard(s);

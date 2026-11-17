@@ -9,7 +9,7 @@ import { resolveRuntime, inspectReadiness } from './runtime.mjs';
 import { parseMdnsServices } from './discovery.mjs';
 import { createBrowserReceiver } from './browser.mjs';
 import { createTrustedDevices } from './trusted-devices.mjs';
-import { browserJoinUrl } from '../receiver/protocol.mjs';
+import { browserJoinUrl, focusGeometry } from '../receiver/protocol.mjs';
 import { createNativeStartupHistory } from './native-startup.mjs';
 
 import {
@@ -424,6 +424,7 @@ export function createControlService({
         // Typing into a receiver focused on the host itself would feed the
         // injected events back into its own typing field. Local preview omits it.
         textFocus: mode !== 'local' && !config.windowId && readiness.features?.browserTextFocus === true,
+        textFocusGeometry: mode !== 'local' && !config.windowId && readiness.features?.browserTextFocusGeometry === true,
         keyboard: mode !== 'local' && !config.windowId && readiness.features?.browserKeyboard === true,
         clipboard: mode !== 'local' && !config.windowId && config.browserClipboard === true && readiness.features?.browserClipboard === true,
         rememberProfile: mode === 'internet' && !config.windowId ? { maxSize: config.maxSize, maxFps: config.maxFps, bitRateMbps: config.bitRateMbps } : null }, grant);
@@ -550,6 +551,7 @@ export function createControlService({
       if (config.browserWindowAudio && !state.readiness?.features?.browserWindowAudio)
         throw new Error('Application audio is unavailable on this host. Create a new invitation with it off.');
       const args = buildScrcpyArgs({ ...config, browserKeyboard: browserBridge?.keyboard === true, browserTextFocus: browserBridge?.textFocus === true,
+        browserTextFocusGeometry: browserBridge?.textFocusGeometry === true,
         browserClipboard: browserBridge?.clipboard === true, browserAdaptiveVideo: browserBridge?.adaptiveVideo === true }, internetBridge?.port);
       state.command = formatCommand(path.basename(runtime.executable), args);
       appendLog('gui', 'Starting ' + state.command);
@@ -592,6 +594,15 @@ export function createControlService({
             if (status && streamProcess === child && browserBridge?.keyboard) browserBridge.keyboardStatus(status[1]);
             return true;
           }
+          if (line.startsWith('DSKCPY_FOCUS_GEOMETRY ')) {
+            const unknown = line === 'DSKCPY_FOCUS_GEOMETRY ?';
+            const match = /^DSKCPY_FOCUS_GEOMETRY ([CF]) (0|[1-9][0-9]{0,4}) (0|[1-9][0-9]{0,4}) ([1-9][0-9]{0,4}) ([1-9][0-9]{0,4})$/.exec(line);
+            const target = match && focusGeometry({ kind: match[1] === 'C' ? 'caret' : 'field',
+              x: Number(match[2]), y: Number(match[3]), width: Number(match[4]), height: Number(match[5]) });
+            if ((unknown || target) && platform === 'darwin' && streamProcess === child && browserBridge?.textFocusGeometry)
+              browserBridge.focusGeometryHint(unknown ? null : target);
+            return true;
+          }
           if (!line.startsWith('DSKCPY_TEXT_FOCUS ')) return false;
           // Consume metadata separately from user logs. Only the current child
           // and negotiated full-desktop keyboard session can publish a hint.
@@ -602,7 +613,7 @@ export function createControlService({
         });
       });
       child.stderr.on('data', (chunk) => consumeOutput('stderr', chunk, line => {
-        if (line.startsWith('DSKCPY_INPUT_PERMISSION ')) return true;
+        if (['DSKCPY_INPUT_PERMISSION ', 'DSKCPY_TEXT_FOCUS ', 'DSKCPY_FOCUS_GEOMETRY '].some(prefix => line.startsWith(prefix))) return true;
         if (streamProcess === child) startupAttempt?.observe(line);
         return false;
       }));
@@ -622,7 +633,8 @@ export function createControlService({
             const finalReason = source === 'stdout' && /^DSKCPY_CAPTURE_END (display-change|sleep|permission-lost|user-stop)$/.exec(logRemainders[source]);
             if (finalReason && platform === 'darwin' && streamProcess === child && browserBridge && readiness.features?.browserCaptureRecovery)
               captureEndReason = finalReason[1];
-            else if (!logRemainders[source].startsWith('DSKCPY_INPUT_PERMISSION ')) appendLog(source, logRemainders[source]);
+            else if (!['DSKCPY_INPUT_PERMISSION ', 'DSKCPY_TEXT_FOCUS ', 'DSKCPY_FOCUS_GEOMETRY ']
+              .some(prefix => logRemainders[source].startsWith(prefix))) appendLog(source, logRemainders[source]);
             logRemainders[source] = '';
           }
         }

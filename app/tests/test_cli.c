@@ -266,6 +266,19 @@ static void test_mac_capture_options(void) {
     audio_args.opts = scrcpy_options_default;
     assert(!scrcpy_parse_args(&audio_args, ARRAY_LEN(no_audio), no_audio));
     struct scrcpy_cli_args args = {.opts = scrcpy_options_default};
+    char *geometry_without_focus[] = {"scrcpy", "--reverse-display", "--reverse-socket=1234", "--reverse-keyboard", "--reverse-text-focus-geometry"};
+    assert(!scrcpy_parse_args(&args, ARRAY_LEN(geometry_without_focus), geometry_without_focus));
+    args.opts = scrcpy_options_default;
+    char *geometry[] = {"scrcpy", "--reverse-display", "--reverse-socket=1234", "--reverse-keyboard", "--reverse-text-focus", "--reverse-text-focus-geometry"};
+#ifdef HAVE_REVERSE_MACOS
+    assert(scrcpy_parse_args(&args, ARRAY_LEN(geometry), geometry)); assert(args.opts.reverse_text_focus_geometry);
+#else
+    assert(!scrcpy_parse_args(&args, ARRAY_LEN(geometry), geometry));
+#endif
+    args.opts = scrcpy_options_default;
+    char *geometry_window[] = {"scrcpy", "--reverse-display", "--reverse-socket=1234", "--reverse-window=17", "--reverse-keyboard", "--reverse-text-focus", "--reverse-text-focus-geometry"};
+    assert(!scrcpy_parse_args(&args, ARRAY_LEN(geometry_window), geometry_window));
+    args.opts = scrcpy_options_default;
     char *window[] = {"scrcpy", "--reverse-display", "--reverse-window=17"};
 #ifdef HAVE_REVERSE_MACOS
     assert(scrcpy_parse_args(&args, ARRAY_LEN(window), window)); assert(args.opts.reverse_window == 17);

@@ -4,6 +4,17 @@ export const MEDIA_FALLBACK_PROTOCOL = 'dskcpy.receiver.media-fallback.v1';
 // Shared browser/host recovery bound; it does not extend invitation or session lifetime.
 export const BROWSER_RESUME_MS = 5 * 60 * 1000;
 
+// Advisory field/caret bounds in the captured display's normalized grid. The
+// fixed shape deliberately excludes text, character indices and app identity.
+export function focusGeometry(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+      || Object.keys(value).length !== 5 || !['caret', 'field'].includes(value.kind)
+      || !['x', 'y', 'width', 'height'].every(key => Number.isInteger(value[key]))
+      || value.x < 0 || value.y < 0 || value.width <= 0 || value.height <= 0
+      || value.x + value.width > 65535 || value.y + value.height > 65535) return null;
+  return { kind: value.kind, x: value.x, y: value.y, width: value.width, height: value.height };
+}
+
 export function browserJoinUrl(address, key) {
   if (!/^[A-Za-z0-9_-]{32}$/.test(key)) throw new Error('Invalid browser invitation.');
   const url = new URL(address);

@@ -153,6 +153,10 @@ test('native focus reporting is browser keyboard only and omitted for window/And
   assert.ok(buildScrcpyArgs({...base,browserKeyboard:true,browserTextFocus:true},1234).includes('--reverse-text-focus'));
   assert.equal(buildScrcpyArgs({...base,browserTextFocus:true},1234).includes('--reverse-text-focus'),false);
   assert.equal(buildScrcpyArgs({...base,connection:'usb',browserKeyboard:true,browserTextFocus:true},1234).includes('--reverse-text-focus'),false);
+  const capable = { ...base, browserKeyboard: true, browserTextFocus: true, browserTextFocusGeometry: true };
+  assert.ok(buildScrcpyArgs(capable, 1234).includes('--reverse-text-focus-geometry'));
+  for (const changed of [{ browserTextFocus: false }, { browserKeyboard: false }, { connection: 'usb' }, { windowId: 17 }])
+    assert.equal(buildScrcpyArgs({ ...capable, ...changed }, 1234).includes('--reverse-text-focus-geometry'), false);
 });
 
 test('clipboard consent is strict, browser-only and passed only with full desktop keyboard', () => {

@@ -25,6 +25,14 @@ test('closing typing restores the prior zoom and normalized pan after keyboard/o
   f.typing.end(); f.layout(full);
   for (const key of ['scale', 'x', 'y']) assert.ok(Math.abs(f.view.state()[key] - before[key]) < 1e-9);
 });
+test('closing and reopening typing before the queued fit retains the original view', () => {
+  const f=fixture();f.view.zoomBy(2);f.view.panBy(70,-30);const before=f.view.state();
+  f.typing.remember({x:1200,y:700,width:1600,height:900});f.typing.begin();f.layout(docked);
+  f.typing.end();f.typing.begin();f.layout(docked);
+  f.typing.end();f.layout(full);
+  for(const key of ['scale','x','y'])assert.ok(Math.abs(f.view.state()[key]-before[key])<1e-9, key);
+});
+
 test('no remote tap means no guessed focus zoom, and stale source coordinates are discarded', () => {
   const f = fixture(); f.typing.begin(); f.layout(docked); assert.equal(f.view.state().scale, 1);
   f.typing.remember({ x: 500, y: 200, width: 1600, height: 900 }); f.layout(docked); assert.ok(f.view.state().scale > 4);
@@ -44,4 +52,33 @@ test('invalid geometry and out-of-image taps cannot create non-finite transforms
   assert.equal(f.typing.hasTarget(), false);
   f.typing.begin(); f.typing.layout({ width: 0, height: 0, contentWidth: 0, contentHeight: 0 });
   f.layout(full); assert.deepEqual(f.view.state(), { scale: 1, x: 0, y: 0 });
+});
+
+const caret = { kind: 'caret', x: 40000, y: 39000, width: 30, height: 1400 };
+test('a validated caret frames readable typing without a prior desktop tap', () => {
+  const f = fixture(); f.typing.begin(); f.layout(docked);
+  assert.equal(f.typing.setFocusGeometry(caret, 1600), true); f.layout(docked);
+  const state = f.view.state(), x = (caret.x + caret.width / 2) / 65535, y = (caret.y + caret.height / 2) / 65535;
+  assert.ok(state.scale > 4 && state.scale <= 10);
+  assert.ok(caret.height / 65535 * docked.contentHeight * state.scale >= 18);
+  assert.ok(Math.abs(docked.height / 2 + (y - .5) * docked.contentHeight * state.scale + state.y - docked.height / 2) < 1e-8);
+  assert.ok(docked.width / 2 + (x - .5) * docked.contentWidth * state.scale + state.x >= 0);
+});
+test('an accepted tap supersedes queued old-field geometry; absent geometry clears that exclusion', () => {
+  const f = fixture(); f.typing.setFocusGeometry(caret, 1600); f.typing.begin(); f.layout(docked);
+  f.typing.remember({ x: 300, y: 250, width: 1600, height: 900 });
+  assert.equal(f.typing.setFocusGeometry(caret, 1600), false);
+  f.typing.remember({ x: 320, y: 260, width: 1600, height: 900 });
+  assert.equal(f.typing.setFocusGeometry(caret, 1600), false);
+  f.typing.setFocusGeometry(null, 1600);
+  assert.equal(f.typing.setFocusGeometry(caret, 1600), true);
+});
+test('field fallback preserves a tap inside the field and typing close restores the saved view', () => {
+  const f = fixture(); f.view.zoomBy(1.5); f.view.panBy(40, -10); const before = f.view.state();
+  f.typing.remember({ x: 800, y: 450, width: 1600, height: 900 }); f.typing.begin();
+  assert.equal(f.typing.setFocusGeometry({ kind: 'field', x: 20000, y: 20000, width: 20000, height: 20000 }, 1600), true);
+  f.layout(docked); assert.ok(f.view.state().scale > 4);
+  f.typing.end(); f.typing.setFocusGeometry(null, 1600); f.layout(full);
+  assert.deepEqual(f.view.state(), before);
+  f.typing.reset({ restoreView: false }); assert.equal(f.typing.hasTarget(), false);
 });
