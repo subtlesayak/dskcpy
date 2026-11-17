@@ -1,3 +1,4 @@
+import { confirmReceiverAction } from './browser-actions.mjs';
 // Owned receiver + generated pixels and fake native controls only. No capture,
 // permissions, OS input, actual windows, devices or installed service.
 import {chromium,webkit} from 'playwright';
@@ -87,7 +88,7 @@ try{for(const variant of variants.filter(v=>!process.argv[3]||v.name===process.a
   const box=await close.boundingBox();assert.ok(box.x>=0&&box.y>=0&&box.x+box.width<=variant.width&&box.y+box.height<=variant.height);
   await page.screenshot({path:path.join(output,variant.name+'.png')});
   assert.deepEqual(errors,[]);
-  await page.getByRole('button',{name:'Disconnect',exact:true}).click();await until(()=>!receiver.status().connected,'explicit Stop');
+  await confirmReceiverAction(page);await until(()=>!receiver.status().connected,'explicit Stop');
   assert.equal(await page.locator('#window-choice-list canvas').count(),0);assert.equal(await page.locator('#choose-window').isHidden(),true);
   results.push({...variant,generatedMedia:true,exactTargets:[11,12,11],sameGrant:true,simultaneousNativeMax:maxActive,actualDecodedThumbnails:true,viewOnly:true,physicalDevice:false});
  }catch(error){await writeFile(path.join(output,variant.name+'-diagnostic.json'),JSON.stringify({error:error.message,sessions:sessions.map(s=>({index:s.index,paused:s.paused,closed:s.socket.destroyed})),page:await page.evaluate(()=>({errors:document.querySelector('#error').textContent,status:document.querySelector('#status').textContent,auth:window.__auth,closed:window.__closed,windowStates:window.__messages.map(({current,windows,...m})=>({switching:m.switching,selected:windows.findIndex(w=>w.key===current),count:windows.length}))}))},null,2));await page.screenshot({path:path.join(output,variant.name+'-failure.png')}).catch(()=>{});throw error;}

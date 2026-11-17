@@ -107,6 +107,7 @@ function receiver(t, { portrait = false, lockFails = false, webRtc = false, webC
     }
   }
   const window = new Target(); window.isSecureContext = true;
+  window.confirm = () => true; // Existing teardown paths explicitly accept Stop.
   if (scrollStorage !== undefined) window.localStorage = scrollStorage;
   if (webAudio) window.AudioDecoder = SoundDecoder;
   if (visualHeight) { window.visualViewport = new Target(); window.visualViewport.height = visualHeight; }
@@ -155,6 +156,28 @@ function receiver(t, { portrait = false, lockFails = false, webRtc = false, webC
   return { context, $, document, window, socket, sockets, locationState, decoders, rtcReceivers, media, orientation, historyChanges, cssVariables, soundDecoders, audioSources, audioContexts,
     notifyResize: () => resize(), flushResize, animationFrames, reflow: () => { resize(); flushResize(); } };
 }
+
+test('power action requires confirmation; Cancel keeps the stream and Accept stops it', t => {
+  const h = receiver(t, { keyboard: true }); let prompts = 0;
+  h.$('keyboard').emit('click'); h.$('keyboard-input').emit('keydown', { code: 'ControlLeft', key: 'Control' });
+  h.window.confirm = message => { prompts++; assert.match(message, /Stop sharing this desktop/); return false; };
+  h.$('disconnect').emit('click');
+  assert.equal(prompts, 1); assert.equal(h.socket.readyState, 1); assert.equal(h.$('join-panel').hidden, true);
+  assert.ok(h.socket.sent.some(p => Buffer.isBuffer(p) && p.equals(Buffer.from([8, 2, 0, 0, 0]))), 'held input is released before the modal');
+  h.window.confirm = () => { prompts++; return true; }; h.$('disconnect').emit('click');
+  assert.equal(prompts, 2); assert.equal(h.socket.readyState, 3); assert.equal(h.$('join-panel').hidden, false);
+});
+
+test('errors end invalid connections without a user-action confirmation', t => {
+  const h = receiver(t); let prompts = 0; h.window.confirm = () => { prompts++; return false; };
+  h.socket.emit('message', { data: JSON.stringify({ type: 'not-a-valid-message' }) });
+  assert.equal(prompts, 0); assert.equal(h.socket.readyState, 3);
+});
+
+test('a blocked confirmation never silently stops sharing', t => {
+  const h = receiver(t); h.window.confirm = undefined; h.$('disconnect').emit('click');
+  assert.equal(h.socket.readyState, 1); assert.match(h.$('error').textContent, /could not show the stop confirmation/);
+});
 
 test('stage resize notifications coalesce outside observer delivery and use the latest viewport without releasing keys', t => {
   const h = receiver(t, {keyboard:true,visualHeight:400});
