@@ -366,7 +366,9 @@ test('background pause, abrupt loss and replacement socket stay on one bounded n
 
 test('desktop stop, detached viewer stop, expiry and native exit revoke resumption', async (t) => {
   for (const cause of ['desktop', 'viewer', 'expiry', 'lifetime', 'native']) {
-    const f = await fixture(t, { resumeMs: 50, lifetimeMs: cause === 'lifetime' ? 50 : 43200000 });
+    // Only the expiry case should race a short resume deadline. Viewer Stop
+    // must exercise its authorization before expiry, including under build load.
+    const f = await fixture(t, { resumeMs: cause === 'expiry' ? 50 : 300000, lifetimeMs: cause === 'lifetime' ? 50 : 43200000 });
     const ws = await login(f), cookie = ws.cookie.split(';')[0];
     if (cause === 'desktop') f.receiver.cancel();
     if (cause === 'native') f.native().destroy();
@@ -654,6 +656,7 @@ test('focus geometry subscription is discarded on socket replacement', async t =
 for (const inputPolicy of [{ keyboard: false, textFocus: true, textFocusGeometry: true },
   { keyboard: true, textFocus: false, textFocusGeometry: true },
   { keyboard: true, textFocus: true, textFocusGeometry: true, viewOnly: true },
+  { keyboard: true, textFocus: true, textFocusGeometry: true, viewOnly: true, windowAudio: true },
   { keyboard: true, textFocus: true }]) test('geometry cannot bootstrap host capability '+JSON.stringify(inputPolicy), async t => {
   const f = await fixture(t, { inputPolicy }); const ws = await login(f);
   assert.equal(f.bridge().textFocusGeometry, false);

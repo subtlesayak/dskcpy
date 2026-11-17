@@ -25,6 +25,14 @@ test('closing typing restores the prior zoom and normalized pan after keyboard/o
   f.typing.end(); f.layout(full);
   for (const key of ['scale', 'x', 'y']) assert.ok(Math.abs(f.view.state()[key] - before[key]) < 1e-9);
 });
+test('closing and reopening typing before the queued fit retains the original view', () => {
+  const f=fixture();f.view.zoomBy(2);f.view.panBy(70,-30);const before=f.view.state();
+  f.typing.remember({x:1200,y:700,width:1600,height:900});f.typing.begin();f.layout(docked);
+  f.typing.end();f.typing.begin();f.layout(docked);
+  f.typing.end();f.layout(full);
+  for(const key of ['scale','x','y'])assert.ok(Math.abs(f.view.state()[key]-before[key])<1e-9, key);
+});
+
 test('no remote tap means no guessed focus zoom, and stale source coordinates are discarded', () => {
   const f = fixture(); f.typing.begin(); f.layout(docked); assert.equal(f.view.state().scale, 1);
   f.typing.remember({ x: 500, y: 200, width: 1600, height: 900 }); f.layout(docked); assert.ok(f.view.state().scale > 4);

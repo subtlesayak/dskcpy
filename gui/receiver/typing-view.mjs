@@ -30,7 +30,9 @@ export function createTypingView(view) {
     view.frameAt(point.x, point.y, scale);
   }
   return {
-    begin() { if (!active) { saved = capture(); pendingRestore = null; active = true; } },
+    // A close/reopen can be coalesced before the next animation-frame fit.
+    // Preserve the pre-typing snapshot rather than saving the magnified view.
+    begin() { if (!active) { saved = pendingRestore || capture(); pendingRestore = null; active = true; } },
     end() { if (active) { pendingRestore = saved; saved = null; active = false; } },
     reset({ restoreView = true } = {}) {
       if (active) pendingRestore = saved;

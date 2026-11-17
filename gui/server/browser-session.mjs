@@ -168,7 +168,7 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
   function announce() {
     if (!ready || !peer) return;
     peer.send(JSON.stringify({ type: 'authenticated', mediaMode, keyboard, viewOnly, textFocus: focusSupported, textFocusGeometry: Boolean(geometrySupported), keyboardStatus: keyboard && !viewOnly, clipboard: clipboardSupported,
-      windowSwitch: Boolean(canSwitchWindow), windowAudio:Boolean(canHearWindow),
+      windowSwitch: Boolean(canSwitchWindow), windowAudio: Boolean(canHearWindow),
       adaptiveVideo: adaptiveSupported,
       mediaFallback: mediaMode === 'webrtc' && !fallbackUsed && peer.protocol === MEDIA_FALLBACK_PROTOCOL }));
     if (wireHeader) forward(wireHeader);
@@ -456,7 +456,7 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
       ready = true; nativeTimer = setTimeout(close, 10000); announce();
       await onConnect({ port: listener.address().port, keyboard, viewOnly, textFocus: focusSupported, focusHint,
         textFocusGeometry: Boolean(geometrySupported), focusGeometryHint, keyboardStatus, clipboard: clipboardSupported,
-        windowAudio:Boolean(canHearWindow), windowSwitch: Boolean(canSwitchWindow), windowOwner: ownerToken, windowTarget: pendingWindow || currentWindow,
+        windowSwitch: Boolean(canSwitchWindow), windowAudio: Boolean(canHearWindow), windowOwner: ownerToken, windowTarget: pendingWindow || currentWindow,
         adaptiveVideo: adaptiveSupported, videoQuality,
         captureRecovery: canRecover, restartNative, close, get closed() { return closed; } });
     } catch { close(); }

@@ -182,6 +182,13 @@ try {
     assert.equal(await page.locator('#keyboard-input').inputValue(), 'café 😊', 'changing typing layout retains the local preview');
    }
    await page.screenshot({ path: path.join(output, `docked-${variant.width}-${!!variant.rtl}-${variant.zoom || 1}.png`), fullPage: true });
+   // Both handlers can run before the animation-frame fit. Reopening must
+   // retain the original view, not save the temporary typing magnification.
+   await page.evaluate(() => {
+    document.getElementById('close-keyboard').click();
+    document.getElementById('keyboard').click();
+   });
+   await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
    await page.getByRole('button', { name: 'Close keyboard', exact: true }).click();
    await page.evaluate(height => window.fixtureKeyboardHeight(height), variant.height);
    await until(async () => (await canvas.evaluate(element => element.style.transform)) === original);
@@ -200,7 +207,7 @@ try {
    assert.deepEqual(errors, []);
    results.push({ engine, ...variant, focusGeometry: geometryMode, typingTargetVisibleWhileDocked: true, lastTapFallback: !geometryMode, zoomedTouchCoordinatesCorrect: true,
     heldContactUnaffectedByGeometry: geometryMode, compositionSurvivesGeometry: geometryMode,
-    unicodeExactlyOnce: true, previousViewRestored: true, floatingSpaceSeparated: split,
+    unicodeExactlyOnce: true, previousViewRestored: true, rapidToggleRestoresView: true, floatingSpaceSeparated: split,
     dockedFloatingModeDiscoverable: variant.width > variant.height && !variant.zoom, noRealIMEOrCapture: true });
   } catch (error) {
    const stem = `failure-${variant.width}-${!!variant.rtl}-${variant.zoom || 1}`;
