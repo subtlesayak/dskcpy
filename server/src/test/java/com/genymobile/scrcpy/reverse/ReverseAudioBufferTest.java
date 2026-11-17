@@ -4,6 +4,15 @@ import org.junit.Test;
 import static org.junit.Assert.*;
 
 public class ReverseAudioBufferTest {
+    @Test public void admissionRetainsEpochAcrossMuteTransitions() throws Exception {
+        ReverseAudioBuffer buffer = new ReverseAudioBuffer();
+        buffer.offer(packet(1, ReversePacketReader.AUDIO_PACKET), 100, 1);
+        ReverseAudioBuffer.Entry held = buffer.poll();
+        buffer.clearData();
+        buffer.offer(packet(2, ReversePacketReader.AUDIO_PACKET), 101, 3);
+        assertEquals(1, held.epoch); // A held old packet can be rejected after mute/resume.
+        assertEquals(3, buffer.poll().epoch);
+    }
     private ReversePacketReader.Packet packet(long pts, int flags) {
         return new ReversePacketReader.Packet(new byte[] {1}, pts, flags);
     }

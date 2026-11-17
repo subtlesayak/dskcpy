@@ -300,6 +300,31 @@ jobs:
       - name: Android unit tests
         if: matrix.buildtype == 'debug'
         run: ./gradlew :server:testDebugUnitTest
+      - name: Verify reconciled audio tests ran and retain counts only
+        if: matrix.buildtype == 'debug'
+        run: |
+          python - <<'PY'
+          import json
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+          reports = sorted(Path('server/build/test-results/testDebugUnitTest').glob('TEST-*.xml'))
+          assert reports, 'Android unit reports are missing'
+          suites = []
+          for report in reports:
+              root = ET.parse(report).getroot()
+              suites.append({'name': root.attrib['name'], **{key: int(root.attrib.get(key, 0)) for key in ['tests', 'failures', 'errors', 'skipped']}})
+          audio = next(s for s in suites if s['name'] == 'com.genymobile.scrcpy.reverse.ReverseAudioPcmBufferTest')
+          passed = audio['tests'] >= 8 and audio['skipped'] == 0 and all(s['failures'] == 0 and s['errors'] == 0 for s in suites)
+          Path('.tmp/ci-android/android-unit-summary.json').write_text(json.dumps({'passed': passed, 'suites': suites}, indent=2) + '\n')
+          assert passed, 'Reconciled audio unit coverage did not pass'
+          PY
+      - name: Preserve Android unit summary without output or environment data
+        if: always() && matrix.buildtype == 'debug'
+        uses: actions/upload-artifact@v7
+        with:
+          name: android-unit-summary
+          path: .tmp/ci-android/android-unit-summary.json
+          if-no-files-found: ignore
       - name: Build standalone server without Gradle
         if: matrix.buildtype == 'debug'
         run: BUILD_DIR=.tmp/ci-manual bash server/build_without_gradle.sh

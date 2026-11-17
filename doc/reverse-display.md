@@ -138,6 +138,22 @@ discarded to avoid a growing backlog. No microphone permission or audio-file
 recording is used. Home/Back pauses both streams; returning resumes the retained
 session and mute preference. Losing audio focus pauses phone playback.
 
+The reconciled receiver audio candidate retains the unwritten tail of short or
+zero nonblocking AudioTrack writes in one reusable buffer, bounded to 15,360
+bytes and 80 ms. It does not flush a healthy device queue at a fixed 60 ms,
+which could repeatedly empty a larger platform buffer. Compressed input stays
+pending until accepted by the codec or deliberately discarded as stale; it is
+not acknowledged merely because no codec input buffer was ready. Audio epochs
+discard old compressed/PCM data across mute, focus and Home/return transitions.
+The existing four-packet/80 ms compressed queue and native wire format remain.
+
+This carries the earlier five-file source candidate into the current repository;
+it does not establish smooth playback on an Android device or fix the separate
+startup stall. Full Gradle/APK compilation and unit reports are checked in CI.
+A compatible update still requires the existing approved signing lineage and
+USB/Wi-Fi audible, mute, background/return and long-session tests. No replacement
+key, uninstall or app-data clearing is part of that update path.
+
 The opt-in Mac host now has an experimental ScreenCaptureKit audio path using
 the same Opus framing and Android player. It requests 48 kHz stereo system audio,
 not microphone capture, and keeps video and audio capture callbacks separate.
