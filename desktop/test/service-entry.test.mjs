@@ -50,6 +50,7 @@ test('service IPC runs the existing backend on its own ephemeral controller with
     const conflict=await request('prepare-receiver');assert.equal(conflict.ok,false);assert.equal(conflict.code,'receiver-port-in-use');
     assert.ok(!JSON.stringify(conflict).includes('private diagnostic'));
     const unknown=await request('prepare-receiver');assert.equal(unknown.ok,false);assert.equal(unknown.code,undefined);
-    assert.equal((await request('shutdown')).ok, true);
+    const idleClose = await request('shutdown-if-idle');
+    assert.equal(idleClose.ok, true); assert.equal(idleClose.value, true);
   } finally { await worker.terminate(); await rm(directory, { recursive: true, force: true }); }
 });

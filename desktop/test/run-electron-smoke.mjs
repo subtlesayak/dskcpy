@@ -29,7 +29,7 @@ try {
     env: electronUiEnvironment(process.env),
   });
   const receipt = JSON.parse(await readFile(result, 'utf8'));
-  if (!receipt.utilityProcessIpc || !receipt.bridgeLoaded || !receipt.hiddenWindow) throw Error('Runtime check incomplete');
+  if (!receipt.utilityProcessIpc || !receipt.realUtilityLifecycleIpc || !receipt.bridgeLoaded || !receipt.hiddenWindow) throw Error('Runtime check incomplete');
   await mkdir('desktop/out/runtime-verification', { recursive: true });
   await writeFile('desktop/out/runtime-verification/electron-smoke.json', JSON.stringify(receipt, null, 2) + '\n');
   console.log(JSON.stringify(receipt));

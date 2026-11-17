@@ -111,6 +111,38 @@ test('Mac input-permission metadata never labels a Windows capture', async t => 
   assert.equal(f.publicState().nativeInputPermission, null);
 });
 
+test('idle-only retirement refuses a waiting browser invitation and closes after explicit Stop', async t => {
+  const f = await fixture(t);
+  assert.equal((await f.request('/api/browser/invite', { browserTransport: 'local' })).code, 201);
+  assert.equal(await f.shutdownIfIdle(), false); assert.equal(f.server.listening, true);
+  assert.equal(f.publicState().browser.waiting, true);
+  await f.request('/api/stream/stop', {}); await waitFor(() => !f.publicState().browser.waiting);
+  assert.equal(await f.shutdownIfIdle(), true); assert.equal(f.server.listening, false);
+});
+
+test('idle-only retirement preserves active native cleanup until an explicit Stop', async t => {
+  const f = await fixture(t);
+  assert.equal((await f.request('/api/stream/start', { connection: 'usb', serial: 'fixture' })).code, 202);
+  const child = f.children[0].child;
+  assert.equal(await f.shutdownIfIdle(), false);
+  assert.equal(child.stdin.writableEnded, false); assert.equal(child.forced, false);
+  await f.request('/api/stream/stop', {}); await waitFor(() => !f.publicState().running);
+  assert.equal(await f.shutdownIfIdle(), true);
+});
+
+test('idle-only retirement refuses in-flight startup before a native child exists', async t => {
+  let block = false, entered = false, release;
+  const pending = new Promise(resolve => { release = resolve; });
+  const f = await fixture(t, { readinessProbe: async () => { if (block) { entered = true; await pending; } return ready; } });
+  block = true;
+  const starting = f.request('/api/stream/start', { connection: 'usb', serial: 'fixture' });
+  await waitFor(() => entered);
+  assert.equal(f.children.length, 0); assert.equal(await f.shutdownIfIdle(), false);
+  release(); assert.equal((await starting).code, 202);
+  await f.request('/api/stream/stop', {}); await waitFor(() => !f.publicState().running);
+  assert.equal(await f.shutdownIfIdle(), true);
+});
+
 test('phone startup history survives raw-log overflow and preserves a final partial phase', async t => {
   const f = await fixture(t);
   const started = await f.request('/api/stream/start', { connection: 'wifi', serial: 'fixture._adb-tls-connect._tcp' });

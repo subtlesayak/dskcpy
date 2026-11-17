@@ -66,6 +66,7 @@ parent.on('message', async ({ data }) => {
           browserClipboard: data.args?.clipboard === true, browserAdaptiveVideo: true, maxSize: 1600, maxFps: 30, bitRateMbps: 8 }); break;
       }
       case 'stop': value = await api('/api/stream/stop', {}); break;
+      case 'shutdown-if-idle': value = await service.shutdownIfIdle(); break;
       case 'shutdown': {
         await service.shutdown();
         // Allow native stdin q / bounded force-stop to release held input before
