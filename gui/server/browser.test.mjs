@@ -606,6 +606,61 @@ test('capture pause suppresses focus metadata and Resume restores the current su
   assert.deepEqual(hints().map(m => JSON.parse(m.data)), [{ type: 'text-focus', focused: true }]);
 });
 
+const geometryTarget = Object.freeze({ kind: 'caret', x: 30000, y: 30000, width: 30, height: 1200 });
+const geometryMessages = ws => ws.received.filter(m => !m.binary).map(m => JSON.parse(m.data)).filter(m => m.type === 'text-focus-geometry');
+async function geometryBarrier(ws, action) { const pong = once(ws, 'pong'); action(); ws.ping(); await pong; }
+async function subscribeGeometry(f, ws) {
+  const command = once(f.native(), 'data');
+  ws.send('text-focus-geometry-subscribe'); ws.send(Buffer.from([8, 2, 0, 0, 0])); await command;
+}
+test('focus geometry requires its own subscription, exact bounded schema and rate limit', async t => {
+  const f = await fixture(t, { inputPolicy: { keyboard: true, textFocus: true, textFocusGeometry: true } });
+  const ws = await login(f);
+  assert.equal(f.bridge().textFocusGeometry, true);
+  await geometryBarrier(ws, () => f.bridge().focusGeometryHint(geometryTarget));
+  assert.deepEqual(geometryMessages(ws), []);
+  await subscribeGeometry(f, ws);
+  let clock = 5000; t.mock.method(Date, 'now', () => clock);
+  await geometryBarrier(ws, () => {
+    for (const target of [{ ...geometryTarget, text: 'private' }, { ...geometryTarget, x: -1 }, { ...geometryTarget, height: 99999 }])
+      f.bridge().focusGeometryHint(target);
+    f.bridge().focusGeometryHint(geometryTarget); f.bridge().focusGeometryHint(geometryTarget);
+  });
+  assert.deepEqual(geometryMessages(ws), [{ type: 'text-focus-geometry', target: geometryTarget }]);
+  clock += 100;
+  await geometryBarrier(ws, () => f.bridge().focusGeometryHint(null));
+  assert.deepEqual(geometryMessages(ws)[1], { type: 'text-focus-geometry', target: null });
+});
+for (const boundary of ['pause', 'blocked']) test('focus geometry stops at '+boundary+' and resumes without stale state', async t => {
+  const f = await fixture(t, { inputPolicy: { keyboard: true, textFocus: true, textFocusGeometry: true } });
+  const ws = await login(f); await subscribeGeometry(f, ws);
+  if (boundary === 'pause') { const command = once(f.native(), 'data'); ws.send(Buffer.from([5, 7])); await command; }
+  else f.bridge().keyboardStatus('blocked');
+  await geometryBarrier(ws, () => f.bridge().focusGeometryHint(geometryTarget)); assert.deepEqual(geometryMessages(ws), []);
+  if (boundary === 'pause') { const command = once(f.native(), 'data'); ws.send(Buffer.from([5, 8])); await command; }
+  else f.bridge().keyboardStatus('ready');
+  await geometryBarrier(ws, () => f.bridge().focusGeometryHint(geometryTarget)); assert.equal(geometryMessages(ws).length, 1);
+});
+test('focus geometry subscription is discarded on socket replacement', async t => {
+  const f = await fixture(t, { inputPolicy: { keyboard: true, textFocus: true, textFocusGeometry: true } });
+  const first = await login(f), cookie = first.cookie.split(';')[0]; await subscribeGeometry(f, first);
+  const away = once(f.native(), 'data'); first.terminate(); await away;
+  const second = await f.open(undefined, cookie); await until(() => second.received.some(m => m.binary));
+  let command = once(f.native(), 'data'); second.send('resume'); second.send(Buffer.from([8, 2, 0, 0, 0])); await command;
+  await geometryBarrier(second, () => f.bridge().focusGeometryHint(geometryTarget)); assert.deepEqual(geometryMessages(second), []);
+  await subscribeGeometry(f, second);
+  await geometryBarrier(second, () => f.bridge().focusGeometryHint(geometryTarget)); assert.equal(geometryMessages(second).length, 1);
+});
+for (const inputPolicy of [{ keyboard: false, textFocus: true, textFocusGeometry: true },
+  { keyboard: true, textFocus: false, textFocusGeometry: true },
+  { keyboard: true, textFocus: true, textFocusGeometry: true, viewOnly: true },
+  { keyboard: true, textFocus: true }]) test('geometry cannot bootstrap host capability '+JSON.stringify(inputPolicy), async t => {
+  const f = await fixture(t, { inputPolicy }); const ws = await login(f);
+  assert.equal(f.bridge().textFocusGeometry, false);
+  const ended = once(ws, 'close'); ws.send('text-focus-geometry-subscribe'); await ended;
+  assert.equal(f.receiver.status().connected, false);
+});
+
 test('focus subscriptions belong to the current socket, not a resumed session', async t => {
   const f = await fixture(t, { inputPolicy: { keyboard: true, textFocus: true } });
   const first = await login(f);

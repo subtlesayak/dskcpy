@@ -106,7 +106,10 @@ export async function inspectReadiness(runtime, runCommand) {
     browserClipboard: ['darwin','win32'].includes(platform) && supported && nativeHelp.includes('browser-clipboard-v1')
       && nativeHelp.includes('--reverse-clipboard') && nativeHelp.includes('--reverse-keyboard')
       && (platform === 'win32' ? nativeHelp.includes('browser-keyboard-v1') : macBackend),
-    browserTextFocus: platform === 'darwin' && macBackend && nativeHelp.includes('--reverse-keyboard') && nativeHelp.includes('--reverse-text-focus'),
+    browserTextFocus: platform === 'darwin' && macBackend && nativeHelp.includes('--reverse-keyboard') && /(?:^|\s)--reverse-text-focus(?:\s|$)/.test(nativeHelp),
+    browserTextFocusGeometry: platform === 'darwin' && macBackend && nativeHelp.includes('--reverse-keyboard')
+      && /(?:^|\s)--reverse-text-focus(?:\s|$)/.test(nativeHelp)
+      && /(?:^|\s)--reverse-text-focus-geometry(?:\s|$)/.test(nativeHelp) && nativeHelp.includes('browser-focus-geometry-v1'),
     browserCaptureRecovery: platform === 'darwin' && macBackend && nativeHelp.includes('browser-capture-recovery-v1'),
     browserKeyboard: nativeHelp.includes('--reverse-keyboard') && ((platform === 'darwin' && macBackend)
       || (platform === 'win32' && supported && nativeHelp.includes('browser-keyboard-v1'))),

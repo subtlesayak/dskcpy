@@ -5,7 +5,7 @@ import { createDesktopView } from './view.mjs';
 import { createTypingView } from './typing-view.mjs';
 import { createRelativeTrackpad } from './trackpad.mjs';
 import { receiverIsAway } from './lifecycle.mjs';
-import { BROWSER_RESUME_MS, MEDIA_FALLBACK_PROTOCOL, avcCodec, avcParameters, touchPacket, scrollPacket, takeDecodedTimestamps, fitDisplay, createMediaAcknowledger, needsControlsRow, parseJoinFragment } from './protocol.mjs';
+import { BROWSER_RESUME_MS, MEDIA_FALLBACK_PROTOCOL, focusGeometry, avcCodec, avcParameters, touchPacket, scrollPacket, takeDecodedTimestamps, fitDisplay, createMediaAcknowledger, needsControlsRow, parseJoinFragment } from './protocol.mjs';
 import { createRtcReceiver } from './rtc.mjs';
 import { createVideoReceiver } from './video.mjs';
 import { createVideoFeedback } from './video-feedback.mjs';
@@ -34,10 +34,11 @@ const remembered = rememberedBrowser({ reconnect: () => { resumeAllowed = true; 
 let rtcReceiver, mediaMode = 'webcodecs';
 let keyboardSupported = false, keyboardOpen = false, viewOnly = false;
 let focusSupported = false, autoKeyboard = false, keyboardStatusSupported = false, keyboardBlocked = false;
+let focusGeometrySupported = false;
 const keyboardStatusMessage = $('keyboard-status');
 const autoSetting = $('auto-keyboard-setting'), autoToggle = $('auto-keyboard'), autoFeedback = $('auto-keyboard-feedback');
 function clearFocusCapability(clearPreference = true) {
-  focusSupported = false; keyboardStatusSupported = false; keyboardBlocked = false;
+  focusSupported = false; focusGeometrySupported = false; keyboardStatusSupported = false; keyboardBlocked = false;
   if (keyboardStatusMessage) keyboardStatusMessage.hidden = true;
   if (clearPreference) autoKeyboard = false;
   if (autoSetting) autoSetting.hidden = true;
@@ -270,6 +271,7 @@ if (viewPresent) {
   });
 }
 const keyboardInput = createBrowserKeyboard({ field: $('keyboard-input'), send,
+  contextControls: ['typing-zoom', 'typing-layout'].map($),
   canSend: () => !mediaSwitching && !viewNavigationActive() && !keyboardBlocked && keyboardSupported && authenticated && header && !paused && !document.hidden && touchEnabled && !viewOnly,
   onError: (message) => { $('error').textContent = message; } });
 function canSendKeys() {
@@ -355,6 +357,8 @@ if (arrowPadPresent) {
 }
 function hideKeyboard() {
   if (typingViewPresent) typingView.end();
+  if (focusGeometrySupported && authenticated && ws?.readyState === WebSocket.OPEN) ws.send('text-focus-geometry-unsubscribe');
+  typingView.setFocusGeometry(null, canvas.width);
   keyboardOpen = false; keyboardInput.setEnabled(false);
   if (autoFeedback) autoFeedback.hidden = true;
   document.body.classList.remove('keyboard-open');
@@ -367,6 +371,7 @@ function showKeyboard(retry = false) {
   if (typingViewPresent) typingView.begin();
   keyboardStartHeight = window.visualViewport?.height || window.innerHeight;
   keyboardOpen = true; $('keyboard-controls').hidden = false;
+  if (focusGeometrySupported && authenticated && ws?.readyState === WebSocket.OPEN) ws.send('text-focus-geometry-subscribe');
   document.body.classList.add('keyboard-open'); $('keyboard').setAttribute('aria-expanded', 'true');
   fitCanvas(); send(keyPacket(2)); keyboardInput.setEnabled(true);
 }
@@ -654,6 +659,14 @@ function connect(key = null, requestedMode = preferredMode) {
           if (!authenticated || ![true, false, null].includes(message.focused)) throw new Error('Unexpected focus hint.');
           autoFocusKeyboard(message.focused); return;
         }
+        if (message.type === 'text-focus-geometry') {
+          if (!authenticated || !focusGeometrySupported || (message.target !== null && !focusGeometry(message.target)))
+            throw new Error('Unexpected focus geometry.');
+          // A held desktop contact keeps its mapping until release. The host
+          // refreshes advisory geometry; a later hint can frame the typing view.
+          if (keyboardOpen && canSendKeys() && !pointers.size && typingView.setFocusGeometry(message.target, canvas.width)) fitCanvas();
+          return;
+        }
         if (message.type !== 'authenticated') throw new Error('Unexpected receiver response.');
         mediaMode = message.mediaMode || 'webcodecs';
         fallbackNegotiated = canFallback && mediaMode === 'webrtc' && message.mediaFallback === true;
@@ -686,6 +699,7 @@ function connect(key = null, requestedMode = preferredMode) {
         keyboardStatusSupported = keyboardSupported && message.keyboardStatus === true;
         if (keyboardStatusSupported) socket.send('keyboard-status-subscribe');
         focusSupported = keyboardSupported && message.textFocus === true;
+        focusGeometrySupported = focusSupported && typingViewPresent && message.textFocusGeometry === true;
         if (focusSupported) ws.send('text-focus-subscribe');
         if (!focusSupported) autoKeyboard = false;
         if (autoToggle) autoToggle.checked = autoKeyboard;

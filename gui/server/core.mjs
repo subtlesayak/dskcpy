@@ -136,6 +136,8 @@ export function buildScrcpyArgs(config, bridgePort) {
   }
   if (config.windowId) args.push(`--reverse-window=${config.windowId}`, '--no-audio');
   else if (config.connection === 'browser' && config.browserKeyboard === true) { args.push('--reverse-keyboard'); if (config.browserTextFocus === true) args.push('--reverse-text-focus'); }
+  if (config.connection === 'browser' && !config.windowId && config.browserKeyboard === true
+      && config.browserTextFocus === true && config.browserTextFocusGeometry === true) args.push('--reverse-text-focus-geometry');
   if (config.connection === 'browser' && !config.windowId && config.browserKeyboard === true && config.browserClipboard === true) args.push('--reverse-clipboard');
   if (config.connection === 'browser' && !config.windowId && config.browserAdaptiveVideo === true) args.push('--reverse-adaptive-video');
   if (config.windowOwnerPid) args.push(`--reverse-window-owner=${config.windowOwnerPid}`);

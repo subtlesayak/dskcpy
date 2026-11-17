@@ -281,6 +281,10 @@ if get_option('buildtype') == 'debug'
             ['tests/test_reverse_macos_focus.m', 'src/reverse_macos_focus.m'],
             dependencies: dependencies, include_directories: include_directories('src'))
         test('test_reverse_macos_focus', mac_focus_test)
+        mac_focus_geometry_test = executable('test_reverse_macos_focus_geometry',
+            'tests/test_reverse_macos_focus_geometry.m',
+            dependencies: dependencies, include_directories: include_directories('src'))
+        test('test_reverse_macos_focus_geometry', mac_focus_geometry_test)
         mac_audio_test = executable('test_reverse_macos_audio',
             ['tests/test_reverse_macos_audio.m', 'src/reverse_macos_audio.m', 'src/reverse_audio_encoder.c'],
             include_directories: src_dir, dependencies: dependencies)

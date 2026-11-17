@@ -33,7 +33,7 @@ function modifiers(event) {
 
 // Only the explicit typing field receives keys. Its recent preview stays local;
 // nothing is read from the clipboard or saved to browser storage.
-export function createBrowserKeyboard({ field, send, canSend, onError = () => {} }) {
+export function createBrowserKeyboard({ field, send, canSend, contextControls = [], onError = () => {} }) {
   const down = new Map();
   let armed = false, composing = false, preview = '', remoteAnchor = 0, remoteFocus = 0;
   const allowed = () => armed && canSend();
@@ -190,7 +190,13 @@ export function createBrowserKeyboard({ field, send, canSend, onError = () => {}
   // replacement arrives. Releasing held keys must not forget the text already
   // sent, or the completed word would be appended after its existing prefix.
   field.addEventListener('blur', releaseKeys);
-  const leaveTyping = event => { if (event.target && event.target !== field) clearContext(); };
+  // These explicit local framing controls do not move the remote caret. Keep
+  // their preview/composition; touching the desktop or other tools still ends
+  // this fragment so later suggestions cannot replace text at a new cursor.
+  const leaveTyping = event => {
+    if (event.target && event.target !== field
+        && !contextControls.some(control => control && (control === event.target || control.contains?.(event.target)))) clearContext();
+  };
   field.ownerDocument?.addEventListener('pointerdown', leaveTyping);
   field.ownerDocument?.addEventListener('focusin', leaveTyping);
   return { release, setEnabled(value) { if (!value) clearContext(); armed = value; if (armed) field.focus(); } };

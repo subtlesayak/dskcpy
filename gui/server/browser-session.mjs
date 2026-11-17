@@ -1,7 +1,7 @@
 import net from 'node:net';
 import { WebSocket } from 'ws';
 import { SrdParser, validBrowserInput, MAX_PACKET } from './browser-protocol.mjs';
-import { ack, avcParameters, touchPacket, MEDIA_FALLBACK_PROTOCOL } from '../receiver/protocol.mjs';
+import { ack, avcParameters, touchPacket, MEDIA_FALLBACK_PROTOCOL, focusGeometry } from '../receiver/protocol.mjs';
 import { createRtcMedia, completeLegacyConfiguration } from './browser-rtc.mjs';
 import { createClipboardBroker } from './browser-clipboard.mjs';
 import { createAdaptiveVideo, validVideoFeedback } from './adaptive-video.mjs';
@@ -10,7 +10,7 @@ import { publicWindowState } from './window-targets.mjs';
 // Keep the native transport alive across a bounded browser suspension. Never
 // retain video frames: only the wire header and codec parameter sets are replayed.
 export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lifetimeMs,
-  mediaMode = 'webcodecs', rtcBind, keyboard = false, viewOnly = false, textFocus = false, clipboard = false,
+  mediaMode = 'webcodecs', rtcBind, keyboard = false, viewOnly = false, textFocus = false, textFocusGeometry = false, clipboard = false,
   captureRecovery = false, adaptiveVideo = false, nativeEndGraceMs = 15000, rtcMediaFactory = createRtcMedia, onChange = () => {}, windowGroup = null, onRetireWindow }) {
   let native, peer, closed = false, ready = false, nativeTimer, awayTimer;
   let listener, nativeEndTimer, recovering = false, restarting = false;
@@ -27,6 +27,8 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
   let suspended = false, capturePaused = false, alive = true, rateAt = Date.now(), events = 0;
   const video = new Set(), audio = new Set(), touches = new Map();
   const focusSupported = textFocus && keyboard && !viewOnly;
+  const geometrySupported = focusSupported && textFocusGeometry;
+  let geometrySubscribed = false, geometryAt = -Infinity;
   let focusAt = -Infinity, focusSubscribed = false;
   let keyboardStatusSubscribed = false, lastKeyboardStatus = null;
   const clipboardSupported = clipboard && keyboard && !viewOnly;
@@ -47,6 +49,14 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
         || !peer || peer.readyState !== WebSocket.OPEN
         || peer.bufferedAmount > MAX_PACKET || ![true, false, null].includes(focused) || Date.now() - focusAt < 100) return;
     focusAt = Date.now(); peer.send(JSON.stringify({ type: 'text-focus', focused }));
+  }
+  function focusGeometryHint(value) {
+    if (!geometrySupported || !geometrySubscribed || !ready || !wireHeader || closed || suspended || capturePaused || recovering
+        || !native || native.destroyed || lastKeyboardStatus === 'blocked' || !peer || peer.readyState !== WebSocket.OPEN
+        || peer.bufferedAmount > MAX_PACKET || Date.now() - geometryAt < 100) return;
+    const target = value === null ? null : focusGeometry(value);
+    if (value !== null && !target) return;
+    geometryAt = Date.now(); peer.send(JSON.stringify({ type: 'text-focus-geometry', target }));
   }
   let rtc, rtcGeneration = 0, negotiating = false;
   let fallbackUsed = false;
@@ -156,7 +166,7 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
   }
   function announce() {
     if (!ready || !peer) return;
-    peer.send(JSON.stringify({ type: 'authenticated', mediaMode, keyboard, viewOnly, textFocus: focusSupported, keyboardStatus: keyboard && !viewOnly, clipboard: clipboardSupported,
+    peer.send(JSON.stringify({ type: 'authenticated', mediaMode, keyboard, viewOnly, textFocus: focusSupported, textFocusGeometry: Boolean(geometrySupported), keyboardStatus: keyboard && !viewOnly, clipboard: clipboardSupported,
       windowSwitch: Boolean(canSwitchWindow),
       adaptiveVideo: adaptiveSupported,
       mediaFallback: mediaMode === 'webrtc' && !fallbackUsed && peer.protocol === MEDIA_FALLBACK_PROTOCOL }));
@@ -175,7 +185,7 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
     peer = ws; alive = true; rateAt = Date.now(); events = 0;
     // Optional messages require this viewer's explicit acknowledgement. A
     // restored/older cached page must not inherit another socket's subscription.
-    focusSubscribed = false; focusAt = -Infinity;
+    focusSubscribed = false; focusAt = -Infinity; geometrySubscribed = false; geometryAt = -Infinity;
     qualitySubscribed = false; windowSubscribed = false; adaptive.reset();
     ws.on('pong', () => { if (peer === ws) alive = true; });
     ws.on('close', (code) => {
@@ -228,6 +238,11 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
         if (message.toString() === 'text-focus-subscribe') {
           if (!focusSupported || !ready) { close(); return; }
           focusSubscribed = true; return;
+        }
+        if (['text-focus-geometry-subscribe', 'text-focus-geometry-unsubscribe'].includes(message.toString())) {
+          if (!geometrySupported || !ready) { close(); return; }
+          geometrySubscribed = message.toString() === 'text-focus-geometry-subscribe';
+          geometryAt = -Infinity; return;
         }
         if (message.toString() === 'keyboard-status-subscribe' && ready && keyboard && !viewOnly) {
           keyboardStatusSubscribed = true;
@@ -291,7 +306,7 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
     releaseTouches(); stopRtc(); video.clear(); audio.clear(); nativeAcks.clear();
     suspended = capturePaused = true; awayTimer = setTimeout(close, resumeMs);
     wireHeader = videoConfig = audioConfig = null; width = height = 0;
-    lastKeyboardStatus = null; focusSubscribed = keyboardStatusSubscribed = false;
+    lastKeyboardStatus = null; focusSubscribed = keyboardStatusSubscribed = geometrySubscribed = false;
     const previous = native; native = null;
     previous?.end(); // Flush cancellation before closing the old input epoch.
     if (previous) setTimeout(() => previous.destroy(), 1000).unref();
@@ -437,7 +452,8 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
       });
       if (closed) { listener.close(); return; }
       ready = true; nativeTimer = setTimeout(close, 10000); announce();
-      await onConnect({ port: listener.address().port, keyboard, viewOnly, textFocus: focusSupported, focusHint, keyboardStatus, clipboard: clipboardSupported,
+      await onConnect({ port: listener.address().port, keyboard, viewOnly, textFocus: focusSupported, focusHint,
+        textFocusGeometry: Boolean(geometrySupported), focusGeometryHint, keyboardStatus, clipboard: clipboardSupported,
         windowSwitch: Boolean(canSwitchWindow), windowOwner: ownerToken, windowTarget: pendingWindow || currentWindow,
         adaptiveVideo: adaptiveSupported, videoQuality,
         captureRecovery: canRecover, restartNative, close, get closed() { return closed; } });

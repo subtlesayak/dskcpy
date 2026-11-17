@@ -69,7 +69,7 @@ test('large Unicode commits split only at codepoint boundaries; invalid and over
 // A small native-editor model checks resulting text, not just emitted packets.
 // It intentionally starts with unrelated host text: the preview is a fragment,
 // never a readback of the active Mac window.
-function editor() {
+function editor({ contextControls = [] } = {}) {
   const listeners = new Map(), documentListeners = new Map(), packets = [];
   const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
   let value = 'host:', anchor = value.length, focus = value.length;
@@ -81,7 +81,7 @@ function editor() {
     focus() { this.ownerDocument.activeElement = this; },
     setSelectionRange(start, end, direction = 'forward') { this.selectionStart = start; this.selectionEnd = end; this.selectionDirection = direction; },
     addEventListener(type, fn) { listeners.set(type, fn); } };
-  const input = createBrowserKeyboard({ field, canSend: () => true, send(bytes) {
+  const input = createBrowserKeyboard({ field, contextControls, canSend: () => true, send(bytes) {
     const p = Buffer.from(bytes); packets.push(p);
     if (p[0] === 9) return replace(p.subarray(3).toString('utf8'));
     if (p[0] !== 8 || p[1] !== 0) return;
@@ -100,6 +100,7 @@ function editor() {
   const emit = (type, event = {}) => { const e = { preventDefault() { this.prevented = true; }, ...event }; listeners.get(type)?.(e); return e; };
   input.setEnabled(true);
   return { field, input, packets, emit, host: () => value,
+    documentEvent(type, target) { documentListeners.get(type)?.({ target }); },
     select(start, end = start, direction = 'forward') { field.setSelectionRange(start, end, direction); documentListeners.get('selectionchange')?.(); },
     change(text, start = text.length, end = start, event = {}) { field.value = text; field.setSelectionRange(start, end); emit('input', event); },
     append(text) { const a = field.selectionStart, b = field.selectionEnd;
@@ -172,6 +173,19 @@ test('leaving the typing context clears its preview and a transient blur release
   e.emit('blur'); assert.deepEqual([...e.packets.at(-1)],[8,2,0,0,0]);
   assert.equal(e.field.value,'local');
   e.input.setEnabled(false); assert.equal(e.field.value,''); assert.equal(e.host(),'host:local');
+});
+
+test('local framing preserves a composing preview and suggestion replacement; a desktop tap clears it', () => {
+  const icon = {}, framing = { contains: target => target === icon };
+  const e = editor({ contextControls: [framing] }); e.append('germ');
+  e.emit('compositionstart'); e.change('German', 6, 6, { isComposing: true });
+  e.documentEvent('pointerdown', icon); e.documentEvent('focusin', framing);
+  assert.equal(e.field.value, 'German'); assert.equal(e.host(), 'host:germ');
+  e.emit('compositionend', { data: 'German' });
+  e.change('German', 6, 6, { inputType: 'insertReplacementText' });
+  assert.equal(e.host(), 'host:German'); assert.equal(e.field.value, 'German');
+  e.documentEvent('pointerdown', {});
+  assert.equal(e.field.value, ''); assert.equal(e.host(), 'host:German');
 });
 
 

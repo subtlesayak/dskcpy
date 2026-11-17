@@ -98,6 +98,8 @@ jobs:
           node desktop/test/video-preference-ui.mjs webkit
           node desktop/test/typing-view-ui.mjs chromium
           node desktop/test/typing-view-ui.mjs webkit
+          node desktop/test/typing-view-ui.mjs chromium geometry
+          node desktop/test/typing-view-ui.mjs webkit geometry
           node desktop/test/window-switch-ui.mjs chromium
           node desktop/test/window-switch-ui.mjs webkit
       - name: Preserve sanitized synthetic-media results

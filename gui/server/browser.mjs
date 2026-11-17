@@ -321,6 +321,7 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
     inputPolicy = { keyboard: policy.keyboard === true && policy.viewOnly !== true, viewOnly: policy.viewOnly === true,
       clipboard: !grant && policy.clipboard === true && policy.keyboard === true && policy.viewOnly !== true,
       textFocus: policy.textFocus === true && policy.keyboard === true && policy.viewOnly !== true,
+      textFocusGeometry: policy.textFocusGeometry === true && policy.textFocus === true && policy.keyboard === true && policy.viewOnly !== true,
       captureRecovery: policy.captureRecovery === true && policy.viewOnly !== true };
     inputPolicy.adaptiveVideo = policy.adaptiveVideo === true && policy.viewOnly !== true;
     if (windowGroup) inputPolicy.windowGroup = windowGroup;
