@@ -44,3 +44,25 @@ native sessions, with no certificate-trust bypass, real device or actual media.
 This strengthens storage/reconnect evidence without replacing real HTTPS/VPN
 and Android Edge lifecycle qualification. The temporary-session bootstrap is
 provided by the fixture, rather than a physical first pairing.
+
+The additional `desktop/test/remembered-network.mjs` matrix exercises actual
+network cookie and WSS behavior in Chromium and WebKit against an owned loopback
+HTTPS proxy and real broker with synthetic native headers. No credentials are
+injected: the browser receives the temporary resume and enrollment cookies from
+the WSS and HTTP responses. It covers approval, HttpOnly/Secure/SameSite/path
+properties, profile and host restart, ticket handoff, transport resume without a
+new capture, pause/resume, denial from a separate unapproved context, revoke and
+server-side expiry with the browser cookie still present. The expiry case uses
+an injected registry clock to check reconnect denial, not active-session timing.
+
+The old intercepted-origin fixture did not expose cookies on its WebKit routed
+requests. A separate network fixture avoids treating that interception behavior
+as a production enrollment defect. Another initial replay assertion used a
+second tab in the approved context, which legitimately had its resume cookie;
+the negative test now uses a separate, unapproved context. Cookie, origin and
+replay assertions remain enforced. No production authentication code changed.
+
+Only disposable browser contexts accept the owned self-signed TLS certificate,
+with other origins blocked and same-origin WSS constrained by CSP. This is not
+certificate-validation, Safari/iOS, physical media, VPN or mobile background
+qualification. System trust and any running host remain untouched.
