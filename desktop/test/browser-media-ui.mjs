@@ -1,3 +1,4 @@
+import { confirmReceiverAction } from './browser-actions.mjs';
 // Actual browser codecs/RTC with synthetic lavfi media and a fake native input
 // collector. Never starts the real host, reads capture devices or sends OS input.
 import { chromium, webkit } from 'playwright';
@@ -283,7 +284,13 @@ try {
     return stats.filter(s => s.type === 'inbound-rtp').map(s => ({ kind: s.kind, bytesReceived: s.bytesReceived, packetsReceived: s.packetsReceived, framesDecoded: s.framesDecoded, totalSamplesReceived: s.totalSamplesReceived }));
   });
   assert.equal(await page.locator('#error').textContent(), ''); assert.deepEqual(errors, []);
-  await page.getByRole('button', { name: 'Disconnect', exact: true }).click();
+  const beforeCancelledStop = counts.videoAcks;
+  await confirmReceiverAction(page, { accept: false });
+  assert.equal(native.destroyed, false, 'Cancel preserves the current capture');
+  await until(() => counts.videoAcks > beforeCancelledStop, 'video continues after cancelled Stop');
+  assert.equal(await page.locator('#join-panel').isVisible(), false);
+  report.cancelledStopPreservesSession = true;
+  await confirmReceiverAction(page);
   await page.locator('#join-panel').waitFor({ state: 'visible' });
   await until(() => native.destroyed && heldKeys.size === 0 && touches.size === 0, 'clean Stop');
   assert.ok(counts.videoAcks > 5 && counts.audioAcks > 3);

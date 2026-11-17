@@ -1,3 +1,4 @@
+import { confirmReceiverAction } from './browser-actions.mjs';
 // Real receiver + authenticated owned broker; in-memory native effects only.
 // No media capture, permission API, OS input, device or installed service.
 import { chromium, webkit } from 'playwright';
@@ -70,7 +71,7 @@ try { for(const variant of [
     await page.goto(browserJoinUrl(invitation.url,invitation.key));await until(()=>b.sessions.length===n+1,'native connection');
     const s=b.sessions.at(-1);if(!defer){s.start();await ready();}return s;
   }
-  const stop=async s=>{await page.getByRole('button',{name:'Disconnect',exact:true}).click();await until(()=>s.socket.destroyed&&!b.receiver.status().connected,'Stop');};
+  const stop=async s=>{await confirmReceiverAction(page);await until(()=>s.socket.destroyed&&!b.receiver.status().connected,'Stop');};
   try {
     let s=await connect();const automatic=page.locator('#video-automatic');
     if(variant.oldHost||variant.viewOnly||variant.unavailable){
@@ -154,7 +155,7 @@ try { for(const variant of [
         await page.getByRole('button',{name:'Options',exact:true}).click();await until(()=>automatic.isEnabled(),'other origin readiness');
         assert.equal(await automatic.isChecked(),true);assert.deepEqual(different.quality,[]);
         assert.equal(await page.evaluate(key=>localStorage.getItem(key),key),null);
-        await page.getByRole('button',{name:'Disconnect',exact:true}).click();await until(()=>different.socket.destroyed,'other Stop');originIsolated=true;
+        await confirmReceiverAction(page);await until(()=>different.socket.destroyed,'other Stop');originIsolated=true;
       }finally{for(const s of other.sessions)s.socket.destroy();await other.receiver.shutdown();}
     }else await stop(s);
     assert.deepEqual(errors,[]);

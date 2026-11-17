@@ -1,3 +1,4 @@
+import { confirmReceiverAction } from './browser-actions.mjs';
 // Actual Chromium receiver + owned broker + fake native clipboard. Browser
 // clipboard methods are injected in-memory stand-ins; no system clipboard,
 // capture, permissions, real keys, private routes or devices are accessed.
@@ -59,7 +60,7 @@ try { for(const variant of [{width:390,height:844,rtl:false},{width:844,height:3
     respond(held,'stale private fixture');await page.getByRole('button',{name:'Resume video',exact:true}).click();assert.equal(await field.inputValue(),'');
     await page.reload();await page.locator('#stream-panel').waitFor({state:'visible'});await until(()=>page.locator('#display').evaluate(c=>c.width===640));assert.equal(await page.locator('#clipboard-enable').isChecked(),false);assert.equal(await page.locator('#clipboard-text').inputValue(),'');
     assert.equal(clipboard,'paste fixture','closing tools must not clear or rewrite the host clipboard');assert.deepEqual(errors,[]);
-    await page.getByRole('button',{name:'Disconnect',exact:true}).click();
+    await confirmReceiverAction(page);
     results.push({...variant,explicitActions:true,noAutomaticLocalClipboard:true,copyVsPasteSeparated:true,pausedAndLateReplyCleared:true,reloadRequiresOptIn:true,noStatusLeak:true,realClipboard:false});
   }finally{await context.close();native?.destroy();await receiver.shutdown();}
  }
