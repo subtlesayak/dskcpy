@@ -40,9 +40,28 @@ Move/hover output keeps only the newest position per 16ms scheduling interval;
 click/scroll boundaries flush it and cancellation discards it. No media queue,
 native capture, codec or session lifetime is changed.
 
-An updated controller serves the new trackpad module. This candidate has not
-been activated in the installed service. Do not restart a host or refresh a
-receiver used by a remote person without agreement.
+Trackpad mode is part of the existing receiver. The touch-scroll changes below
+remain a separate source candidate. Update an active receiver only with the
+user's agreement.
+
+## Touch scroll speed
+
+Open **Options → Touch and scrolling → Touch scroll speed**. The new control
+defaults to 2× and ranges from 0.5× to 3× in quarter steps. It changes the distance
+produced by finger gestures in direct-touch and trackpad modes. Pointer movement,
+mouse-wheel events and keyboard scrolling retain their existing behavior.
+Adjustments apply without a capture restart. Only an explicit numeric choice is
+saved in the receiver origin's local storage; malformed or unavailable storage
+uses the default. Older documents without the control retain the 1× baseline.
+
+Two-finger centroids often move by fractions of a CSS pixel. Previously, rounding
+each event separately could discard an entire slow swipe. A deterministic
+receiver regression reproduced 0 delivered pixels for a −2px movement and 10px
+instead of 12px for a direct swipe. The shared touch-scroll normalizer now retains
+fractional movement within the gesture before producing integer scroll packets.
+It keeps the existing per-packet bounds and discards residue when the gesture,
+input epoch or speed changes. It adds no post-gesture scroll queue, native input
+action or wire-layout change.
 
 ## Layout and verification
 
@@ -59,10 +78,14 @@ pause/touch/view-only guards and queued-motion cleanup on connection loss.
 keyboard focus and fullscreen, an owned broker and a fake native collector.
 It checks portrait, landscape, 320px RTL and 200% CSS zoom, tap position,
 two-finger scroll, drag release, resize cancellation, aspect ratio and marker
-placement. No actual desktop input/capture, clipboard, OS permission or phone
+placement. It also checks fractional scrolling in both directions, the live
+range control's keyboard behavior in LTR/RTL, local preference saving and that
+range keys are not forwarded as remote keys. No actual desktop input/capture,
+clipboard, OS permission or phone
 is accessed. The fake native collector does not qualify Windows/Mac injection,
 software keyboards, real browser UI zoom, Safari, screen readers or hardware.
 
 Physical USB/LAN/private-network tests, native app-specific drag behavior and
-the complete device/OS matrix remain required before promoting the feature.
-Pinch/pan, configurable shortcuts and raw relative input remain separate work.
+the complete device/OS matrix remain required for the scroll changes. Zoom/pan
+and configurable shortcuts are implemented separately and retain their physical
+qualification gates. Raw relative/locked input remains later work.

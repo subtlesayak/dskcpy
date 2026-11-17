@@ -128,7 +128,12 @@
                 <button id="clipboard-paste-host" type="button" disabled>Paste on computer</button>
               </div><p id="clipboard-status" class="subtle" role="status"></p>
             </details>
-            <details id="touch-help"><summary>Touch help</summary><p class="subtle">Tap to click. One or two fingers scroll. Use the selection icon to select text or drag items; two fingers still scroll.</p></details>
+            <details id="touch-help"><summary>Touch and scrolling</summary>
+              <label for="touch-scroll-speed">Touch scroll speed</label>
+              <div class="scroll-speed-row"><input id="touch-scroll-speed" type="range" min="0.5" max="3" step="0.25" value="2" aria-describedby="touch-scroll-speed-help"><output id="touch-scroll-speed-value" for="touch-scroll-speed" aria-hidden="true">2×</output></div>
+              <p id="touch-scroll-speed-help" class="subtle">Adjust how far finger swipes scroll. Pointer movement and mouse-wheel scrolling keep their own speed.</p>
+              <p class="subtle">Tap to click. One or two fingers scroll. Use the selection icon to select text or drag items; two fingers still scroll.</p>
+            </details>
             <details id="connection-details"><summary>Connection details</summary><p id="stats" class="subtle">Waiting for the first decoded frame…</p></details>
           </section>
         </div>
