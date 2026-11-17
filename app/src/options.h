@@ -346,6 +346,7 @@ struct scrcpy_options {
     bool reverse_window_audio; // Explicit owner consent: entire selected application, never system fallback.
     bool list_reverse_windows;
     bool reverse_text_focus; // Optional stdout metadata; requires browser keyboard.
+    bool reverse_text_focus_geometry; // Optional bounded field/caret rectangle, never contents.
     bool reverse_adaptive_video; // Experimental capable browser-host fixed levels.
     bool reverse_keyboard; // Browser-only Windows/Mac opt-in; never inferred from Android.
     bool reverse_clipboard; // Separate full-desktop, per-invitation clipboard consent.

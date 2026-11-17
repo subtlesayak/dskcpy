@@ -935,6 +935,51 @@ test('current native child focus metadata reaches only its capable browser and i
 });
 
 
+test('geometry metadata is bounded, current-child stdout only and never a user log', async t => {
+  const reserve = net.createServer(); reserve.listen(0, '127.0.0.1'); await once(reserve, 'listening');
+  const browserPort = reserve.address().port; await new Promise(resolve => reserve.close(resolve));
+  const origin = 'https://viewer.example.test';
+  const f = await fixture(t, { platform: 'darwin', browserPort,
+    environment: { ...process.env, SCRCPY_GUI_BINARY: process.execPath, DSKCPY_VIEWER_ORIGIN: origin },
+    readinessProbe: async () => ({ ...ready, features: { browserKeyboard: true, browserTextFocus: true, browserTextFocusGeometry: true } }) });
+  async function connect() {
+    const { body, code } = await f.request('/api/browser/invite', { browserTransport: 'wifi' }); assert.equal(code, 201);
+    const count = f.children.length;
+    const ws = new WebSocket(`ws://127.0.0.1:${browserPort}/stream`, { origin, headers: { Host: 'viewer.example.test' } });
+    ws.on('error', () => {}); t.after(() => ws.terminate()); const messages = []; let headerSeen = false;
+    ws.on('message', (data, binary) => { if (binary) headerSeen = true; else messages.push(JSON.parse(data)); });
+    await once(ws, 'open'); ws.send(body.key); await waitFor(() => f.children.length === count + 1);
+    const child = f.children.at(-1); assert.ok(child.args.includes('--reverse-text-focus-geometry'));
+    const port = Number(child.args.find(arg => arg.startsWith('--reverse-socket=')).split('=')[1]);
+    const native = net.connect(port, '127.0.0.1'); native.on('error', () => {}); t.after(() => native.destroy()); await once(native, 'connect');
+    native.write(Buffer.from('535244310000000100000280000001e0', 'hex'));
+    await waitFor(() => headerSeen && messages.some(m => m.type === 'authenticated' && m.textFocusGeometry));
+    const subscribed = once(native, 'data'); ws.send('text-focus-geometry-subscribe'); ws.send(Buffer.from([8, 2, 0, 0, 0])); await subscribed;
+    return { ws, child: child.child, messages };
+  }
+  const first = await connect();
+  first.child.stdout.write('DSKCPY_FOCUS_GEO'); first.child.stdout.write('METRY C 12000 13000 30 1500\n');
+  await waitFor(() => first.messages.some(m => m.type === 'text-focus-geometry'));
+  assert.deepEqual(first.messages.find(m => m.type === 'text-focus-geometry'),
+    { type: 'text-focus-geometry', target: { kind: 'caret', x: 12000, y: 13000, width: 30, height: 1500 } });
+  let pong = once(first.ws, 'pong');
+  first.child.stderr.write('DSKCPY_FOCUS_GEOMETRY C 1000 1000 30 1500\nDSKCPY_TEXT_FOCUS PRIVATE_DO_NOT_LOG\n');
+  first.child.stdout.write('DSKCPY_FOCUS_GEOMETRY C 65535 0 30 1500\nDSKCPY_FOCUS_GEOMETRY PRIVATE_DO_NOT_LOG\n');
+  first.ws.ping(); await pong;
+  assert.equal(first.messages.filter(m => m.type === 'text-focus-geometry').length, 1);
+  await f.request('/api/stream/stop', {}); await waitFor(() => !f.publicState().running);
+  const second = await connect(); pong = once(second.ws, 'pong');
+  first.child.stdout.emit('data', Buffer.from('DSKCPY_FOCUS_GEOMETRY C 1000 1000 30 1500\n'));
+  second.child.stdout.write('DSKCPY_FOCUS_GEOMETRY F 22000 23000 300 1500\n'); second.ws.ping(); await pong;
+  assert.deepEqual(second.messages.filter(m => m.type === 'text-focus-geometry'),
+    [{ type: 'text-focus-geometry', target: { kind: 'field', x: 22000, y: 23000, width: 300, height: 1500 } }]);
+  second.child.stdout.write('DSKCPY_FOCUS_GEOMETRY PRIVATE_DO_NOT_LOG');
+  second.child.stderr.write('DSKCPY_TEXT_FOCUS PRIVATE_DO_NOT_LOG');
+  await f.request('/api/stream/stop', {}); await waitFor(() => !f.publicState().running);
+  assert.ok(!JSON.stringify(f.publicState().logs).includes('DSKCPY_FOCUS_GEOMETRY'));
+  assert.ok(!JSON.stringify(f.publicState().logs).includes('PRIVATE_DO_NOT_LOG'));
+});
+
 test('Windows browser keyboard is authenticated and fixed status IPC is not logged',async t=>{
  const reserve=net.createServer();reserve.listen(0,'127.0.0.1');await once(reserve,'listening');
  const browserPort=reserve.address().port;await new Promise(r=>reserve.close(r));

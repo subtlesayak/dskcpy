@@ -57,6 +57,7 @@ enum {
     OPT_LIST_REVERSE_WINDOWS,
     OPT_REVERSE_KEYBOARD,
     OPT_REVERSE_TEXT_FOCUS,
+    OPT_REVERSE_TEXT_FOCUS_GEOMETRY,
     OPT_REVERSE_ADAPTIVE_VIDEO,
     OPT_REVERSE_CLIPBOARD,
     OPT_REVERSE_SOCKET,
@@ -1010,6 +1011,11 @@ static const struct sc_option options[] = {
         .longopt_id = OPT_REVERSE_TEXT_FOCUS,
         .longopt = "reverse-text-focus",
         .text = "Report only editable-focus metadata to the browser controller. Requires --reverse-keyboard.",
+    },
+    {
+        .longopt_id = OPT_REVERSE_TEXT_FOCUS_GEOMETRY,
+        .longopt = "reverse-text-focus-geometry",
+        .text = "Report browser-focus-geometry-v1 normalized caret/field bounds, never text. Requires --reverse-text-focus and --reverse-keyboard.",
     },
     {
         .longopt_id = OPT_REVERSE_ADAPTIVE_VIDEO,
@@ -3117,6 +3123,9 @@ parse_args_with_getopt(struct scrcpy_cli_args *args, int argc, char *argv[],
             case OPT_REVERSE_TEXT_FOCUS:
                 opts->reverse_text_focus = true;
                 break;
+            case OPT_REVERSE_TEXT_FOCUS_GEOMETRY:
+                opts->reverse_text_focus_geometry = true;
+                break;
             case OPT_REVERSE_ADAPTIVE_VIDEO:
                 opts->reverse_adaptive_video = true;
                 break;
@@ -3158,13 +3167,16 @@ parse_args_with_getopt(struct scrcpy_cli_args *args, int argc, char *argv[],
         LOGE("--reverse-window-audio requires a selected window/owner, reverse socket and audio enabled");
         return false;
     }
+    if (opts->reverse_text_focus_geometry && !opts->reverse_text_focus) {
+        LOGE("--reverse-text-focus-geometry requires --reverse-text-focus"); return false;
+    }
     if ((opts->reverse_window_owner && !opts->reverse_window) || (opts->reverse_window && !opts->reverse_display)
             || (opts->reverse_keyboard && (!opts->reverse_display || !opts->reverse_socket || opts->reverse_window))) {
         LOGE("Window capture requires reverse display; browser keyboard requires a full-desktop reverse socket");
         return false;
     }
 #ifndef HAVE_REVERSE_MACOS
-    if (opts->reverse_window || opts->reverse_window_audio || opts->list_reverse_windows || opts->reverse_text_focus) {
+    if (opts->reverse_window || opts->reverse_window_audio || opts->list_reverse_windows || opts->reverse_text_focus || opts->reverse_text_focus_geometry) {
         LOGE("These capture/input options require the experimental Mac host");
         return false;
     }
