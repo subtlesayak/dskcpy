@@ -185,9 +185,14 @@ for remote browser receiving; see the [browser guide](browser-receiver.md).
 
 ## Audio and recovery checks
 
-Mac system audio and output-route recovery are implemented experimentally.
-Sustained audible playback remains a qualification gate. An Opus initialization
-log or ACK is not proof of audible sound. With a quiet, non-protected clip:
+Mac system audio and output-route recovery are implemented. They remain
+experimental while the current combined build awaits longer audible sessions,
+output-device changes, recovery and physical receiver checks. An earlier
+USB/WebCodecs candidate has a human-reported five-minute audible pass; see the
+[candidate-specific evidence](project-status.md#earlier-usb-browser-audio-and-input-candidate).
+That result does not qualify a newer artifact or another transport/browser.
+An Opus initialization log or ACK is not proof of audible sound. With a quiet,
+non-protected clip:
 
 - Enable playback on the receiver, check its media volume, then mute/unmute it.
   Receiver playback mute and Mac volume are separate controls.
@@ -199,7 +204,11 @@ log or ACK is not proof of audible sound. With a quiet, non-protected clip:
 
 The implementation clears old samples/partial encoding state on route changes
 and uses bounded PCM conversion. It does not change the selected output device
-or require microphone capture. Window mode has no audio. See the
+or require microphone capture. Window audio is off by default. A capable host
+can explicitly allow the selected window's entire application audio, including
+its other windows and tabs; window input stays off. See
+[application-audio scope and remaining physical checks](browser-window-audio.md)
+and the
 [qualification record](testing/mac/platform-features.json) for source tests and limits.
 
 ## Updates and troubleshooting
