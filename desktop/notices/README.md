@@ -6,11 +6,20 @@ release, commit `23292efc644f1048041433a76fbcf4b6d62bfd46`, root `LICENSE`:
 SHA-256: `b83683f3f71b5971e6c2e33a8b894a49d752fd24c11b8ae08b53ca20f594fca5`.
 
 The npm package declares MIT but ships only its separate libwebrtc notice.
-Staging retains that bundled notice and adds this primary notice under
-`host/licenses`. It checks the installed package name, version and license;
+Desktop staging retains that bundled notice and adds this primary notice under
+`host/licenses`. The separate Terminal-style Mac package adds the same pinned
+notice under `licenses` and records it in its own build manifest. Both paths
+check the installed package name, version and license;
 a dependency upgrade requires a fresh source/notice review. No build or runtime
 network fetch is added. Bundle verification checks the pinned bytes and manifest
 entry, independently of the manifest's supplied hash.
+When desktop staging consumes the Terminal package's license directory, it
+reuses only the exact regular-file notice with the pinned hash. A conflicting
+file or link is preserved and rejected rather than replaced.
+For the Terminal-style package, run
+`node release/package_macos_host.mjs --check-notices PACKAGE_DIRECTORY` to
+repeat that notice-only check without launching any native program, capture,
+device tool or host. It is not a full package verifier or release approval.
 Git attributes disable line-ending conversion for the pinned notice; a temporary
 checkout fixture verifies its exact bytes with Windows automatic line endings.
 

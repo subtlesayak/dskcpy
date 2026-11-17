@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, readFile, rm, symlink } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, rm, symlink, lstat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { WERIFT_NOTICE, stageRuntimeNotices, verifyRuntimeNotices } from '../runtime-notices.mjs';
@@ -26,7 +26,17 @@ test('exact dependency receives its upstream notice without replacing bundled th
   assert.deepEqual(await verifyRuntimeNotices(f.app, f.host, manifest), { supplementalRuntimeNoticesVerified: 1, completeNoticesReviewed: false });
   assert.equal(await readFile(thirdParty, 'utf8'), 'existing upstream libwebrtc notice');
   assert.match(await readFile(f.notice, 'utf8'), /^MIT License/);
-  await assert.rejects(stageRuntimeNotices(f.app, f.host), { code: 'EEXIST' });
+  const before = await lstat(f.notice);
+  assert.deepEqual(await stageRuntimeNotices(f.app, f.host), runtimeNotices);
+  const after = await lstat(f.notice);
+  assert.equal(after.ino, before.ino); assert.equal(after.mtimeMs, before.mtimeMs);
+});
+test('a conflicting inherited notice is preserved and rejects staging', async t => {
+  const f = await fixture(t);
+  await mkdir(path.dirname(f.notice), { recursive: true });
+  await writeFile(f.notice, 'different inherited notice');
+  await assert.rejects(stageRuntimeNotices(f.app, f.host), /Changed existing runtime notice/);
+  assert.equal(await readFile(f.notice, 'utf8'), 'different inherited notice');
 });
 for (const override of [{ version: '0.28.0' }, { license: 'Unknown' }, { name: 'different-package' }]) {
   test(`changed dependency requires notice review: ${JSON.stringify(override)}`, async t => {
@@ -53,6 +63,7 @@ test('linked notice files are rejected even when their bytes match', { skip: pro
   const manifest = { runtimeNotices, files: await inventory(f.root) }, original = await readFile(f.notice);
   await rm(f.notice); const target = path.join(f.root, 'notice-target.txt');
   await writeFile(target, original); await symlink(target, f.notice);
+  await assert.rejects(stageRuntimeNotices(f.app, f.host), /Changed existing runtime notice/);
   await assert.rejects(verifyRuntimeNotices(f.app, f.host, manifest), /changed runtime notice/);
 });
 test('Git checkout with automatic Windows line endings preserves the pinned upstream bytes', async t => {
