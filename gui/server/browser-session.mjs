@@ -279,7 +279,7 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
   }
   function announce() {
     if (!ready || !peer) return;
-    peer.send(JSON.stringify({ type: 'authenticated', mediaMode, keyboard: keyboard && !splitControl, viewOnly: viewOnly || splitControl,
+    peer.send(JSON.stringify({ type: 'authenticated', mediaMode, keyboard: keyboard && !splitControl, viewOnly,
       textFocus: focusSupported && !splitControl, textFocusGeometry: Boolean(geometrySupported) && !splitControl,
       keyboardStatus: keyboard && !viewOnly && !splitControl, clipboard: clipboardSupported && !splitControl,
       ...(canSplitControl ? { presentationControl: true, role: splitControl ? 'presentation' : 'combined' } : {}),

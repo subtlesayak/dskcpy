@@ -205,6 +205,8 @@ test('presentation transport loss gates controller input until the same capture 
   const display = await f.open('stream', f.cookie);
   await until(() => display.received.some(m => m.binary));
   assert.equal(texts(display).find(m => m.type === 'authenticated').role, 'presentation');
+  assert.equal(texts(display).find(m => m.type === 'authenticated').viewOnly, false,
+    'presentation input ownership must not turn full-desktop audio into window-only policy');
   display.send('resume'); display.send(Buffer.from([5, 8])); display.ping(); await once(display, 'pong');
   c.ws.send('resume'); c.ws.send(point); await until(() => f.bytes().includes(point));
   assert.equal(f.calls(), 1); assert.equal(c.ws.readyState, WebSocket.OPEN);
