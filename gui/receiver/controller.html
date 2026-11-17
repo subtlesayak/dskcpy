@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+  <title>Phone controller · dskcpy</title>
+  <link rel="stylesheet" href="/receiver.css">
+  <link rel="stylesheet" href="/controller.css">
+  <script type="module" src="/controller.mjs"></script>
+</head>
+<body class="phone-controller">
+  <main>
+    <header><h1>Phone controller</h1><p id="controller-status" role="status">Not connected</p></header>
+    <p id="controller-error" role="alert"></p>
+    <section id="controller-join" aria-labelledby="controller-join-title">
+      <h2 id="controller-join-title">Connect your touchpad and keyboard</h2>
+      <p>In the presentation browser, choose “Use phone as touchpad and keyboard” and open its controller link here. Keep the private connection available on both devices.</p>
+      <form id="controller-form">
+        <label for="controller-key">Controller code</label>
+        <input id="controller-key" name="controller-code" type="password" maxlength="43" autocomplete="off" autocapitalize="none" spellcheck="false" required aria-describedby="controller-key-help controller-error">
+        <p id="controller-key-help" class="subtle">A desktop connection code cannot authorize a controller. Controller links are one use and expire after five minutes.</p>
+        <button type="submit">Connect controller</button>
+      </form>
+    </section>
+    <section id="controller-workspace" hidden aria-label="Desktop controller">
+      <div class="controller-pointer-area">
+      <div id="controller-pad" role="group" tabindex="0" aria-label="Remote pointer touchpad" aria-describedby="controller-pad-help" aria-disabled="true">
+        <span id="controller-marker" aria-hidden="true"></span>
+        <p id="controller-pad-help">Slide one finger to move. Tap to click. Two fingers scroll.<span class="keyboard-help"> Arrow keys move the pointer; Enter clicks.</span></p>
+      </div>
+      <nav class="controller-actions" aria-label="Pointer and keyboard controls">
+        <button id="controller-resume" type="button" hidden>Resume control</button>
+        <button id="controller-keyboard" type="button" aria-expanded="false" aria-controls="controller-typing" disabled>Keyboard</button>
+        <button id="controller-click" type="button" disabled>Click</button>
+        <button id="controller-drag" type="button" aria-label="Start drag" aria-pressed="false" disabled>Drag</button>
+      </nav>
+      </div>
+      <section id="controller-typing" hidden aria-label="Remote keyboard">
+        <div class="controller-typing-row">
+          <label class="sr-only" for="controller-input">Type on the computer</label>
+          <textarea id="controller-input" dir="auto" rows="1" maxlength="512" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Type here"></textarea>
+          <button id="controller-close-keyboard" type="button" aria-label="Close keyboard">Close</button>
+        </div>
+        <div class="controller-arrows" role="group" aria-label="Remote arrow keys">
+          <button type="button" data-key="ArrowLeft" aria-label="Arrow left">←</button>
+          <button type="button" data-key="ArrowUp" aria-label="Arrow up">↑</button>
+          <button type="button" data-key="ArrowDown" aria-label="Arrow down">↓</button>
+          <button type="button" data-key="ArrowRight" aria-label="Arrow right">→</button>
+        </div>
+      </section>
+      <details id="controller-options">
+        <summary>Options and connection</summary>
+        <div class="controller-option-content">
+          <p id="controller-presentation-status" role="status"></p>
+          <p class="subtle">Desktop video and audio play only in the presentation browser. This controller plays no audio. App-only casting must be checked on your phone and display.</p>
+          <label for="controller-pointer-speed">Pointer speed</label>
+          <input id="controller-pointer-speed" type="range" min="0.25" max="4" step="0.25" value="1" aria-describedby="controller-pointer-value">
+          <output id="controller-pointer-value" for="controller-pointer-speed">1×</output>
+          <label for="controller-scroll-speed">Touch scroll speed</label>
+          <input id="controller-scroll-speed" type="range" min="0.5" max="8" step="0.25" value="2" aria-describedby="controller-scroll-value">
+          <output id="controller-scroll-value" for="controller-scroll-speed">2×</output>
+          <label><input id="controller-auto-keyboard" type="checkbox"> Open keyboard for text fields</label>
+          <p class="subtle">If your phone keyboard stays closed, tap the typing field. Secondary click is unavailable on this host.</p>
+          <div class="controller-extra-keys" role="group" aria-label="Remote editing keys">
+            <button type="button" data-key="Tab">Tab</button><button type="button" data-key="Escape">Escape</button>
+            <button type="button" data-key="Backspace">Backspace</button><button type="button" data-key="Enter">Enter</button>
+            <button type="button" data-key="Home">Home</button><button type="button" data-key="End">End</button>
+          </div>
+          <fieldset id="controller-modifiers"><legend>Shortcut modifiers</legend>
+            <label><input type="checkbox" data-modifier="1"> Ctrl</label><label><input type="checkbox" data-modifier="2"> Shift</label>
+            <label><input type="checkbox" data-modifier="4"> Alt</label><label><input type="checkbox" data-modifier="8"> Command / Meta</label>
+          </fieldset>
+          <label for="controller-shortcut-key">Shortcut key</label><select id="controller-shortcut-key"></select>
+          <button id="controller-send-shortcut" type="button">Send shortcut</button>
+          <p class="subtle">Choose modifiers and a key, then Send shortcut. Some browser and system shortcuts stay on this device.</p>
+          <div class="controller-session-actions">
+            <button id="controller-leave" type="button">Leave controller</button>
+            <button id="controller-end-presentation" type="button">End presentation</button>
+            <button id="controller-stop" type="button">Stop sharing</button>
+          </div>
+        </div>
+      </details>
+    </section>
+  </main>
+</body>
+</html>

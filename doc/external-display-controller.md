@@ -1,6 +1,6 @@
 # External display and phone controller
 
-Status: isolated backend prototype and implementation plan, not an available casting feature. No phone, TV or
+Status: isolated browser/backend prototype, not a qualified casting feature. No phone, TV or
 casting device is available for physical qualification as of 17 November 2026.
 The existing receiver, trackpad, keyboard and private transport remain the base.
 
@@ -13,11 +13,17 @@ expiry/leave, explicit whole-session Stop and native/media recovery. WebRTC
 offers and frame/audio delivery remain with the presentation while the controller
 is hidden. These are server/software checks, not a phone or casting test.
 
-The desktop service does not enable this prototype. Presentation/controller
-pages, a beginner setup flow, separate presentation-ending action, adjustable
-pointer sensitivity and negotiated secondary click remain to implement. Do not
-enable the backend in an installed app until those clients and lifecycle checks
-are complete; existing receivers do not handle its new role messages.
+Separate browser views, guided mechanism selection, pointer sensitivity and
+independent End presentation are implemented in this source prototype. The
+desktop service negotiates it only when its own environment explicitly sets
+`DSKCPY_EXPERIMENTAL_PRESENTATION=1`; the default is off. Window/view-only grants,
+local preview and hosts without browser keyboard support cannot mint controller
+access. No installed application or running service has been changed.
+
+This needs matching server and receiver modules. Do not copy its browser assets
+into an older running application. Negotiated secondary click, actual casting
+and physical background/audio qualification remain open. The current human
+decision is to preserve the working session and prepare candidates only.
 
 ## Intended flow
 
@@ -40,8 +46,9 @@ dskcpy WebRTC playback, background execution or privacy behavior. [Samsung App
 Cast documentation](https://www.samsung.com/ae/support/mobile-devices/s23-series-app-cast-feature/)
 
 Keep setup credentials and pairing UI on the phone before presentation begins.
-Offer **Open controller in another browser** through the available share/open
-flow, with a copy-link fallback. Do not assume a browser can force another
+Offer **Share controller link** or **Copy controller link** after explicit
+controller creation, with a masked manual-copy fallback. Each action requires a
+separate gesture. Do not assume a browser can force another
 browser to open, or require the user to scan a QR displayed on the same phone.
 Never put an enrollment QR or connection secret over the cast desktop picture.
 
@@ -63,15 +70,14 @@ Neither specification guarantees support by the actual browser, display or
 private-network route. These are alternatives to evaluate, not new required
 accounts, public endpoints or infrastructure.
 
-## Required server change
+## Implemented server separation
 
-The current `gui/server/browser.mjs` owns one authenticated session and
-`gui/server/browser-session.mjs` owns one `peer`. Attaching another receiver
-replaces that peer, retires RTC and suspends capture. Its resume cookie does not
-represent independent roles. Reusing the existing attach path for a controller
-would disconnect the presentation; hiding the canvas would not fix this.
+The ordinary combined receiver retains its original single-peer lifecycle.
+`gui/server/browser.mjs` and `gui/server/browser-session.mjs` add independent role
+slots when this prototype is explicitly enabled. A controller does not reuse the
+media attach path or replace the presentation peer.
 
-Introduce explicit `presentation` and `controller` role slots around one native
+The explicit `presentation` and `controller` role slots share one native
 capture owner. Preserve the existing combined receiver as the default. An
 external-display session has at most one presentation media peer and one active
 controller input peer. The role is a server authorization property, not a URL
@@ -116,7 +122,8 @@ renew the session or restart an ended capture.
 Only one input owner exists. Entering controller mode releases input from the
 old combined peer before explicitly transferring ownership; the presentation
 does not retain fallback input permission. A second controller is rejected as
-busy until the user explicitly replaces the owner. Ownership is checked on
+busy; the current controller must leave before another invitation is created.
+Ownership is checked on
 every packet against both socket and generation, so stale queued input cannot
 reach the native host after transfer. Reconnection gets a fresh input epoch and
 starts with no held buttons or modifiers. Clipboard remains separately opted in
@@ -148,8 +155,13 @@ keyboard toggle reachable with the software keyboard open. Reuse committed
 Unicode/IME, Backspace, Enter, Tab, Escape, navigation keys and configured
 modifiers; do not replace the tested Gboard editing helper.
 
-Pointer sensitivity and secondary click are remaining implementation work.
-Secondary click needs an explicitly negotiated host capability and corresponding
+Pointer sensitivity ranges from 0.25× to 4×; finger scroll speed ranges from
+0.5× to 8×, with a 2× default. Only these numeric preferences are saved per
+receiver origin. The dedicated pad uses uniform horizontal/vertical pointer
+scaling, including a tall portrait pad. Sensitivity never changes scroll gain.
+
+Secondary click remains unavailable and is labelled accordingly. It needs an
+explicitly negotiated host capability and corresponding
 Mac/Windows validation; do not reinterpret an existing SRD1 field or emulate it
 as an undocumented long press. Coordinate that shared input change before
 implementation and preserve denial on older hosts.
@@ -166,6 +178,68 @@ with **Leave controller**, **End presentation** and **Stop session** actions tha
 match the lifecycle above. Full-screen mirroring must retain a clear privacy
 notice rather than displaying a reassuring app-only-cast indicator.
 
+These three explicit actions ask for confirmation. Cancel keeps the current
+session. End presentation retires its media authorization and disables input,
+while the controller remains authenticated on a status page with Stop sharing
+available. Neither the ended presentation nor native recovery may start capture
+again under that old grant. The ordinary receiver's power button also asks
+before ending the entire session; transport failures do not show that prompt.
+
+An explicit, initially unchecked background-playback choice changes the
+presentation's visibility policy for an App Cast trial. It is not detection that
+casting is active. Controller visibility always releases input, and page unload
+still closes/suspends its resources. Browser or OS suspension may stop playback.
+
+The controller contains no video, canvas, audio element or AudioContext. Its
+landscape keyboard layout keeps the pad on the left and the typing field,
+Close button and physical arrow directions on the right. Portrait stacks them.
+Native range controls, buttons and a shortcut selector provide keyboard paths;
+Ctrl/Shift/Alt/Command selection applies only to an explicit Send shortcut.
+Focus hints cannot interrupt Options or clear the preview during Gboard edits.
+
+## Source and generated-browser checks
+
+The source check includes 538 Node cases: 531 pass and seven optional skips.
+Both React UI builds pass. `desktop/test/presentation-ui.mjs` uses two separate
+browser contexts, generated video and an owned fake native input collector.
+Four flows each pass in Chromium and WebKit: portrait, landscape with a
+simulated 220px keyboard viewport, 320px RTL and 200% CSS zoom. These verify:
+
+- one-use role pairing, fragment removal, distinct resume cookies and one native
+  capture across controller reload;
+- tap, drag cancellation, Unicode text, shortcut/modifier packets, arrow keys,
+  adjustable/persisted gains and keyboard-only controls;
+- focus restoration, repeated focus hints during suggestion replacement,
+  reachable typing/Close controls and no Options overlap;
+- controller background input release while actual presentation decode counts
+  continue, no controller media/audio objects, and independent confirmed End
+  followed by whole-session Stop.
+
+Actual automated two-finger touch is exercised through Chromium's touch
+injection. WebKit exercises the other paths, not multi-touch hardware.
+WebKit's keyboard traversal uses native Option-Tab; no system preference or
+positive tabindex is introduced. No real screen-reader, phone IME, OS background,
+cast privacy or audible route is qualified here.
+
+The checks exposed and retained the initial failures: WebKit resize-observer
+feedback at zoom, Options overlapped by an oversized pad, and fixture mistakes
+around native dialog focus timing, selected video transport and Mac keyboard
+navigation. The production fixes schedule geometry changes on animation frames,
+write CSS sizes only when changed and preserve minimum pad content height.
+Fixtures now observe the active transport and native focus behavior without
+filtering page errors, forcing clicks or weakening continuity assertions.
+
+### Layout and keyboard review
+
+| Severity | Location | Before | After | Why |
+| --- | --- | --- | --- | --- |
+| HIGH, fixed | `gui/receiver/controller.css:9`, Options | Pad children covered the summary when its flex box shrank | Minimum content height keeps Options reachable | Complete the Options task; WCAG 2.4.11 focus visibility |
+| MEDIUM, fixed | `gui/receiver/controller.mjs:252`, geometry observer | WebKit repeatedly resized after zoom | RAF scheduling and changed-size writes | Stable keyboard-open interaction |
+| LOW, fixed | `gui/receiver/controller.html:41` and `gui/receiver/controller.css:19` | Mixed-direction preview and mirrored physical arrows | Automatic text direction and LTR physical arrow row | Predictable RTL typing/navigation |
+
+Approve the inspected generated layout and keyboard scope. Screen-reader,
+physical-device and casting acceptance remain unverified.
+
 ## Implementation and acceptance sequence
 
 1. Add opt-in server role authorization, ownership and independent transport
@@ -177,7 +251,8 @@ notice rather than displaying a reassuring app-only-cast indicator.
 3. Add presentation/controller pages and beginner setup, reusing current input
    modules. Use generated Chromium/WebKit flows for keyboard-open layouts,
    aspect changes, isolated audio and denied/busy/expired states.
-4. Coordinate and implement negotiated secondary click plus pointer sensitivity.
+4. Coordinate and implement negotiated secondary click; sensitivity is now in
+   the browser prototype.
    Qualify Mac and Windows behavior, including held-button cancellation.
 5. On real Samsung hardware, record model, Android/One UI, browser versions,
    display/cast model and casting method. Demonstrate external desktop video,

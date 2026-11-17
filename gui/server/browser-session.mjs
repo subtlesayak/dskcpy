@@ -15,7 +15,7 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
   onControllerLeave = () => {}, nativeEndGraceMs = 15000, rtcMediaFactory = createRtcMedia, onChange = () => {}, windowGroup = null, onRetireWindow }) {
   let native, peer, closed = false, ready = false, nativeTimer, awayTimer;
   const canSplitControl = presentationControl && !viewOnly;
-  let splitControl = false, controller, controllerActive = false, controllerAlive = true;
+  let splitControl = false, presentationEnded = false, controller, controllerActive = false, controllerAlive = true, controllerAuthorized = false;
   let controllerAwayTimer, controllerRateAt = 0, controllerEvents = 0;
   const inputPeer = () => splitControl ? controller : peer;
   const inputActive = () => !splitControl || controllerActive;
@@ -150,12 +150,12 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
     clipboardBroker.disable();
   }
   function presentationAvailable() {
-    return !closed && ready && Boolean(wireHeader) && !recovering && !suspended && !capturePaused
+    return !closed && !presentationEnded && ready && Boolean(wireHeader) && !recovering && !suspended && !capturePaused
       && Boolean(native && !native.destroyed && peer?.readyState === WebSocket.OPEN);
   }
   function presentationState() {
-    return { presentation: splitControl, presentationAvailable: presentationAvailable(),
-      controllerConnected: Boolean(controller?.readyState === WebSocket.OPEN), controllerActive };
+    return { presentation: splitControl, presentationEnded, presentationAvailable: presentationAvailable(),
+      controllerConnected: Boolean(controller?.readyState === WebSocket.OPEN), controllerActive, controllerAuthorized };
   }
   function publishPresentation() {
     if (!splitControl) return;
@@ -183,7 +183,7 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
       previous.close(revoke ? 1008 : 1012, revoke ? 'controller-ended' : 'controller-away');
       setTimeout(() => previous.terminate(), 1000).unref();
     }
-    if (revoke) onControllerLeave();
+    if (revoke) { controllerAuthorized = false; onControllerLeave(); }
     else if (!closed && splitControl) controllerAwayTimer = setTimeout(() => detachController(true), resumeMs);
     publishPresentation();
   }
@@ -196,6 +196,18 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
       publishPresentation();
     }
     return true;
+  }
+  function endPresentation() {
+    if (!splitControl || closed || presentationEnded) return false;
+    presentationEnded = true; command(11);
+    const previous = peer; peer = null;
+    stopRtc(); suspend(); drain(video, 4); drain(audio, 6); native?.resume();
+    if (previous?.readyState === WebSocket.OPEN) {
+      previous.send(JSON.stringify({ type: 'presentation-ended' }));
+      previous.close(1008, 'presentation-ended');
+      setTimeout(() => previous.terminate(), 1000).unref();
+    }
+    publishPresentation(); return true;
   }
   function writeInput(ws, message) {
     if (message[0] === 10) return clipboardBroker.request(ws, message);
@@ -210,7 +222,7 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
   function attachController(ws) {
     if (!splitControl || closed || controller) { ws.close(1008, 'controller-busy'); return false; }
     clearTimeout(controllerAwayTimer);
-    controller = ws; controllerActive = false; controllerAlive = true;
+    controller = ws; controllerActive = false; controllerAlive = true; controllerAuthorized = true;
     controllerAwayTimer = setTimeout(() => detachController(true), resumeMs);
     controllerRateAt = Date.now(); controllerEvents = 0; resetInputSubscriptions();
     ws.on('pong', () => { if (controller === ws) controllerAlive = true; });
@@ -295,6 +307,7 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
   }
   function attach(ws) {
     if (closed) { ws.close(1000); return; }
+    if (presentationEnded) { ws.close(1008, 'presentation-ended'); return; }
     if (peer && peer !== ws) detach(peer, true);
     keyboardStatusSubscribed = false;
     clipboardBroker.disable();
@@ -416,7 +429,7 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
     announce();
   }
   function prepareRecovery(explicitWindow = false) {
-    if (closed || (!canRecover && !(explicitWindow && canSwitchWindow))) return false;
+    if (closed || presentationEnded || (!canRecover && !(explicitWindow && canSwitchWindow))) return false;
     if (recovering && !native) return true;
     recovering = true; ready = false;
     adaptive.manual(); qualityAvailable = false; qualityFailed = false; lastQuality = null;
@@ -455,7 +468,7 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
     } catch { close('capture-recovery'); }
   }
   async function restartNative() {
-    if (closed || !canRecover || restarting) return false;
+    if (closed || presentationEnded || !canRecover || restarting) return false;
     restartTimes = restartTimes.filter(time => Date.now() - time < 30000);
     if (restartTimes.length >= 3) { close('capture-recovery'); return false; }
     restartTimes.push(Date.now());
@@ -588,7 +601,7 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
         captureRecovery: canRecover, restartNative, close, get closed() { return closed; } });
     } catch { close(); }
   }
-  return { start, attach, close, beginPresentation, attachController, detachController,
+  return { start, attach, close, beginPresentation, endPresentation, attachController, detachController,
     get presentation() { return splitControl; }, get controllerConnected() { return Boolean(controller); },
     get mediaMode() { return mediaMode; }, get recovering() { return recovering; }, get cleanup() { return rtcCleanup; } };
 }

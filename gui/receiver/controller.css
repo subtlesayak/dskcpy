@@ -1,0 +1,47 @@
+.phone-controller main { width: 100%; max-width: 64rem; margin-inline: auto; min-height: 100dvh; }
+.phone-controller header { margin-block-end: 8px; gap: 8px; }
+.phone-controller h1 { font-size: 1.2rem; margin: 0; }
+#controller-status { margin: 0; color: #64d9fa; font-size: .875rem; }
+#controller-error { color: #ffb4ab; overflow-wrap: anywhere; }
+#controller-error:empty { display: none; }
+#controller-join { max-width: 36rem; margin-inline: auto; }
+#controller-workspace { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.controller-pointer-area { display: grid; grid-template-rows: minmax(120px, 1fr) auto; gap: 8px; min-height: min-content; min-width: 0; flex: 1 0 auto; }
+.controller-connected main { min-height: 0; height: var(--controller-height, 100dvh); overflow-y: auto; display: grid; grid-template-rows: auto auto minmax(0, 1fr); gap: 8px; }
+.controller-connected #controller-error { grid-row: 2; margin: 0; }
+.controller-connected #controller-workspace { grid-row: 3; min-height: 0; }
+#controller-pad { position: relative; min-width: 0; min-height: 120px; border: 1px solid #627d8c; border-radius: 12px; background: #101b22; touch-action: none; overflow: hidden; display: grid; place-items: center; padding: 16px; }
+#controller-pad[aria-disabled="true"] { opacity: .65; }
+#controller-pad-help { max-width: 38ch; margin: 0; align-self: end; text-align: center; color: #a1b5c0; font-size: .875rem; pointer-events: none; }
+#controller-marker { position: absolute; inset-inline-start: 50%; top: 50%; width: 16px; height: 16px; border: 2px solid #64d9fa; border-radius: 50%; transform: translate(-50%, -50%); pointer-events: none; }
+.controller-actions, .controller-arrows { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.controller-arrows { grid-template-columns: repeat(4, minmax(0, 1fr)); margin-block-start: 6px; }
+.controller-arrows { direction: ltr; } /* Physical key directions do not mirror. */
+.controller-actions:has(#controller-resume:not([hidden])) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.controller-actions button, .controller-arrows button { min-height: 44px; padding: 6px 8px; font-size: .875rem; }
+#controller-typing { min-width: 0; }
+.controller-typing-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; }
+#controller-input { font: inherit; font-size: 1rem; resize: none; min-width: 0; width: 100%; min-height: 48px; max-height: 5rem; padding: 10px; color: inherit; background: #080f13; border: 1px solid #627d8c; border-radius: 8px; }
+.controller-option-content { padding: 12px 4px; display: grid; gap: 8px; min-width: 0; }
+.controller-option-content p { margin: 0 0 8px; }
+.controller-extra-keys, .controller-session-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+#controller-modifiers { display: flex; flex-wrap: wrap; gap: 8px 16px; border: 1px solid #405461; border-radius: 8px; margin: 8px 0; padding: 12px; }
+.controller-option-content input[type="checkbox"] { width: auto; min-height: 0; }
+.controller-option-content label:has(input[type="checkbox"]) { display: inline-flex; gap: 8px; align-items: center; min-height: 44px; }
+.controller-option-content output { font-variant-numeric: tabular-nums; }
+#controller-stop { color: #ffb4ab; }
+#controller-pad:focus-visible { outline: 3px solid #64d9fa; outline-offset: 3px; }
+.controller-keyboard-open main { padding-block: 4px; gap: 4px; }
+.controller-keyboard-open header h1 { display: none; }
+.controller-keyboard-open header { margin: 0; }
+.controller-keyboard-open #controller-workspace { gap: 6px; }
+.controller-keyboard-open .controller-pointer-area { grid-template-rows: minmax(64px, 1fr) auto; }
+.controller-keyboard-open #controller-pad { min-height: 64px; padding: 8px; }
+.controller-keyboard-open .keyboard-help { display: none; }
+.controller-keyboard-open #controller-pad-help { font-size: .75rem; }
+@media (max-height: 340px) { .controller-keyboard-open #controller-pad-help { display: none; } }
+@media (min-width: 560px) and (max-height: 360px) {
+  .controller-keyboard-open #controller-workspace { display: grid; grid-template-columns: minmax(0, 1fr) minmax(220px, .9fr); grid-template-rows: minmax(0, 1fr); gap: 12px; }
+  .controller-keyboard-open #controller-options { display: none; }
+}
+@media (forced-colors: active) { #controller-pad:focus-visible { outline-color: Highlight; } #controller-marker { border-color: Highlight; } }

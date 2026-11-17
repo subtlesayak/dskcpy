@@ -12,6 +12,7 @@ import { createVideoFeedback } from './video-feedback.mjs';
 import { createWindowChooser } from './window-chooser.mjs';
 import { createVideoPreference } from './video-preference.mjs';
 import { createBrowserKeyboard, keyboardUsage, keyPacket } from './keyboard.mjs';
+import { createPresentationUI } from './presentation.mjs';
 
 const $ = (id) => document.getElementById(id);
 function takeJoinFragment() {
@@ -29,7 +30,9 @@ function setRailLabel(id, label) {
 }
 const canvas = $('display');
 const rtcDisplay = $('rtc-display');
-const away = () => receiverIsAway({ hidden: document.hidden, pictureInPictureElement: document.pictureInPictureElement, video: rtcDisplay, presentationMode: rtcDisplay.webkitPresentationMode });
+let presentationUI = null, presentationRole = false, presentationCapable = false;
+const away = () => receiverIsAway({ hidden: document.hidden, pictureInPictureElement: document.pictureInPictureElement, video: rtcDisplay, presentationMode: rtcDisplay.webkitPresentationMode,
+  presentationPlayback: presentationRole && presentationUI?.backgroundPlayback === true });
 const remembered = rememberedBrowser({ reconnect: () => { resumeAllowed = true; void resumeSession(); } });
 let rtcReceiver, mediaMode = 'webcodecs';
 let keyboardSupported = false, keyboardOpen = false, viewOnly = false, windowAudioAllowed = false, windowAudioUnavailable = false;
@@ -173,7 +176,7 @@ scrollSpeedControl?.addEventListener('input', () => {
 const trackpadPresent = ['trackpad-mode', 'trackpad-cursor', 'trackpad-help'].every(id => $(id));
 let trackMoveTimer, pendingTrackMove;
 function canSendPointer() {
-  return !mediaSwitching && !viewNavigationActive() && authenticated && header && !paused && !document.hidden && !away() && touchEnabled && !viewOnly && ws?.readyState === WebSocket.OPEN;
+  return !presentationRole && !mediaSwitching && !viewNavigationActive() && authenticated && header && !paused && !document.hidden && !away() && touchEnabled && !viewOnly && ws?.readyState === WebSocket.OPEN;
 }
 function flushTrackMove() {
   clearTimeout(trackMoveTimer); trackMoveTimer = null;
@@ -298,10 +301,10 @@ if (viewPresent) {
 }
 const keyboardInput = createBrowserKeyboard({ field: $('keyboard-input'), send,
   contextControls: ['typing-zoom', 'typing-layout'].map($),
-  canSend: () => !mediaSwitching && !viewNavigationActive() && !keyboardBlocked && keyboardSupported && authenticated && header && !paused && !document.hidden && touchEnabled && !viewOnly,
+  canSend: () => !presentationRole && !mediaSwitching && !viewNavigationActive() && !keyboardBlocked && keyboardSupported && authenticated && header && !paused && !document.hidden && touchEnabled && !viewOnly,
   onError: (message) => { $('error').textContent = message; } });
 function canSendKeys() {
-  return !mediaSwitching && !viewNavigationActive() && !keyboardBlocked && keyboardSupported && authenticated && header && !paused && !document.hidden && touchEnabled && !viewOnly && ws?.readyState === WebSocket.OPEN;
+  return !presentationRole && !mediaSwitching && !viewNavigationActive() && !keyboardBlocked && keyboardSupported && authenticated && header && !paused && !document.hidden && touchEnabled && !viewOnly && ws?.readyState === WebSocket.OPEN;
 }
 const clipboardTools = $('clipboard-tools') ? createBrowserClipboard({ section: $('clipboard-tools'), field: $('clipboard-text'), toggle: $('clipboard-enable'), status: $('clipboard-status'),
   buttons: { read: $('clipboard-read-host'), copyLocal: $('clipboard-copy-local'), readLocal: $('clipboard-read-local'), copyHost: $('clipboard-copy-host'), pasteHost: $('clipboard-paste-host') },
@@ -466,7 +469,7 @@ function clearMedia() {
   header = false; videoConfig = null; configBytes = null; audioConfig = null;
   paintTrackpad(); paintShortcuts();
 }
-function disconnect({ stopSession = false } = {}) {
+function disconnect({ stopSession = false, keepSession = false } = {}) {
   if (closing) return;
   closing = true;
   const cancelRetainedCapture = mediaSwitching || sameCaptureRecovery;
@@ -476,12 +479,12 @@ function disconnect({ stopSession = false } = {}) {
   generation++;
   resumePendingMedia = null;
   sameCaptureRecovery = false;
-  if (sessionExpected && (stopSession || cancelRetainedCapture || ws?.readyState !== WebSocket.OPEN)) void fetch('/stream/session', { method: 'POST', credentials: 'same-origin' }).catch(() => {});
+  if (!keepSession && sessionExpected && (stopSession || cancelRetainedCapture || ws?.readyState !== WebSocket.OPEN)) void fetch('/stream/session', { method: 'POST', credentials: 'same-origin' }).catch(() => {});
   sessionExpected = false; resumeDeadline = 0; clearFocusCapability();
   if (document.fullscreenElement) void document.exitFullscreen().catch(() => {});
   clearTimeout(retryTimer); clearTimeout(connectionTimer);
   releaseTouches(); stopAudio(); drainAudioAcks(true);
-  ws?.close(4000, 'Disconnected by viewer'); ws = null;
+  ws?.close(keepSession ? 4001 : 4000, 'Disconnected by viewer'); ws = null;
   clearMedia();
   trackpadMode = false; trackpad.reset(); desktopView.reset();
   hideKeyboard(); keyboardSupported = false; viewOnly = false; windowAudioAllowed = false; windowAudioUnavailable = false; $('keyboard').hidden = true;
@@ -499,9 +502,30 @@ function disconnect({ stopSession = false } = {}) {
   setRailLabel('pause', 'Pause video'); $('pause').setAttribute('aria-label', 'Pause video');
   $('audio').setAttribute('aria-label', audioLabel('off'));
   setControlTray(); $('show-controls').hidden = true;
+  presentationCapable = false; presentationUI?.reset();
   if (!document.hidden) $('session-key').focus();
   closing = false;
 }
+
+function endPresentationLocal() {
+  disconnect({ keepSession: true });
+  $('status').textContent = 'Presentation ended · the phone controller can stop the session';
+}
+presentationUI = createPresentationUI({ document, window, navigator, location,
+  canCreate: () => authenticated && header && !paused && !away() && !viewOnly && ws?.readyState === WebSocket.OPEN,
+  releaseInput: releaseTouches, onPlaybackChange: updatePause, onEnd: endPresentationLocal,
+  onRole: role => {
+    presentationRole = role; document.body.classList.toggle('presentation-role', role);
+    document.title = role ? 'Presentation · dskcpy' : 'Receiver · dskcpy';
+    if (role) {
+      releaseTouches(); hideKeyboard(); setControlTray(); touchEnabled = false; keyboardSupported = false;
+      clipboardTools?.setSupported(false); clearFocusCapability(); $('keyboard').hidden = true;
+      $('touch').disabled = true; $('drag-mode').disabled = true; updateArrowAvailability();
+      sameCaptureRecovery = true; remembered.authenticated(true);
+    }
+    setRailLabel('disconnect', role ? 'Stop sharing' : 'Disconnect');
+  },
+});
 
 async function resumeSession() {
   if (away() || ws || probing || !supported || !resumeAllowed) return;
@@ -599,6 +623,7 @@ function connect(key = null, requestedMode = preferredMode) {
   socket.addEventListener('close', (event) => {
     clearTimeout(timeout);
     if (mine !== generation) return;
+    if (presentationRole && event.reason === 'presentation-ended') { endPresentationLocal(); return; }
     generation++; // Retire old async media work before the reconnect delay.
     resumePendingMedia = null;
     clearTimeout(connectionTimer);
@@ -629,6 +654,18 @@ function connect(key = null, requestedMode = preferredMode) {
     try {
       if (typeof event.data === 'string') {
         const message = JSON.parse(event.data);
+        if (message.type === 'presentation-mode') {
+          if (!authenticated || !presentationCapable || !presentationUI || message.role !== 'presentation') throw Error('Unexpected presentation role.');
+          presentationUI.role(true); return;
+        }
+        if (message.type === 'presentation-state') {
+          if (!authenticated || !presentationRole || !presentationUI) throw Error('Unexpected presentation state.');
+          presentationUI.state(message); return;
+        }
+        if (message.type === 'presentation-ended') {
+          if (!authenticated || !presentationRole) throw Error('Unexpected presentation end.');
+          endPresentationLocal(); return;
+        }
         if (message.type === 'media-fallback') {
           if (!authenticated || !fallbackNegotiated || !canFallback || fallbackAcknowledged || mediaMode !== 'webrtc' || message.mediaMode !== 'webcodecs') throw Error('Unexpected media recovery response.');
           fallbackAcknowledged = true; sameCaptureRecovery = true; prepareMediaChange(); return;
@@ -654,7 +691,7 @@ function connect(key = null, requestedMode = preferredMode) {
           rtcReceiver = createRtcReceiver({ element: rtcDisplay,
             signal: (value) => { if (mine === generation && !mediaSwitching && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(value)); },
             onPlaying: () => {
-              if (mine !== generation || mediaSwitching || paused || document.hidden) return;
+              if (mine !== generation || mediaSwitching || paused || away()) return;
               clearTimeout(timeout); $('status').textContent = streamingStatus(); $('error').textContent = '';
               $('stats').textContent = `${canvas.width} × ${canvas.height} · WebRTC · native browser video and audio`;
             }, onError: (message) => { if (mine === generation && !mediaSwitching) $('error').textContent = message; },
@@ -716,16 +753,20 @@ function connect(key = null, requestedMode = preferredMode) {
         }
         windowSwitchExpected=false;
         viewOnly = message.viewOnly === true;
+        presentationCapable = message.presentationControl === true && !viewOnly;
+        if (message.role !== undefined && (!presentationCapable || !['combined', 'presentation'].includes(message.role))) throw Error('Invalid presentation role.');
+        presentationUI?.available(presentationCapable);
+        presentationUI?.role(message.role === 'presentation');
         windowAudioAllowed = viewOnly && message.windowAudio === true; windowAudioUnavailable = false;
         if ($('window-audio-scope')) $('window-audio-scope').hidden = !windowAudioAllowed;
         setRailLabel('audio',audioLabel(muted?'off':'on'));
         // Never silently replace a window grant with remembered full-desktop access.
-        sameCaptureRecovery = viewOnly;
+        sameCaptureRecovery = viewOnly || presentationRole;
         windowChooser?.supported(viewOnly && message.windowSwitch === true);
         if (windowChooser && viewOnly && message.windowSwitch === true) socket.send('window-select-subscribe');
         else windowChooser?.clear();
-        remembered.authenticated(viewOnly);
-        keyboardSupported = message.keyboard === true && !viewOnly;
+        remembered.authenticated(viewOnly || presentationRole);
+        keyboardSupported = message.keyboard === true && !viewOnly && !presentationRole;
         clipboardTools?.setSupported(keyboardSupported && message.clipboard === true);
         keyboardStatusSupported = keyboardSupported && message.keyboardStatus === true;
         if (keyboardStatusSupported) socket.send('keyboard-status-subscribe');
@@ -737,7 +778,7 @@ function connect(key = null, requestedMode = preferredMode) {
         if (autoSetting) autoSetting.hidden = !focusSupported;
         updateArrowAvailability();
         $('keyboard').hidden = !keyboardSupported;
-        touchEnabled = !viewOnly && (!restoring || touchEnabled); $('touch').disabled = viewOnly; $('drag-mode').disabled = viewOnly;
+        touchEnabled = !viewOnly && !presentationRole && (!restoring || touchEnabled); $('touch').disabled = viewOnly || presentationRole; $('drag-mode').disabled = viewOnly || presentationRole;
         setRailLabel('touch', viewOnly ? 'Window · view only' : touchEnabled ? 'Touch on' : 'Touch off');
         $('touch').setAttribute('aria-pressed', String(touchEnabled));
         for (const id of ['volume', 'window']) $(id).hidden = viewOnly;
@@ -754,8 +795,9 @@ function connect(key = null, requestedMode = preferredMode) {
         if (data.byteLength !== 16 || data.getUint32(0) !== 0x53524431 || data.getUint32(4) !== 1) throw new Error('Unsupported stream protocol.');
         canvas.width = data.getUint32(8); canvas.height = data.getUint32(12);
         header = true; action(11); // Start muted. Enable only from a user gesture.
+        presentationUI?.available(presentationCapable);
         fitCanvas(); updatePause();
-        if (!muted && audioContext?.state === 'running' && !document.hidden) action(10);
+        if (!muted && audioContext?.state === 'running' && !away()) action(10);
         return;
       }
       if (data.byteLength < 16 || data.getUint32(0) !== data.byteLength - 16) throw new Error('Incomplete media packet.');
@@ -779,7 +821,7 @@ function connect(key = null, requestedMode = preferredMode) {
         if (mediaMode !== 'webrtc') configureAudio(); return;
       }
       if (flags === 8) {
-        if (!muted && !paused && !document.hidden && audio?.state === 'configured' && audio.decodeQueueSize < 4) {
+        if (!muted && !paused && !away() && audio?.state === 'configured' && audio.decodeQueueSize < 4) {
           try {
             pendingAudioAcks.push(timestamp);
             audio.decode(new EncodedAudioChunk({ type: 'key', timestamp, data: payload }));
@@ -795,7 +837,7 @@ function connect(key = null, requestedMode = preferredMode) {
         createVideoDecoder();
         if (flags & 1) return;
       }
-      if (paused || document.hidden) { mediaAcks.acknowledge(4, timestamp); return; }
+      if (paused || away()) { mediaAcks.acknowledge(4, timestamp); return; }
       if (!video || !configBytes) throw new Error('Missing H.264 configuration.');
       const keyFrame = Boolean(flags & 2);
       let encoded = payload;
@@ -807,13 +849,13 @@ function connect(key = null, requestedMode = preferredMode) {
   });
 
   function createVideoDecoder() {
-    video ||= createVideoReceiver({ suspended: paused || document.hidden,
+    video ||= createVideoReceiver({ suspended: paused || away(),
       onRecovery: (message) => { if (mine === generation) $('status').textContent = message; },
       onError: (message) => { if (mine === generation) fail(message); },
       onKeyframe: () => { if (mine === generation) action(8); },
       onAck: (timestamp) => { if (mine === generation) mediaAcks.acknowledge(4, timestamp); },
       onFrame: (frame) => {
-        if (mine !== generation || paused || document.hidden) return;
+        if (mine !== generation || paused || away()) return;
         context.drawImage(frame, 0, 0, canvas.width, canvas.height); frames++; windowFrames++;
         clearTimeout(timeout);
         $('status').textContent = streamingStatus();
@@ -842,7 +884,7 @@ function configureAudio() {
     output: (data) => {
       try {
         if (mine !== generation || epoch !== audioGeneration) return;
-        if (!muted && !paused && !document.hidden && audioContext?.state === 'running') {
+        if (!muted && !paused && !away() && audioContext?.state === 'running') {
           const now = audioContext.currentTime;
           // onended is dispatched on the main thread and may arrive late;
           // completed sound must not consume the bounded future-source budget.

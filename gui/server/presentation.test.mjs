@@ -4,7 +4,7 @@ import { once } from 'node:events';
 import net from 'node:net';
 import { WebSocket } from 'ws';
 import { createBrowserReceiver } from './browser.mjs';
-import { touchPacket, scrollPacket, ack } from '../receiver/protocol.mjs';
+import { touchPacket, scrollPacket, ack, controllerJoinUrl, parseControllerFragment } from '../receiver/protocol.mjs';
 import { clipboardRequest } from '../receiver/clipboard.mjs';
 
 const header = Buffer.from('535244310000000100000280000001e0', 'hex');
@@ -76,6 +76,8 @@ test('controller creation is opt-in, same-origin, explicit and full-desktop only
   assert.equal(texts(defaults.presentation)[0].presentationControl, undefined);
   const viewOnly = await fixture(t, { policy: { viewOnly: true, keyboard: true } });
   assert.equal((await viewOnly.post('stream/controller/invite')).status, 403);
+  const disallowed = await fixture(t, { policy: { keyboard: true, presentationControl: false } });
+  assert.equal((await disallowed.post('stream/controller/invite')).status, 403);
   const f = await fixture(t);
   assert.equal((await f.post('stream/controller/invite', '')).status, 403);
   assert.equal((await f.post('stream/controller/invite', f.cookie, {}, { Origin: 'https://untrusted.invalid' })).status, 403);
@@ -298,4 +300,34 @@ test('clipboard transfer cancels old work and requires a new controller opt-in',
   const [code] = await ended; assert.equal(code, 1008);
   assert.equal(denied.bytes().includes(Buffer.from(clipboardRequest(0, 1))), false);
   assert.equal(denied.presentation.readyState, WebSocket.OPEN);
+});
+
+test('End presentation revokes only the picture role and cannot silently restart capture', async t => {
+  for (const fromController of [false, true]) {
+    const f = await fixture(t, { policy: { keyboard: true, captureRecovery: true } }), c = await f.pair(); c.ws.send('resume');
+    const ended = once(f.presentation, 'close');
+    const response = await f.post(fromController ? 'stream/controller/end-presentation' : 'stream/presentation/end', fromController ? c.cookie : f.cookie, {});
+    assert.ok(response.ok); await ended;
+    await until(() => texts(c.ws).some(m => m.type === 'controller-state' && m.presentationEnded));
+    assert.equal(c.ws.readyState, WebSocket.OPEN); assert.equal((await f.controllerStatus(c.cookie)).resumable, true);
+    for (const token of [f.cookie, f.cookie.split('=')[0] + '=' + 'A'.repeat(43)]) {
+      const status = await fetch(f.invitation.url + 'stream/session', { headers: { Cookie: token } });
+      assert.equal((await status.json()).resumable, false, 'neither old nor zeroed cookie may restore presentation');
+    }
+    assert.equal(await f.bridge().restartNative(), false); assert.equal(f.calls(), 1);
+    assert.equal(f.receiver.status().connected, true, 'controller still has the separate Stop action');
+    assert.equal((await f.post('stream/controller/stop', c.cookie, {})).status, 204);
+    assert.equal(f.receiver.status().connected, false);
+  }
+});
+
+test('controller navigation uses an independent public path and a strict role fragment', () => {
+  const key = 'x'.repeat(43), url = new URL(controllerJoinUrl('https://receiver.test/', key));
+  assert.match(url.pathname, /^\/controller\/[a-f0-9]{32}$/); assert.equal(url.search, '');
+  assert.equal(parseControllerFragment(url.hash), key);
+  assert.equal(parseControllerFragment('#connect=' + key), null);
+  assert.equal(parseControllerFragment('#controller=' + key + '&extra=1'), null);
+  assert.equal(parseControllerFragment('#controller=' + 'x'.repeat(32)), null);
+  for (const address of ['http://receiver.test/', 'https://user@receiver.test/', 'https://receiver.test/path', 'https://receiver.test/?code=value'])
+    assert.throws(() => controllerJoinUrl(address, key));
 });

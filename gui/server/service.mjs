@@ -57,6 +57,7 @@ export function createControlService({
   let browserUsbCleanupPending = Promise.resolve();
   const trustedDevices = createTrustedDevices({ filename: trustedDevicesPath });
   const browserReceiver = createBrowserReceiver({ configuredPort: browserPort,
+    presentationControl: environment.DSKCPY_EXPERIMENTAL_PRESENTATION === '1',
     origin: environment.DSKCPY_VIEWER_ORIGIN, trustedDevices,
     onTrustedConnect: grant => prepareBrowser({ ...grant.profile, browserTransport: 'internet' }, grant),
     rtcBind: environment.DSKCPY_VIEWER_RTC_BIND || '127.0.0.1',
@@ -417,6 +418,7 @@ export function createControlService({
       }
       if (attempt.signal.aborted) throw new Error('Connection cancelled.');
       const invitation = await browserReceiver.invite(mode, { viewOnly: Boolean(config.windowId),
+        presentationControl: mode !== 'local' && !config.windowId && readiness.features?.browserKeyboard === true,
         windowTargets: rawConfig.browserWindows, windowAudio:config.browserWindowAudio === true,
         initialWindow: {windowId:config.windowId,windowOwnerPid:config.windowOwnerPid},
         adaptiveVideo: ['darwin','win32'].includes(platform) && !config.windowId && config.browserAdaptiveVideo === true && readiness.features?.browserAdaptiveVideo === true,

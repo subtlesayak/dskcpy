@@ -35,6 +35,21 @@ export function parseJoinFragment(fragment) {
   return /^#connect=([A-Za-z0-9_-]{32})$/.exec(fragment)?.[1] || null;
 }
 
+export function controllerJoinUrl(address, key) {
+  if (!/^[A-Za-z0-9_-]{43}$/.test(key)) throw Error('Invalid controller invitation.');
+  const url = new URL(address);
+  const local = url.protocol === 'http:' && ['127.0.0.1', 'localhost'].includes(url.hostname);
+  if ((!local && url.protocol !== 'https:') || url.username || url.password || url.pathname !== '/' || url.search || url.hash)
+    throw Error('Invalid controller address.');
+  url.pathname = `/controller/${crypto.randomUUID().replaceAll('-', '')}`;
+  url.hash = `controller=${key}`;
+  return url.href;
+}
+
+export function parseControllerFragment(fragment) {
+  return /^#controller=([A-Za-z0-9_-]{43})$/.exec(fragment)?.[1] || null;
+}
+
 export function ack(type, timestamp) {
   const bytes = new Uint8Array(9);
   bytes[0] = type;

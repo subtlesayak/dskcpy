@@ -29,6 +29,10 @@ const assets = new Map([
   ['/remembered.mjs', ['remembered.mjs', 'text/javascript; charset=utf-8']],
   ['/lifecycle.mjs', ['lifecycle.mjs', 'text/javascript; charset=utf-8']],
   ['/receiver.css', ['receiver.css', 'text/css; charset=utf-8']],
+  ['/controller', ['controller.html', 'text/html; charset=utf-8']],
+  ['/controller.mjs', ['controller.mjs', 'text/javascript; charset=utf-8']],
+  ['/controller.css', ['controller.css', 'text/css; charset=utf-8']],
+  ['/presentation.mjs', ['presentation.mjs', 'text/javascript; charset=utf-8']],
 ]);
 
 export function receiverOrigin(value) {
@@ -201,7 +205,7 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
         || req.headers['sec-fetch-site'] === 'cross-site') { json(403, { error: 'Controller authorization required.' }); return; }
     if (req.url === '/stream/controller/invite') {
       const active = session;
-      if (!mayResume(req) || inputPolicy.viewOnly || !presentationControl) { json(403, { error: 'Use the full-desktop receiver to authorize a controller.' }); return; }
+      if (!mayResume(req) || !inputPolicy.presentationControl || inputPolicy.viewOnly || !presentationControl) { json(403, { error: 'Use a full-desktop receiver with phone-controller support to authorize a controller.' }); return; }
       let body; try { body = await readTrustBody(req); } catch { json(400, { error: 'Expected a controller invitation request.' }); return; }
       if (Object.keys(body).length !== 1 || body.action !== 'create') { json(400, { error: 'Explicit controller invitation action required.' }); return; }
       // Authentication and session identity must still hold after reading I/O.
@@ -218,6 +222,10 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
       json(201, { key, expiresAt: new Date(controllerGrant.expiresAt).toISOString(), role: 'controller' }); return;
     }
     if (!mayResumeController(req)) { json(403, { error: 'Controller authorization required.' }); return; }
+    if (req.url === '/stream/controller/end-presentation') {
+      session.token?.fill(0); session.token = null;
+      session.endPresentation(); json(200, { ended: true }); return;
+    }
     if (req.url === '/stream/controller/stop') cancel();
     else if (req.url === '/stream/controller/leave') { clearControllerGrant(); session.detachController(true); }
     else { json(404, {}); return; }
@@ -282,15 +290,23 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
     // Public per-launch document paths prevent fragment-only reuse of stale
     // receiver scripts. They grant no access; authentication stays in /stream.
     const asset = assets.get(req.url)
+      || (presentationControl === true && /^\/controller\/[a-f0-9]{32}$/.test(req.url) ? assets.get('/controller') : undefined)
       || (/^\/join\/[a-f0-9]{32}$/.test(req.url) ? assets.get('/join') : undefined);
     if (!allowedHost(req.headers.host)) { res.writeHead(403).end(); return; }
+    if (req.url.startsWith('/controller') && presentationControl !== true) { res.writeHead(404).end(); return; }
     if (req.url === '/health' && req.method === 'GET') {
       res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ service: 'dskcpy-browser-receiver', instance: healthInstance }));
       return;
     }
     if (['/stream/remember', '/stream/remember/status', '/stream/trusted/connect'].includes(req.url)) { await trustedRequest(req, res); return; }
-    if (['/stream/controller/invite', '/stream/controller/session', '/stream/controller/leave', '/stream/controller/stop'].includes(req.url)) {
+    if (['/stream/controller/invite', '/stream/controller/session', '/stream/controller/leave', '/stream/controller/stop', '/stream/controller/end-presentation'].includes(req.url)) {
       await controllerRequest(req, res); return;
+    }
+    if (req.url === '/stream/presentation/end' && req.method === 'POST') {
+      if (presentationControl !== true || !mayResume(req) || req.headers.origin !== session.origin || !session.presentation) { res.writeHead(403).end(); return; }
+      session.token.fill(0); session.token = null; session.endPresentation();
+      res.setHeader('Set-Cookie', `${cookieName()}=; HttpOnly; SameSite=Strict; Path=/stream; Max-Age=0${req.headers.origin.startsWith('https:') ? '; Secure' : ''}`);
+      res.writeHead(204).end(); return;
     }
     if (req.url === '/stream/session' && req.method === 'GET') {
       const resumable = mayResume(req);
@@ -428,6 +444,7 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
       textFocusGeometry: policy.textFocusGeometry === true && policy.textFocus === true && policy.keyboard === true && policy.viewOnly !== true,
       captureRecovery: policy.captureRecovery === true && policy.viewOnly !== true };
     inputPolicy.adaptiveVideo = policy.adaptiveVideo === true && policy.viewOnly !== true;
+    inputPolicy.presentationControl = presentationControl === true && policy.presentationControl !== false && policy.viewOnly !== true;
     inputPolicy.windowAudio = policy.viewOnly === true && policy.windowAudio === true && !grant;
     if (windowGroup) inputPolicy.windowGroup = windowGroup;
     invitation = randomBytes(24);

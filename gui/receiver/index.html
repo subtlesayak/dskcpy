@@ -134,6 +134,8 @@
               <p id="touch-scroll-speed-help" class="subtle">Adjust how far finger swipes scroll. Pointer movement and mouse-wheel scrolling keep their own speed.</p>
               <p class="subtle">Tap to click. One or two fingers scroll. Use the selection icon to select text or drag items; two fingers still scroll.</p>
             </details>
+            <div id="presentation-entry" hidden><button id="presentation-open" type="button">Use phone as touchpad and keyboard</button><p id="presentation-controller-status" class="subtle" role="status"></p></div>
+            <button id="presentation-end" type="button" hidden>End presentation</button>
             <details id="connection-details"><summary>Connection details</summary><p id="stats" class="subtle">Waiting for the first decoded frame…</p></details>
           </section>
         </div>
@@ -164,6 +166,31 @@
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
       </button></div>
     </section>
+    <dialog id="presentation-setup" aria-labelledby="presentation-title" aria-describedby="presentation-intro">
+      <div class="panel-heading"><h2 id="presentation-title">Use phone as touchpad and keyboard</h2><button id="presentation-close" type="button">Done</button></div>
+      <p id="presentation-intro">Keep the desktop picture in this browser. Your phone gets a separate controller for mouse and keyboard input.</p>
+      <form id="presentation-form">
+        <label for="presentation-method">Where will the picture appear?</label>
+        <select id="presentation-method" required aria-describedby="presentation-method-help presentation-error">
+          <option value="">Choose a display connection</option>
+          <option value="app-cast">Samsung Smart View → App Cast</option>
+          <option value="display-browser">A browser on another display</option>
+          <option value="mirror">Full phone mirroring · includes phone UI</option>
+        </select>
+        <p id="presentation-method-help" class="subtle"></p>
+        <p>Creating a controller link gives that browser control of this desktop. Touch and typing stop in the presentation browser.</p>
+        <button id="presentation-create" type="submit">Create controller link</button>
+      </form>
+      <p id="presentation-link-status" role="status"></p>
+      <div id="presentation-link-actions" hidden>
+        <div class="quick-controls"><button id="presentation-copy" type="button">Copy controller link</button><button id="presentation-share" type="button">Share controller link</button></div>
+        <p>Open the link in a different browser app on your phone. Then close this setup before starting App Cast. No code entry is needed.</p>
+        <div id="presentation-copy-fallback" hidden><label for="presentation-private-link">Private controller link</label><input id="presentation-private-link" type="password" readonly autocomplete="off" aria-describedby="presentation-copy-help"><p id="presentation-copy-help">Select and copy the hidden link, then paste it into the other browser. Do this before casting.</p></div>
+      </div>
+      <label id="presentation-background-setting" hidden><input id="presentation-background" type="checkbox"> Keep this presentation playing while I use other phone apps</label>
+      <p id="presentation-background-help" class="subtle" hidden>For app-only casting after you start App Cast. Your phone must keep the presentation browser running. Full phone mirroring can show your keyboard, notifications and other apps.</p>
+      <p id="presentation-error" role="alert"></p>
+    </dialog>
   </main>
 </body>
 </html>

@@ -1,7 +1,7 @@
 import { createTouchScroll } from './protocol.mjs';
 // Relative gestures over a fitted video surface. Only local coordinates live
 // here; authentication, lifecycle gating and transport belong to the receiver.
-export function createRelativeTrackpad({ geometry, emit, changed = () => {}, now = () => performance.now(), scrollGain = () => 1 }) {
+export function createRelativeTrackpad({ geometry, emit, changed = () => {}, now = () => performance.now(), scrollGain = () => 1, pointerGain = () => 1, uniformPointer = false }) {
   let x = .5, y = .5, dragging = false, gesture = null;
   const fingerScroll = createTouchScroll({ gain: scrollGain });
   const points = new Map();
@@ -22,8 +22,11 @@ export function createRelativeTrackpad({ geometry, emit, changed = () => {}, now
   function move(dx, dy) {
     const g = bounds();
     if (!g || ![dx, dy].every(Number.isFinite)) return;
-    x = Math.max(0, Math.min(1, x + dx / g.cssWidth));
-    y = Math.max(0, Math.min(1, y + dy / g.cssHeight));
+    const value = pointerGain();
+    const gain = Number.isFinite(value) && value >= .25 && value <= 4 ? value : 1;
+    const cssHeight = uniformPointer ? g.cssWidth * g.height / g.width : g.cssHeight;
+    x = Math.max(0, Math.min(1, x + dx * gain / g.cssWidth));
+    y = Math.max(0, Math.min(1, y + dy * gain / cssHeight));
     output(dragging ? 'move' : 'hover'); changed();
   }
   function click() {
