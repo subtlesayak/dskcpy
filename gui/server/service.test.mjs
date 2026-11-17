@@ -1057,3 +1057,15 @@ test('owner Stop during new window readiness cancels the switch before a second 
  await f.request('/api/stream/stop',{});release();await waitFor(()=>!f.publicState().running);
  assert.equal(f.children.length,1);assert.equal(f.publicState().browser.connected,false);assert.equal(f.publicState().error,null);
 });
+
+test('owner application-audio opt-in is native-capability gated and never enables window input',async t=>{
+ for(const capable of [false,true]){
+  const f=await fixture(t,{platform:'darwin',readinessProbe:async()=>({...ready,features:{macWindowCapture:true,browserWindowAudio:capable,browserKeyboard:true,browserClipboard:true}})});
+  const result=await f.request('/api/browser/invite',{windowId:17,windowOwnerPid:42,browserWindowAudio:true,browserClipboard:true});
+  assert.equal(result.code,capable?201:400);if(!capable){assert.equal(f.children.length,0);continue;}
+  const ws=new WebSocket(result.body.url.replace('http:','ws:')+'stream',{origin:result.body.url.slice(0,-1)});ws.on('error',()=>{});t.after(()=>ws.terminate());await once(ws,'open');ws.send(result.body.key);
+  await waitFor(()=>f.children.length===1);const args=f.children[0].args;
+  assert.ok(args.includes('--reverse-window-audio')&&args.includes('--reverse-window=17')&&args.includes('--reverse-window-owner=42'));
+  assert.ok(!args.includes('--no-audio')&&!args.includes('--reverse-keyboard')&&!args.includes('--reverse-clipboard'));
+ }
+});

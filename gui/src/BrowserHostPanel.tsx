@@ -32,6 +32,7 @@ export default function BrowserHostPanel({ status, config, online, onStatus }: {
   const [extraWindows, setExtraWindows] = useState<string[]>([]);
   const approvedWindows = windows.filter(w => windowKey(w) === selectedWindow || extraWindows.includes(windowKey(w)));
   const switchAvailable = Boolean(selectedWindow && status.readiness?.features?.browserCaptureRecovery);
+  const [windowAudioAllowed,setWindowAudioAllowed] = useState(false);
   const [clipboardAllowed, setClipboardAllowed] = useState(false);
   const [windowBusy, setWindowBusy] = useState(false);
   const keyTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -68,7 +69,7 @@ export default function BrowserHostPanel({ status, config, online, onStatus }: {
                   : allowWindowSwitch && (!switchAvailable || approvedWindows.length < 2 || approvedWindows.length > 8) ? 'Select between two and eight available windows to allow switching.'
                   : needsSetup ? 'Set up a secure link, or choose USB cable or This computer.' : '';
 
-  useEffect(() => { if (!active) setClipboardAllowed(false); }, [active]);
+  useEffect(() => { if (!active) {setClipboardAllowed(false);setWindowAudioAllowed(false);} }, [active]);
   useEffect(() => {
     if (browser?.connected) { setKey(''); setMessage(''); setCopied(''); clearTimeout(keyTimer.current); }
   }, [browser?.connected]);
@@ -100,6 +101,7 @@ export default function BrowserHostPanel({ status, config, online, onStatus }: {
         headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...config,
           windowId: windows.find((window) => windowKey(window) === selectedWindow)?.id,
           windowOwnerPid: windows.find((window) => windowKey(window) === selectedWindow)?.ownerPid,
+          browserWindowAudio: Boolean(selectedWindow && windowAudioAllowed && status.readiness?.features?.browserWindowAudio),
           browserWindows: allowWindowSwitch && switchAvailable ? approvedWindows.map(w => ({id:w.id,ownerPid:w.ownerPid,label:`${w.application} — ${w.title}`.slice(0,80)})) : undefined,
           browserClipboard: clipboardAllowed && !selectedWindow, browserTransport: mode, browserSerial: config.connection === 'usb' ? config.serial : undefined }) });
       const result = await response.json();
@@ -143,7 +145,7 @@ export default function BrowserHostPanel({ status, config, online, onStatus }: {
         <div><input id="browser-code" value={key} readOnly autoComplete="off" spellCheck={false} aria-describedby="browser-code-help" />
           <button className="secondary-button" type="button" onClick={() => copy(key, 'code')}><Copy size={16} aria-hidden="true" />{copied === 'code' ? 'Code copied' : 'Copy code'}</button></div>
       </div>
-      <p id="browser-code-help" className="action-note">One use · expires five minutes after creation. Share only with someone you trust: {selectedWindow ? 'this code lets them view the selected windows, with audio and control off.' : 'this code lets them view and control your computer.'}</p>
+      <p id="browser-code-help" className="action-note">One use · expires five minutes after creation. Share only with someone you trust: {selectedWindow ? 'this code lets them view selected windows. Control is off; app audio follows your Application audio choice.' : 'this code lets them view and control your computer.'}</p>
   </>;
 
   return <section className="panel browser-host-panel" aria-labelledby="browser-title">
@@ -169,7 +171,7 @@ export default function BrowserHostPanel({ status, config, online, onStatus }: {
     {status.hostPlatform === 'macOS' && status.readiness?.features?.macWindowCapture && <fieldset disabled={active || busy || windowBusy}>
       <legend>Choose what to share</legend>
       <label htmlFor="browser-capture-target">Capture target</label>
-      <select id="browser-capture-target" value={selectedWindow} onChange={(event) => { setSelectedWindow(event.target.value); setClipboardAllowed(false); setAllowWindowSwitch(false); setExtraWindows([]); }}>
+      <select id="browser-capture-target" value={selectedWindow} onChange={(event) => { setSelectedWindow(event.target.value); setClipboardAllowed(false); setAllowWindowSwitch(false); setExtraWindows([]); setWindowAudioAllowed(false); }}>
         <option value="">Entire desktop · video, audio and control</option>
         {selectedWindow && !windows.some((w) => windowKey(w) === selectedWindow)
           && <option value={selectedWindow} disabled>Selected window is no longer available</option>}
@@ -179,8 +181,14 @@ export default function BrowserHostPanel({ status, config, online, onStatus }: {
         {windowBusy ? 'Refreshing windows…' : 'Refresh windows'}
       </button>
       <p className="action-note">{selectedWindow
-        ? allowWindowSwitch ? 'Only approved windows can be selected by the receiver. Window mode is view-only with audio off. Closing or hiding the captured window ends sharing.' : 'Only this window is captured. Window mode is view-only with audio off; minimizing, hiding or closing it ends the stream. Resize keeps a fixed video canvas.'
+        ? allowWindowSwitch ? 'Only approved windows can be selected by the receiver. Control stays off. Application audio is off unless you allow it below. Closing or hiding the captured window ends sharing.' : 'Only this window is captured. Control stays off; application audio is off unless you allow it below. Minimizing, hiding or closing it ends the stream. Resize keeps a fixed video canvas.'
         : 'Refresh to choose windows. Names stay in this local picker unless you allow receiver switching.'}</p>
+    </fieldset>}
+
+    {selectedWindow && status.readiness?.features?.browserWindowAudio && <fieldset className="browser-window-choices" disabled={active || busy || windowBusy}>
+      <legend>Application audio</legend>
+      <label><input type="checkbox" checked={windowAudioAllowed} onChange={event=>setWindowAudioAllowed(event.target.checked)} aria-describedby="window-audio-consent" /> Allow audio from the selected window’s app</label>
+      <p className="action-note" id="window-audio-consent">Includes all audio from that application, even its other windows and tabs. If you allow window switching, audio follows the app of the window the receiver selects. Other apps and microphone audio are not shared. The receiver starts muted and can enable its speaker.</p>
     </fieldset>}
 
     {switchAvailable && <fieldset disabled={active || busy || windowBusy} className="browser-window-choices">
@@ -235,7 +243,7 @@ export default function BrowserHostPanel({ status, config, online, onStatus }: {
         <svg role="img" aria-label={selectedWindow ? "Scan this QR code to view selected windows" : "Scan this QR code to view and control this computer"} viewBox={`0 0 ${qr.size} ${qr.size}`} shapeRendering="crispEdges">
           <rect width={qr.size} height={qr.size} fill="white" /><path d={qr.path} fill="black" />
         </svg>
-        <p>Scan with your phone’s camera. No copying needed.<br /><span className="action-note">{selectedWindow ? 'Anyone with this invitation can view the selected windows. Audio and control are off.' : 'Anyone with this invitation can view and control your screen.'} It expires after five minutes or its first use.</span></p>
+        <p>Scan with your phone’s camera. No copying needed.<br /><span className="action-note">{selectedWindow ? 'Anyone with this invitation can view selected windows. Control is off; app audio follows your Application audio choice.' : 'Anyone with this invitation can view and control your screen.'} It expires after five minutes or its first use.</span></p>
       </div>}
       {mode === 'usb' ? <details className="wireless-setup"><summary>Manual USB connection</summary>{invitationFields}</details> : invitationFields}
       {mode === 'local' && <a className="secondary-button browser-open" href={url} target="_blank" rel="noreferrer"><ExternalLink size={16} aria-hidden="true" />Open browser receiver</a>}

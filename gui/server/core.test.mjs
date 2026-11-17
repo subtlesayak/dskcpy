@@ -164,3 +164,14 @@ test('clipboard consent is strict, browser-only and passed only with full deskto
   assert.ok(buildScrcpyArgs({...config,browserKeyboard:true},1234).includes('--reverse-clipboard'));
   assert.ok(!buildScrcpyArgs({...config,browserKeyboard:false},1234).includes('--reverse-clipboard'));
 });
+
+test('application audio is an explicit browser window choice, never a desktop or native receiver default',()=>{
+ const selected={connection:'browser',windowId:17,windowOwnerPid:42};
+ const off=sanitizeStreamConfig(selected);assert.equal(off.browserWindowAudio,undefined);
+ assert.ok(buildScrcpyArgs(off,1234).includes('--no-audio'));
+ const on=sanitizeStreamConfig({...selected,browserWindowAudio:true});
+ assert.equal(on.browserWindowAudio,true);const args=buildScrcpyArgs(on,1234);
+ assert.ok(args.includes('--reverse-window-audio'));assert.ok(args.includes('--reverse-window-owner=42'));
+ assert.ok(!args.includes('--no-audio')&&!args.includes('--reverse-keyboard')&&!args.includes('--reverse-clipboard'));
+ for(const invalid of [{connection:'browser',browserWindowAudio:true},{...selected,connection:'usb',browserWindowAudio:true},{...selected,windowOwnerPid:undefined,browserWindowAudio:true},{...selected,browserWindowAudio:'true'}])assert.throws(()=>sanitizeStreamConfig(invalid));
+});

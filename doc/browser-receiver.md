@@ -232,7 +232,10 @@ explicitly approve. Titles are not stored in logs or performance exports. Select
 also binds the current owning process, and native capture revalidates it. A missing
 selection never silently falls back to the desktop.
 
-Window sharing is a deliberately separate view-only mode with audio off.
+Window sharing is a separate view-only mode with audio off by default. A capable
+Mac host can opt in to the selected window's entire application audio, including
+its other windows and tabs. This never enables window input. See
+[application-audio scope and qualification](browser-window-audio.md).
 ScreenCaptureKit captures only the selected window, including when another
 window covers it. Resizing letterboxes into the original output canvas.
 Minimizing, hiding or closing the window ends the session; create a fresh
@@ -241,7 +244,8 @@ and desktop-window actions are rejected at both bridge and native boundaries.
 The owner can instead approve two to eight windows before creating the grant;
 the receiver may switch only within that list. See [approved window switching](browser-window-switching.md)
 for capture retirement, Stop/permission vetoes and memory-only last-viewed previews.
-Target-relative window control and window audio remain unavailable.
+Target-relative window control remains unavailable. The separate application-audio
+opt-in still requires physical capture and playback qualification.
 
 For a full-desktop Mac or matching Windows session on a receiving device, select **Keyboard** and keep **Type on the
 computer** focused. Physical navigation/function keys and shortcuts use paired

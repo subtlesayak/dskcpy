@@ -309,6 +309,7 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
   }
   async function invite(connection = 'local', policy = {}, grant = null) {
     if (invitation || session) throw new Error('A browser session is already open. Stop it first.');
+    if (policy.windowAudio === true && (policy.viewOnly !== true || grant)) throw new Error('Application audio requires a temporary window invitation.');
     const windowGroup = createWindowTargets(policy.windowTargets, policy.initialWindow);
     if (windowGroup && (policy.viewOnly !== true || typeof onRetireWindow !== 'function' || grant))
       throw Error('Window switching requires an explicitly selected view-only window session.');
@@ -323,6 +324,7 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
       textFocus: policy.textFocus === true && policy.keyboard === true && policy.viewOnly !== true,
       captureRecovery: policy.captureRecovery === true && policy.viewOnly !== true };
     inputPolicy.adaptiveVideo = policy.adaptiveVideo === true && policy.viewOnly !== true;
+    inputPolicy.windowAudio = policy.viewOnly === true && policy.windowAudio === true && !grant;
     if (windowGroup) inputPolicy.windowGroup = windowGroup;
     invitation = randomBytes(24);
     failures = 0;

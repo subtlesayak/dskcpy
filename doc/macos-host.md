@@ -149,7 +149,10 @@ and private media reachability. The existing-private-VPN launcher is
 private HTTPS route described in that guide.
 
 The dashboard's **Refresh windows** picker enables single-window capture.
-Window mode is view-only with audio off; minimizing, hiding or closing the
+Window mode is view-only with audio off by default. A capable host can explicitly
+allow the selected window's entire application audio; see
+[application-audio scope and qualification](browser-window-audio.md).
+Minimizing, hiding or closing the
 selected target ends the session. The dashboard can also approve a fixed list of
 two to eight windows for [receiver switching](browser-window-switching.md) under
 the same temporary view-only grant. Full-desktop browser sessions can offer

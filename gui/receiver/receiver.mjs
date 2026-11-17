@@ -32,7 +32,9 @@ const rtcDisplay = $('rtc-display');
 const away = () => receiverIsAway({ hidden: document.hidden, pictureInPictureElement: document.pictureInPictureElement, video: rtcDisplay, presentationMode: rtcDisplay.webkitPresentationMode });
 const remembered = rememberedBrowser({ reconnect: () => { resumeAllowed = true; void resumeSession(); } });
 let rtcReceiver, mediaMode = 'webcodecs';
-let keyboardSupported = false, keyboardOpen = false, viewOnly = false;
+let keyboardSupported = false, keyboardOpen = false, viewOnly = false, windowAudioAllowed = false, windowAudioUnavailable = false;
+const audioLabel = (state) => windowAudioAllowed ? `App audio ${state}` : `Audio ${state}`;
+const streamingStatus = () => windowAudioAllowed ? `Viewing window · app audio ${windowAudioUnavailable ? 'unavailable' : muted ? 'off' : 'on'}` : 'Streaming';
 let focusSupported = false, autoKeyboard = false, keyboardStatusSupported = false, keyboardBlocked = false;
 const keyboardStatusMessage = $('keyboard-status');
 const autoSetting = $('auto-keyboard-setting'), autoToggle = $('auto-keyboard'), autoFeedback = $('auto-keyboard-feedback');
@@ -128,7 +130,7 @@ if (viewPresent) controlTrays.push({ trigger: 'view', panel: 'view-controls', fi
 const windowChooserPresent = ['choose-window','window-choices','window-choice-list','window-choice-status','close-window-choices'].every(id => $(id));
 if (windowChooserPresent) controlTrays.push({trigger:'choose-window',panel:'window-choices',first:'close-window-choices'});
 let windowFrames = 0, windowSwitchExpected = false;
-const windowChooser = windowChooserPresent ? createWindowChooser({document,trigger:$('choose-window'),list:$('window-choice-list'),status:$('window-choice-status'),
+const windowChooser = windowChooserPresent ? createWindowChooser({document,trigger:$('choose-window'),list:$('window-choice-list'),status:$('window-choice-status'),audioScope:()=>windowAudioAllowed,
   canSelect: () => authenticated && header && !mediaSwitching && !paused && !away() && ws?.readyState === WebSocket.OPEN,
   send: message => { if (ws?.readyState !== WebSocket.OPEN) return false; ws.send(JSON.stringify(message)); return true; },
   snapshot: () => {
@@ -439,6 +441,7 @@ function disconnect() {
   closing = true;
   const cancelRetainedCapture = mediaSwitching || sameCaptureRecovery;
   windowChooser?.clear(); windowSwitchExpected=false;
+  if ($('window-audio-scope')) $('window-audio-scope').hidden=true;
   resumeAllowed = false;
   generation++;
   resumePendingMedia = null;
@@ -451,7 +454,7 @@ function disconnect() {
   ws?.close(4000, 'Disconnected by viewer'); ws = null;
   clearMedia();
   trackpadMode = false; trackpad.reset(); desktopView.reset();
-  hideKeyboard(); keyboardSupported = false; viewOnly = false; $('keyboard').hidden = true;
+  hideKeyboard(); keyboardSupported = false; viewOnly = false; windowAudioAllowed = false; windowAudioUnavailable = false; $('keyboard').hidden = true;
   if (audioContext) void audioContext.close().catch(() => {}); audioContext = null;
   authenticated = false; header = false; muted = true; paused = false; mediaSwitching = false; updateArrowAvailability();
   videoConfig = null; configBytes = null; audioConfig = null; frames = 0;
@@ -460,11 +463,11 @@ function disconnect() {
   document.body.classList.remove('is-streaming', 'controls-hidden');
   $('join').disabled = false; $('join').textContent = 'Connect';
   $('status').textContent = 'Disconnected · reconnect with a remembered browser or use a new code';
-  setRailLabel('audio', 'Audio off'); $('audio').setAttribute('aria-pressed', 'false');
+  setRailLabel('audio', audioLabel('off')); $('audio').setAttribute('aria-pressed', 'false');
   $('audio').disabled = false;
   $('pause').setAttribute('aria-pressed', 'false');
   setRailLabel('pause', 'Pause video'); $('pause').setAttribute('aria-label', 'Pause video');
-  $('audio').setAttribute('aria-label', 'Audio off');
+  $('audio').setAttribute('aria-label', audioLabel('off'));
   setControlTray(); $('show-controls').hidden = true;
   if (!document.hidden) $('session-key').focus();
   closing = false;
@@ -578,7 +581,7 @@ function connect(key = null, requestedMode = preferredMode) {
     const captureRestart = event.code === 1012 && event.reason === 'capture-restart';
     const mediaFallback = fallbackNegotiated && (fallbackAcknowledged || fallbackRequested || (event.code === 1012 && event.reason === 'media-fallback'));
     if (captureRestart || mediaFallback || windowSwitch) { hideKeyboard(); fitCanvas(); }
-    if (mediaFallback) { sameCaptureRecovery = true; muted = true; setRailLabel('audio', 'Audio off'); $('audio').setAttribute('aria-pressed', 'false'); $('audio').setAttribute('aria-label', 'Audio off'); }
+    if (mediaFallback) { sameCaptureRecovery = true; muted = true; setRailLabel('audio', audioLabel('off')); $('audio').setAttribute('aria-pressed', 'false'); $('audio').setAttribute('aria-label', audioLabel('off')); }
     if (sessionExpected && ![1000, 1008, 4000, 4002].includes(event.code) && (event.code !== 1005 || mediaFallback || windowSwitch)) {
       resumeDeadline ||= Date.now() + BROWSER_RESUME_MS;
       $('status').textContent = document.hidden ? 'Paused while away' : windowSwitch ? 'Switching window…' : captureRestart ? 'Restoring the computer display…' : mediaFallback ? 'Restoring browser video…' : 'Reconnecting…';
@@ -622,7 +625,7 @@ function connect(key = null, requestedMode = preferredMode) {
             signal: (value) => { if (mine === generation && !mediaSwitching && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(value)); },
             onPlaying: () => {
               if (mine !== generation || mediaSwitching || paused || document.hidden) return;
-              clearTimeout(timeout); $('status').textContent = 'Streaming'; $('error').textContent = '';
+              clearTimeout(timeout); $('status').textContent = streamingStatus(); $('error').textContent = '';
               $('stats').textContent = `${canvas.width} × ${canvas.height} · WebRTC · native browser video and audio`;
             }, onError: (message) => { if (mine === generation && !mediaSwitching) $('error').textContent = message; },
             onFailure: (message) => { if (mine === generation && !mediaSwitching && !requestMediaFallback()) $('error').textContent = message; } });
@@ -675,6 +678,9 @@ function connect(key = null, requestedMode = preferredMode) {
         }
         windowSwitchExpected=false;
         viewOnly = message.viewOnly === true;
+        windowAudioAllowed = viewOnly && message.windowAudio === true; windowAudioUnavailable = false;
+        if ($('window-audio-scope')) $('window-audio-scope').hidden = !windowAudioAllowed;
+        setRailLabel('audio',audioLabel(muted?'off':'on'));
         // Never silently replace a window grant with remembered full-desktop access.
         sameCaptureRecovery = viewOnly;
         windowChooser?.supported(viewOnly && message.windowSwitch === true);
@@ -696,7 +702,7 @@ function connect(key = null, requestedMode = preferredMode) {
         setRailLabel('touch', viewOnly ? 'Window · view only' : touchEnabled ? 'Touch on' : 'Touch off');
         $('touch').setAttribute('aria-pressed', String(touchEnabled));
         for (const id of ['volume', 'window']) $(id).hidden = viewOnly;
-        $('audio').disabled = viewOnly;
+        $('audio').disabled = viewOnly && !windowAudioAllowed;
         $('status').textContent = 'Connected · waiting for video';
         $('join-panel').hidden = true; $('stream-panel').hidden = false;
         document.body.classList.add('is-streaming');
@@ -718,15 +724,18 @@ function connect(key = null, requestedMode = preferredMode) {
       if (!Number.isSafeInteger(timestamp)) throw new Error('Invalid media timestamp.');
       const flags = data.getUint32(12), payload = new Uint8Array(event.data, 16);
       if (flags === 16) {
+        windowAudioUnavailable = windowAudioAllowed;
         stopAudio(); drainAudioAcks(true); audioGeneration++;
         if (audio && audio.state !== 'closed') audio.close(); audio = null;
-        setRailLabel('audio', 'Audio unavailable'); $('audio').setAttribute('aria-label', 'Audio unavailable');
+        setRailLabel('audio', audioLabel('unavailable')); $('audio').setAttribute('aria-label', audioLabel('unavailable'));
         $('audio').disabled = true; return;
       }
+      if (viewOnly && !windowAudioAllowed && [4,8].includes(flags)) throw Error('Audio is not allowed for this window invitation.');
       if (flags === 4) {
+        windowAudioUnavailable = false;
         stopAudio(); // A fresh codec configuration also discards the old route's scheduled audio.
         audioConfig = payload.slice(); $('audio').disabled = false;
-        setRailLabel('audio', muted ? 'Audio off' : 'Audio on');
+        setRailLabel('audio', audioLabel(muted ? 'off' : 'on'));
 
         if (mediaMode !== 'webrtc') configureAudio(); return;
       }
@@ -768,7 +777,7 @@ function connect(key = null, requestedMode = preferredMode) {
         if (mine !== generation || paused || document.hidden) return;
         context.drawImage(frame, 0, 0, canvas.width, canvas.height); frames++; windowFrames++;
         clearTimeout(timeout);
-        $('status').textContent = 'Streaming';
+        $('status').textContent = streamingStatus();
         if (performance.now() - statsAt > 1000) {
           $('stats').textContent = `${canvas.width} × ${canvas.height} · ${frames} decoded frames · H.264 · decode ACK, not motion-to-photon latency`;
           statsAt = performance.now();
@@ -824,13 +833,14 @@ function configureAudio() {
   catch { audioUnavailable(); }
 }
 $('audio').addEventListener('click', async () => {
-  if (viewOnly || mediaSwitching || !authenticated || !header) return;
+  if (viewOnly && !windowAudioAllowed || mediaSwitching || !authenticated || !header) return;
   if (mediaMode === 'webrtc') {
     const mine = generation, attempt = ++playbackAttempt;
     const updateButton = () => {
-      setRailLabel('audio', muted ? 'Audio off' : 'Audio on');
+      setRailLabel('audio', audioLabel(muted ? 'off' : 'on'));
 
       $('audio').setAttribute('aria-pressed', String(!muted));
+      if(windowAudioAllowed) $('status').textContent=streamingStatus();
     };
     muted = !muted; rtcDisplay.muted = muted; action(muted ? 11 : 10);
     updateButton();
@@ -853,7 +863,8 @@ $('audio').addEventListener('click', async () => {
       muted = false; configureAudio(); if (!muted) action(10);
     } catch { $('error').textContent = 'Audio could not start. Check browser playback permissions.'; return; }
   }
-  if (!$('audio').disabled) setRailLabel('audio', muted ? 'Audio off' : 'Audio on'); $('audio').setAttribute('aria-pressed', String(!muted));
+  if (!$('audio').disabled) setRailLabel('audio', audioLabel(muted ? 'off' : 'on')); $('audio').setAttribute('aria-pressed', String(!muted));
+  if(windowAudioAllowed) $('status').textContent=streamingStatus();
 
 });
 function updatePause() {
@@ -887,8 +898,8 @@ function updatePause() {
   if (mediaMode !== 'webrtc' && !away() && !muted && audioContext?.state !== 'running') {
     // Mobile browsers may suspend audio independently of the video connection.
     // Ask for a fresh tap instead of showing an inaccurate "Audio on" state.
-    muted = true; action(11); setRailLabel('audio', 'Audio off');
-    $('audio').setAttribute('aria-label', 'Audio off'); $('audio').setAttribute('aria-pressed', 'false');
+    muted = true; action(11); setRailLabel('audio', audioLabel('off'));
+    $('audio').setAttribute('aria-label', audioLabel('off')); $('audio').setAttribute('aria-pressed', 'false');
   }
   if (!away() && !paused) configureAudio();
   // Resume must reach the host before a saved setting: suspended sessions

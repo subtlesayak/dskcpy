@@ -271,6 +271,10 @@ if get_option('buildtype') == 'debug'
             'tests/test_reverse_macos_audio_send.m', objects: audio_send_objects,
             include_directories: src_dir, dependencies: dependencies)
         test('test_reverse_macos_audio_send', audio_send_test)
+        window_audio_test = executable('test_reverse_macos_window_audio',
+            'tests/test_reverse_macos_window_audio.m', objects: audio_send_objects,
+            include_directories: src_dir, dependencies: dependencies)
+        test('test_reverse_macos_window_audio', window_audio_test)
         mac_keyboard_test = executable('test_reverse_macos_keyboard',
             ['tests/test_reverse_macos_keyboard.m', 'src/reverse_macos_keyboard.m'],
             include_directories: src_dir, dependencies: dependencies)

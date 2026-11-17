@@ -912,3 +912,20 @@ test('switching does not renew the original browser-session lifetime',async t=>{
  await until(()=>f.calls()===2);const resumed=await f.open(undefined,cookie);await until(()=>resumed.received.some(m=>m.binary));
  const ended=once(resumed,'close');const [code]=await ended;assert.equal(code,1008);assert.equal(await resumable(f,cookie),false);assert.equal(f.calls(),2);
 });
+
+for(const allowed of [false,true])test('view-only application audio requires owner consent: '+allowed,async t=>{
+ const f=await fixture(t,{inputPolicy:{viewOnly:true,windowAudio:allowed}}),ws=await login(f),chunks=[];
+ f.native().on('data',c=>chunks.push(c));const auth=ws.received.filter(m=>!m.binary).map(m=>JSON.parse(m.data)).find(m=>m.type==='authenticated');
+ assert.equal(auth.windowAudio,allowed);assert.equal(f.bridge().windowAudio,allowed);assert.equal(f.bridge().keyboard,false);assert.equal(f.bridge().clipboard,false);
+ ws.send('resume');ws.send(Buffer.from([5,8]));
+ if(allowed){ws.send(Buffer.from([5,10]));await until(()=>Buffer.concat(chunks).includes(Buffer.from([5,10])));
+  const ended=once(ws,'close');ws.send(touchPacket(0,0,10,10,640,480));assert.equal((await ended)[0],1008);
+ }else{const ended=once(ws,'close');ws.send(Buffer.from([5,10]));assert.equal((await ended)[0],1008);assert.ok(!Buffer.concat(chunks).includes(Buffer.from([5,10])));}
+});
+test('a window without audio consent cannot forward native audio configuration or fall back to desktop scope',async t=>{
+ const f=await fixture(t,{inputPolicy:{viewOnly:true}}),ws=await login(f),ended=once(ws,'close');
+ f.native().write(packet(0,4));assert.equal((await ended)[0],1008);
+ assert.equal(ws.received.filter(m=>m.binary).length,1);
+ const receiver=createBrowserReceiver({configuredPort:0,onConnect:()=>{}});t.after(()=>receiver.shutdown());
+ await assert.rejects(receiver.invite('local',{windowAudio:true,viewOnly:false}));
+});
