@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { OwnedBackend } from '../owned-backend.mjs';
 
-function fixture({ failFirstReady = false } = {}) {
+function fixture({ failFirstReady = false, deferredExit = false } = {}) {
   const children = []; let exits = 0;
   const backend = new OwnedBackend({ modulePath: 'owned-entry.cjs', environment: {}, onExit: () => exits++,
     fork(module, args, options) {
@@ -11,7 +11,7 @@ function fixture({ failFirstReady = false } = {}) {
       child.postMessage = message => { child.calls.push(message.action);
         const ok = !(failFirstReady && children[0]?.child === child && message.action === 'ready');
         queueMicrotask(() => child.emit('message', { id: message.id, ok, value: message.action === 'status' ? child.status : true })); };
-      child.kill = () => { child.killed = true; child.emit('exit', 0); };
+      child.kill = () => { child.killed = true; if (deferredExit) setImmediate(() => child.emit('exit', 0)); else child.emit('exit', 0); };
       children.push({ child, module, args, options }); return child;
     } });
   return { backend, children, exits: () => exits };
@@ -48,4 +48,58 @@ test('failed startup retires its child and a retry can create a fresh service', 
   assert.equal(f.children[0].child.killed, true); assert.equal(f.exits(), 0);
   await f.backend.ensure(route); assert.equal(f.children.length, 2);
   assert.equal(f.children[1].child.killed, false); await f.backend.shutdown();
+});
+
+test('concurrent idle setup requests retain only one replacement service with asynchronous exits', async t => {
+  const f = fixture({ deferredExit: true }); t.after(() => f.backend.shutdown());
+  await f.backend.ensure(route);
+  const next = { ...route, bind: '100.64.0.2' };
+  await Promise.all([f.backend.ensure(next), f.backend.ensure(next)]);
+  assert.equal(f.children.length, 2, 'Only one replacement may be created');
+  assert.equal(f.children.filter(({ child }) => !child.killed).length, 1);
+});
+
+test('Quit during idle reconfiguration cannot create a service after shutdown', async t => {
+  const f = fixture({ deferredExit: true }); t.after(() => f.backend.shutdown());
+  await f.backend.ensure(route);
+  const changing = f.backend.ensure({ ...route, bind: '100.64.0.2' });
+  const closing = f.backend.shutdown();
+  await Promise.allSettled([changing, closing]);
+  assert.equal(f.children.length, 1, 'Shutdown vetoes a queued replacement');
+  assert.equal(f.backend.child, null);
+  assert.ok(f.children.every(({ child }) => child.killed));
+});
+
+test('repeated Quit requests share one retirement and leave no service handle', async () => {
+  const f = fixture({ deferredExit: true }); await f.backend.ensure(route);
+  await Promise.all([f.backend.shutdown(), f.backend.shutdown()]);
+  assert.equal(f.children[0].child.calls.filter(action => action === 'shutdown').length, 1);
+  assert.equal(f.backend.child, null);
+  await assert.rejects(f.backend.ensure(route), /Host closed/);
+  assert.equal(f.children.length, 1);
+});
+
+test('an incoming session after the idle snapshot vetoes reconfiguration without killing its owner', async t => {
+  const f = fixture({ deferredExit: true }); t.after(() => f.backend.shutdown());
+  await f.backend.ensure(route); const child = f.children[0].child, post = child.postMessage;
+  child.postMessage = message => {
+    if (message.action === 'status') {
+      const value = structuredClone(child.status);
+      queueMicrotask(() => { child.status.running = true; child.emit('message', { id: message.id, ok: true, value }); });
+    } else if (message.action === 'shutdown-if-idle') {
+      queueMicrotask(() => child.emit('message', { id: message.id, ok: true, value: !child.status.running }));
+    } else post(message);
+  };
+  await assert.rejects(f.backend.ensure({ ...route, bind: '100.64.0.2' }), /Stop this app/);
+  assert.equal(f.children.length, 1); assert.equal(child.killed, false);
+  assert.equal(f.backend.child, child);
+});
+
+test('an uncertain idle-retirement reply preserves the owned process instead of force-killing it', async t => {
+  const f = fixture(); t.after(() => f.backend.shutdown()); await f.backend.ensure(route);
+  const child = f.children[0].child, post = child.postMessage;
+  child.postMessage = message => message.action === 'shutdown-if-idle'
+    ? queueMicrotask(() => child.emit('message', { id: message.id, ok: false })) : post(message);
+  await assert.rejects(f.backend.ensure({ ...route, bind: '100.64.0.2' }));
+  assert.equal(child.killed, false); assert.equal(f.backend.child, child); assert.equal(f.children.length, 1);
 });

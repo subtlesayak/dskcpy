@@ -4,21 +4,29 @@ export class OwnedBackend {
   constructor({ fork, modulePath, environment, onExit = () => {} }) {
     Object.assign(this, { fork, modulePath, environment, onExit });
     this.child = null; this.pending = new Map(); this.sequence = 0; this.configuration = null;
-    this.opening = null; this.closed = false; this.retiring = new WeakSet();
+    this.opening = null; this.closed = false; this.retiring = new WeakSet(); this.shutdownPromise = null;
   }
   async ensure(route) {
     if (this.closed) throw new Error('Host closed');
-    const configuration = JSON.stringify({ origin: route.origin || '', bind: route.bind || '127.0.0.1' });
-    if (this.opening) await this.opening;
-    if (this.child && this.configuration === configuration) return;
-    if (this.child) {
-      const status = await this.status();
-      if (status.running || status.browser?.waiting || status.browser?.connected) throw new Error('Stop this app’s sharing before changing its connection.');
-      await this.retire();
+    // Serialize the whole status/retire/start operation, not just fork/ready.
+    // Another waiter may have acquired the slot while we awaited its predecessor.
+    while (this.opening) {
+      await this.opening;
+      if (this.closed) throw new Error('Host closed');
     }
+    const origin = route.origin || '', bind = route.bind || '127.0.0.1';
+    const configuration = JSON.stringify({ origin, bind });
+    if (this.child && this.configuration === configuration) return;
     this.opening = (async () => {
+      if (this.child) {
+        const status = await this.status();
+        if (this.closed) throw new Error('Host closed');
+        if (status.running || status.browser?.waiting || status.browser?.connected) throw new Error('Stop this app’s sharing before changing its connection.');
+        await this.retire({ idleOnly: true });
+      }
+      if (this.closed) throw new Error('Host closed');
       const child = this.fork(this.modulePath, [], { env: { ...this.environment,
-        DSKCPY_VIEWER_ORIGIN: route.origin || '', DSKCPY_VIEWER_RTC_BIND: route.bind || '127.0.0.1' },
+        DSKCPY_VIEWER_ORIGIN: origin, DSKCPY_VIEWER_RTC_BIND: bind },
         stdio: 'ignore', serviceName: 'dskcpy Host service' });
       this.child = child; this.configuration = configuration;
       child.on('message', message => {
@@ -61,15 +69,31 @@ export class OwnedBackend {
   prepareReceiver() { return this.request('prepare-receiver'); }
   invite(args) { return this.request('invite', args); }
   stop() { return this.child ? this.request('stop') : Promise.resolve(); }
-  async retire() {
+  async retire({ idleOnly = false } = {}) {
     const child = this.child;
     if (!child) return;
     this.retiring.add(child);
-    try { await this.request('shutdown'); } finally {
+    let terminate = !idleOnly;
+    try {
+      const accepted = await this.request(idleOnly ? 'shutdown-if-idle' : 'shutdown');
+      if (idleOnly && accepted !== true) throw new Error('Stop this app’s sharing before changing its connection.');
+      terminate = true;
+    } finally {
       // This handle belongs only to this app; never terminate by name or port.
-      if (this.child === child) { this.child = null; this.configuration = null; }
-      child.kill();
+      if (terminate) {
+        if (this.child === child) { this.child = null; this.configuration = null; }
+        child.kill();
+      } else this.retiring.delete(child);
     }
   }
-  async shutdown() { this.closed = true; if (this.opening) await this.opening.catch(() => {}); await this.retire(); }
+  shutdown() {
+    if (!this.shutdownPromise) {
+      this.closed = true;
+      this.shutdownPromise = (async () => {
+        if (this.opening) await this.opening.catch(() => {});
+        await this.retire();
+      })();
+    }
+    return this.shutdownPromise;
+  }
 }

@@ -20,6 +20,8 @@ app.whenReady().then(async () => {
   // Even accidental external renderer requests remain blocked in this fixture.
   session.defaultSession.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*'] }, (_details, callback) => callback({ cancel: true }));
   const { OwnedBackend } = await import(pathToFileURL(path.join(config.application, 'desktop/owned-backend.mjs')).href);
+  stage = 'owned-lifecycle-races';
+  const lifecycle = await require('./owned-backend-utility.cjs')(OwnedBackend, utilityProcess.fork, config.ownedDirectory);
   backend = new OwnedBackend({ fork: utilityProcess.fork,
     modulePath: path.join(config.application, 'desktop/service-entry.cjs'),
     environment: { ...process.env, SCRCPY_GUI_BINARY: config.fakeNative,
@@ -34,6 +36,9 @@ app.whenReady().then(async () => {
   assert.equal(readiness.clipboard, false);
   assert.deepEqual(await backend.usbDevices(), { devices: [], error: true });
   stage = 'utility-idle';
+  assert.deepEqual(await backend.status(), { running: false, browser: { waiting: false, connected: false }, nativeInputPermission: null });
+  stage = 'utility-idle-retirement';
+  await backend.ensure({ origin: '', bind: '127.0.0.2' });
   assert.deepEqual(await backend.status(), { running: false, browser: { waiting: false, connected: false }, nativeInputPermission: null });
   let state = { phase: 'ready', features: { keyboard: true }, permissions: { screen: true, control: true },
     route: { connected: true, ready: true, conflict: false }, startup: { available: true, requested: false, enabled: false, requiresApproval: false, error: null }, error: null, invitation: null, canStop: false };
@@ -105,7 +110,7 @@ app.whenReady().then(async () => {
   assert.deepEqual(errors, []); assert.equal(window.isVisible(), false);
   stage = 'utility-shutdown'; await backend.shutdown(); backend = null;
   stage = 'result-write';
-  await writeFile(config.result, JSON.stringify({ ...check, utilityProcessIpc: true,
+  await writeFile(config.result, JSON.stringify({ ...check, ...lifecycle, utilityProcessIpc: true, utilityIdleRetirementIpc: true,
     bundledRuntime: process.versions.electron, hiddenWindow: true, nativeProgram: 'fake --help only',
     realInvitation: false, realDeviceEnrolled: false, screenCapture: false, permissionApis: false, tailscale: false,
     actualHostShellLaunched: false, desktopMediaQualified: false }, null, 2));

@@ -973,5 +973,14 @@ export function createControlService({
     });
   }
 
-  return { server, listen, shutdown, publicState };
+  function shutdownIfIdle() {
+    const browser = browserReceiver.status();
+    if (shuttingDown || state.running || state.stopping || state.reconnecting || startAttempt
+        || browserPreparation || windowRetirement || browser.waiting || browser.connected) return Promise.resolve(false);
+    // No await between the idle check and shutdown's synchronous admission veto.
+    // An incoming session must not slip between a parent snapshot and retirement.
+    return shutdown().then(() => true);
+  }
+
+  return { server, listen, shutdown, shutdownIfIdle, publicState };
 }
