@@ -1,3 +1,4 @@
+import { confirmReceiverAction } from './browser-actions.mjs';
 // Real browser decoding with generated lavfi media and fake native controls.
 // All output is test-muted; no real screen, microphone, OS input or device.
 import {chromium,webkit} from 'playwright';
@@ -78,7 +79,7 @@ try{for(const mode of engine==='chromium'?['webcodecs','webrtc']:['webcodecs']){
   await choose(0);await until(()=>sessions.length===3,'third native');await new Promise(r=>setTimeout(r,120));assert.equal(sessions[2].audio,false);assert.equal(sessions[2].sentAudio,0);
   assert.equal(await page.getByRole('button',{name:'App audio off',exact:true}).count(),1);assert.equal(maxActive,1);assert.deepEqual(sessions.map(s=>s.index),[0,1,0]);
   await page.screenshot({path:path.join(output,mode+'.png')});assert.deepEqual(errors,[]);
-  await page.getByRole('button',{name:'Disconnect',exact:true}).click();await until(()=>!receiver.status().connected,'Stop');
+  await confirmReceiverAction(page);await until(()=>!receiver.status().connected,'Stop');
   results.push({engine,mode,syntheticOpus:true,distinctTones:[440,880],decodedToneChange:true,staleAudioNotScheduled:true,explicitMuteRetainedAcrossSwitch:true,maxSimultaneousNative:maxActive,windowInputForbidden:true,allOutputTestMuted:true,physicalDevice:false,audiblePlaybackQualified:false});
  }catch(error){await page.screenshot({path:path.join(output,mode+'-failure.png')}).catch(()=>{});await writeFile(path.join(output,mode+'-failure.json'),JSON.stringify({error:error.message,errors,sessions:sessions.map(s=>({index:s.index,audio:s.audio,paused:s.paused,sentAudio:s.sentAudio,commands:s.commands.slice(-20)})),page:await page.evaluate(()=>({error:document.querySelector('#error').textContent,status:document.querySelector('#status').textContent,states:window.__audioTest.states,buffers:window.__audioTest.buffers.slice(-12)}))},null,2));throw error;}
  finally{await context.close();for(const s of sessions)s.socket.destroy();await receiver.shutdown();}
