@@ -199,8 +199,13 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
         const device = trustedDevices.find(token, remoteOrigin, true);
         const hostIdentity = device && await trustedDevices.ensureIdentity();
         const busy = device && Boolean(trustedConnecting || invitation || session || (requestOpen() && connectionRequest.device.id !== device.id));
+        // Only the paired browser that owns this pending request may recover
+        // its id after a tab reload. This identifier grants no stream access.
+        const ownRequest = device && requestOpen() && connectionRequest.device.id === device.id
+          && connectionRequest.device.digest === device.digest;
         json(200, { status: pending ? 'pending' : device ? 'approved' : 'unavailable', paused: trustedDevices.snapshot().paused,
-          streamApproval: true, ...(device && { hostIdentity, pairingId: device.id, busy }) }); return;
+          streamApproval: true, requestId: ownRequest ? connectionRequest.id : null,
+          ...(device && { hostIdentity, pairingId: device.id, busy }) }); return;
       }
       if (req.url === '/stream/trusted/forget') {
         const device = trustedDevices.find(cookieValue(req), remoteOrigin, true);

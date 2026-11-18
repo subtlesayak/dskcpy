@@ -71,7 +71,7 @@ export function linkComputerDirectory(remembered) {
           || link.fingerprint !== value.fingerprint) { send(current, 'result', { phase: 'pairing-required' }); return; }
       const info = await remembered.inspect();
       let phase = info.phase;
-      if (current.cancelled) phase = 'cancelled';
+      if (current.cancelled) phase = await remembered.cancelPendingRequest(info.requestId) ? 'cancelled' : 'cancel-unconfirmed';
       else if (info.computer?.fingerprint !== link.fingerprint) phase = 'pairing-required';
       else if (info.paired && info.pairingId !== link.pairingId) phase = 'pairing-required';
       else if (current.action === 'forget' && ['reachable', 'pairing-required', 'paused'].includes(phase)) {

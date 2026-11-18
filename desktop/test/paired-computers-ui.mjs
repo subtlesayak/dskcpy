@@ -165,6 +165,28 @@ try {
   assert.equal(a.broker.trustedStatus().streamRequest, null);
   await receiver.close();
 
+  // A receiver reload must retain the in-flight directory intent, including
+  // cancellation. It must not start capture or require a new host request.
+  receiver = await select(directory, nameA);
+  const reloadingRequest = a.broker.trustedStatus().streamRequest.id;
+  await receiver.reload();
+  await receiver.getByRole('button', { name: 'Request to connect', exact: true }).waitFor();
+  await button(directory, 'Cancel request').click();
+  await directory.getByRole('status').filter({ hasText: 'Connection request cancelled' }).waitFor();
+  assert.equal(a.broker.trustedStatus().streamRequest, null);
+  assert.equal(a.captures, 1, 'Reload and cancellation cannot start a new capture');
+  await assert.rejects(a.broker.trustAction('allow-stream', reloadingRequest), /expired/);
+  await receiver.close();
+
+  receiver = await select(directory, nameA);
+  const abandonedRequest = a.broker.trustedStatus().streamRequest.id;
+  await receiver.goto('about:blank');
+  await directory.getByRole('status').filter({ hasText: 'The receiver stopped responding' }).waitFor();
+  assert.equal(await button(directory, `Request to connect for ${nameA}`).isEnabled(), true);
+  assert.equal(a.captures, 1, 'A missing receiver response cannot authorize capture');
+  await a.broker.trustAction('deny-stream', abandonedRequest);
+  await receiver.close();
+
   receiver = await select(directory, nameA);
   await a.broker.trustAction('deny-stream', a.broker.trustedStatus().streamRequest.id);
   await directory.getByRole('status').filter({ hasText: 'The computer denied the request' }).waitFor();
@@ -211,7 +233,7 @@ try {
   assert.equal(a.broker.trustedStatus().devices.length, 0);
   assert.equal(moved.broker.trustedStatus().devices.length, 1);
   assert.deepEqual(errors, []);
-  console.log(`${engine}: two-host list, rename, cancellation, denial, approved request, signed address change and isolated forget passed.`);
+  console.log(`${engine}: two-host list, pending reload/cancel, bounded handoff, denial, approved request, signed address change and isolated forget passed.`);
 } finally {
   await context?.close();
   for (const host of hosts) await host.close();

@@ -10,6 +10,7 @@ const labels = {
   'pairing-required': 'Pairing required', busy: 'Computer is busy', paused: 'Requests are paused on the computer',
   'update-required': 'Update the computer to request a stream', denied: 'The computer denied the request',
   expired: 'The request expired', ended: 'The request ended', cancelled: 'Connection request cancelled',
+  'cancel-unconfirmed': 'Request cancelled in this browser. The host did not confirm; its pending request will expire.',
   'focus-required': 'Return to the receiver tab and request a new stream', 'request-failed': 'The computer could not finish the request',
   approved: 'Approved. Continue in the receiver tab', forgotten: 'Computer forgotten',
 };
@@ -172,12 +173,18 @@ async function openReceiver(url, action, computer) {
     popup.location.replace(`${url.origin}/#directory-access`);
   }
   const start = Date.now();
+  job.lastResponseAt = start;
   const tick = () => {
     if (popup.closed) { stop(job, 'The receiver tab closed. Any pending request will expire.'); return; }
-    if (!job.ready && Date.now() - start > 10000) {
-      stop(job, 'The receiver did not respond to the list. Continue in its tab to connect directly.'); return;
+    if (Date.now() - job.lastResponseAt > 10000) {
+      if (action === 'request') message(job, 'cancel');
+      stop(job, job.cancelled ? 'The receiver did not confirm cancellation. Check its tab; pending requests expire.'
+        : 'The receiver stopped responding. Check its tab; any pending request will expire.'); return;
     }
-    if (!job.ready || action === 'add') message(job, action);
+    // Re-announce the same nonce/binding so a reloaded receiver can rejoin the
+    // pending intent. Its handler deduplicates an active or completed job; this
+    // neither approves a stream nor repeats an already consumed host grant.
+    message(job, action);
     if (job.ready && job.cancelled) message(job, 'cancel');
   };
   job.timer = setInterval(tick, 350); tick();
@@ -186,6 +193,7 @@ async function openReceiver(url, action, computer) {
 window.addEventListener('message', async event => {
   const job = active, value = event.data;
   if (!job || event.source !== job.popup || event.origin !== job.origin || value?.scope !== directoryMessage || value.id !== job.id) return;
+  job.lastResponseAt = Date.now();
   if (value.action === 'ready') { job.ready = true; if (job.cancelled) message(job, 'cancel'); return; }
   if (value.action === 'waiting' && job.action === 'request' && !job.cancelled) { say('Waiting for host approval'); return; }
   if (value.action === 'saved' && job.action === 'add' && !job.saving) {

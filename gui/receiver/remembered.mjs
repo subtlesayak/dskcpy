@@ -12,7 +12,7 @@ export function rememberedBrowser({ connectApproved, document = globalThis.docum
   const availability = $('paired-availability'), name = $('paired-name'), manage = $('paired-manage');
   const nameField = $('paired-name-input'), forget = $('paired-forget'), managementStatus = $('paired-management-status');
   let known = false, available = false, busy = false, timer, connectionAttempt, statusVersion = 0;
-  let computer, pairingId, identityChanged = false, forgetting = false, phase = 'offline';
+  let computer, pairingId, requestId, identityChanged = false, forgetting = false, phase = 'offline';
   try {
     const saved = JSON.parse(storage()?.getItem(computerStorageKey));
     if (validIdentity(saved) && validName(saved.name)) computer = { fingerprint: saved.fingerprint, publicKey: saved.publicKey, name: saved.name };
@@ -51,6 +51,7 @@ export function rememberedBrowser({ connectApproved, document = globalThis.docum
       if (mine !== statusVersion) return false;
       known = result.status === 'approved';
       pairingId = known && typeof result.pairingId === 'string' && /^[a-f0-9]{32}$/.test(result.pairingId) ? result.pairingId : undefined;
+      requestId = known && /^[a-f0-9]{32}$/.test(result.requestId || '') ? result.requestId : undefined;
       const verified = known && validIdentity(result.hostIdentity);
       identityChanged = Boolean(computer && known && (!verified || computer.fingerprint !== result.hostIdentity.fingerprint
         || computer.publicKey !== result.hostIdentity.publicKey));
@@ -75,7 +76,7 @@ export function rememberedBrowser({ connectApproved, document = globalThis.docum
       return known;
     } catch {
       if (mine === statusVersion) {
-        known = false; available = false; phase = 'offline';
+        known = false; available = false; requestId = undefined; phase = 'offline';
         renderComputer('Computer is unreachable. Check its connection and try again.');
       }
       return false;
@@ -104,7 +105,7 @@ export function rememberedBrowser({ connectApproved, document = globalThis.docum
     statusVersion++; clearTimeout(timer);
     try {
       await request('trusted/forget');
-      computer = null; pairingId = undefined; known = false; available = false; identityChanged = false; phase = 'pairing-required';
+      computer = null; pairingId = undefined; requestId = undefined; known = false; available = false; identityChanged = false; phase = 'pairing-required';
       saveComputer(); renderComputer('');
       $('session-key')?.focus();
       return true;
@@ -126,15 +127,24 @@ export function rememberedBrowser({ connectApproved, document = globalThis.docum
     catch (error) { $('remember-status').textContent = error.message; }
     finally { busy = false; $('remember-submit').disabled = false; }
   });
+  async function cancelPendingRequest(id) {
+    if (!/^[a-f0-9]{32}$/.test(id || '')) return true;
+    try {
+      const result = await request('trusted/cancel', { id });
+      return ['cancelled', 'expired'].includes(result.status);
+    } catch { return false; } // The bounded host request still expires.
+  }
   async function cancelConnection(attempt) {
     attempt.cancelled = true;
-    if (!attempt.id || attempt.cancelSent) return;
-    attempt.cancelSent = true;
-    try { await request('trusted/cancel', { id: attempt.id }); } catch { /* The request expires if the host is unreachable. */ }
+    if (!attempt.id) return true;
+    // A second caller must await the same acknowledgement, not report success
+    // merely because the first cancellation has been sent.
+    attempt.cancelPromise ||= cancelPendingRequest(attempt.id);
+    return attempt.cancelPromise;
   }
   function cancelRequest(owner) {
     if (!connectionAttempt || (owner && connectionAttempt.owner !== owner)) return false;
-    $('remembered-connection-status').textContent = 'Connection request cancelled.';
+    $('remembered-connection-status').textContent = 'Cancelling connection request…';
     $('remembered-cancel').hidden = true;
     void cancelConnection(connectionAttempt);
     return true;
@@ -145,6 +155,12 @@ export function rememberedBrowser({ connectApproved, document = globalThis.docum
     if (!available || location.protocol !== 'https:') return phase;
     const attempt = connectionAttempt = { cancelled: false, owner };
     const feedback = $('remembered-connection-status');
+    const finishCancellation = async () => {
+      const confirmed = await cancelConnection(attempt);
+      feedback.textContent = confirmed ? 'Connection request cancelled.'
+        : 'Request cancelled in this browser. The host did not confirm; its pending request will expire.';
+      return confirmed ? 'cancelled' : 'cancel-unconfirmed';
+    };
     reconnect.disabled = true;
     if (forget) forget.disabled = true;
     $('remembered-cancel').hidden = false;
@@ -153,14 +169,14 @@ export function rememberedBrowser({ connectApproved, document = globalThis.docum
       const pending = await request('trusted/connect', { action: 'request' });
       if (!/^[a-f0-9]{32}$/.test(pending.id || '') || !Number.isSafeInteger(pending.expiresAt)) throw Error('Update the host to request a new stream.');
       attempt.id = pending.id;
-      if (attempt.cancelled) { await cancelConnection(attempt); return 'cancelled'; }
+      if (attempt.cancelled) return await finishCancellation();
       feedback.textContent = 'Waiting for host approval';
       onWaiting();
       const deadline = Math.min(Date.now() + 120000, pending.expiresAt);
       while (!attempt.cancelled && Date.now() < deadline) {
         if (owner && !canClaim()) { await new Promise(resolve => setTimeout(resolve, 1000)); continue; }
         const result = await request('trusted/status', { id: attempt.id });
-        if (attempt.cancelled) return 'cancelled';
+        if (attempt.cancelled) return await finishCancellation();
         if (/^[A-Za-z0-9_-]{32}$/.test(result.key || '')) {
           if (connectApproved(result.key)) return 'approved';
           await cancelConnection(attempt);
@@ -174,10 +190,10 @@ export function rememberedBrowser({ connectApproved, document = globalThis.docum
         await new Promise(resolve => setTimeout(resolve, 1000));
       }
       if (!attempt.cancelled) feedback.textContent = 'The request expired. Try again when ready.';
-      return attempt.cancelled ? 'cancelled' : 'expired';
+      return attempt.cancelled ? await finishCancellation() : 'expired';
     } catch (error) {
       if (!attempt.cancelled) { feedback.textContent = error.message; if ([403, 409].includes(error.status)) void status(); }
-      if (attempt.cancelled) return 'cancelled';
+      if (attempt.cancelled) return await finishCancellation();
       return error.status === 409 ? 'busy' : error.status === 403 ? 'pairing-required' : 'request-failed';
     }
     finally {
@@ -188,10 +204,10 @@ export function rememberedBrowser({ connectApproved, document = globalThis.docum
     }
   }
   reconnect.addEventListener('click', () => requestConnection());
-  return { status, requestConnection, cancelRequest, forgetComputer,
+  return { status, requestConnection, cancelRequest, cancelPendingRequest, forgetComputer,
     async inspect() {
       await status();
-      return { phase, pairingId, paired: known && !identityChanged, computer: computer && { ...computer } };
+      return { phase, pairingId, requestId, paired: known && !identityChanged, computer: computer && { ...computer } };
     },
     authenticated(viewOnly) { $('remember-device').hidden = viewOnly || location.protocol !== 'https:'; if (!viewOnly) void status(); },
   };

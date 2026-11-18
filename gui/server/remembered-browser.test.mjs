@@ -300,6 +300,8 @@ test('simultaneous paired browsers cannot claim or cancel another browser’s re
   await f.store.approve({ id: 'a'.repeat(32), name: 'Second browser', origin, digest: deviceDigest(secondToken), profile: policy.rememberProfile });
   const first = await f.post('trusted/connect', cookie, { action: 'request' });
   assert.equal(first.status, 202);
+  assert.equal((await f.post('remember/status', cookie)).body.requestId, first.body.id);
+  assert.equal((await f.post('remember/status', secondCookie)).body.requestId, null);
   assert.equal((await f.post('trusted/connect', secondCookie, { action: 'request' })).status, 409);
   assert.equal((await f.post('trusted/status', secondCookie, { id: first.body.id })).body.status, 'expired');
   assert.equal((await f.post('trusted/cancel', secondCookie, { id: first.body.id })).body.status, 'expired');
@@ -308,4 +310,62 @@ test('simultaneous paired browsers cannot claim or cancel another browser’s re
   assert.equal((await f.post('trusted/connect', secondCookie, { action: 'request' })).status, 202);
   assert.equal(f.receiver.status().waiting, false);
   assert.equal(f.captures(), 1);
+});
+
+
+test('cancelling during awaited preparation cannot issue a late ticket', async t => {
+  let preparing = false, release;
+  const f = await fixture(t, { beforeTrusted: async () => {
+    preparing = true; await new Promise(resolve => { release = resolve; });
+  } });
+  const { ws, cookie } = await enroll(f);
+  ws.close(4000); await until(() => !f.receiver.status().connected);
+  const id = await requestApproval(f, cookie);
+  const pending = f.post('trusted/status', cookie, { id });
+  await until(() => preparing);
+  assert.equal((await f.post('trusted/cancel', cookie, { id })).body.status, 'cancelled');
+  release();
+  assert.equal((await pending).body.status, 'cancelled');
+  assert.equal(f.receiver.status().waiting, false);
+  assert.equal(f.captures(), 1);
+  await assert.rejects(f.receiver.trustAction('allow-stream', id), /expired/);
+});
+
+test('approval expiry during awaited preparation cannot issue a late ticket', async t => {
+  let preparing = false, release;
+  const f = await fixture(t, { connectionRequestMs: 1000, beforeTrusted: async () => {
+    preparing = true; await new Promise(resolve => { release = resolve; });
+  } });
+  const { ws, cookie } = await enroll(f);
+  ws.close(4000); await until(() => !f.receiver.status().connected);
+  const asked = await f.post('trusted/connect', cookie, { action: 'request' });
+  const id = asked.body.id;
+  await f.receiver.trustAction('allow-stream', id);
+  const pending = f.post('trusted/status', cookie, { id });
+  await until(() => preparing);
+  await until(() => Date.now() >= asked.body.expiresAt);
+  release();
+  assert.equal((await pending).body.status, 'cancelled');
+  assert.equal(f.receiver.status().waiting, false);
+  assert.equal(f.captures(), 1);
+});
+
+test('one host approval cannot authorize a second stream after explicit Stop', async t => {
+  const f = await fixture(t);
+  const { ws, cookie } = await enroll(f);
+  ws.close(4000); await until(() => !f.receiver.status().connected);
+  const requestId = await requestApproval(f, cookie);
+  const ticket = await f.post('trusted/status', cookie, { id: requestId });
+  const accepted = await f.connect(ticket.body.key, origin, 'host.example', cookie);
+  await until(() => f.captures() === 2);
+  assert.equal((await f.post('trusted/cancel', cookie, { id: requestId })).body.status, 'expired');
+  assert.equal(f.receiver.status().connected, true, 'Stale request cancellation cannot stop an established stream');
+  accepted.close(4000); await until(() => !f.receiver.status().connected);
+  await assert.rejects(f.connect(ticket.body.key, origin, 'host.example', cookie));
+  const next = await f.post('trusted/connect', cookie, { action: 'request' });
+  assert.equal(next.status, 202);
+  assert.equal((await f.post('trusted/status', cookie, { id: next.body.id })).body.status, 'pending');
+  assert.equal(f.captures(), 2);
+  await f.receiver.trustAction('deny-stream', next.body.id);
+  assert.equal(f.captures(), 2);
 });
