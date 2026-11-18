@@ -220,7 +220,11 @@ notice rather than displaying a reassuring app-only-cast indicator.
 These three explicit actions ask for confirmation. Cancel keeps the current
 session. End presentation retires its media authorization and disables input,
 while the controller remains authenticated on a status page with Stop sharing
-available. Neither the ended presentation nor native recovery may start capture
+available. Its HttpOnly cookie can restore that status-only connection after a
+transient socket loss, within the original recovery/session bounds. Reconnecting
+does not restore input, restart media or renew the ended presentation's expiry.
+Detach/attach may still send input-release cleanup. Neither the ended
+presentation nor native recovery may start capture
 again under that old grant. The ordinary receiver's power button also asks
 before ending the entire session; transport failures do not show that prompt.
 

@@ -120,7 +120,9 @@ function stopLocal(message = 'Controller disconnected') {
   document.body.classList.remove('controller-connected'); say(message);
 }
 async function resumeSession() {
-  if (ws || probing || document.hidden || ended) return;
+  // End presentation retires media/input, not this role's bounded status/Stop
+  // authorization. Let its HttpOnly cookie restore the status-only connection.
+  if (ws || probing || document.hidden) return;
   probing = true; const mine = generation;
   try {
     const response = await fetch('/stream/controller/session', { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(5000) });
