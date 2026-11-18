@@ -466,7 +466,7 @@ function clearMedia() {
   header = false; videoConfig = null; configBytes = null; audioConfig = null;
   paintTrackpad(); paintShortcuts();
 }
-function disconnect() {
+function disconnect({ stopSession = false } = {}) {
   if (closing) return;
   closing = true;
   const cancelRetainedCapture = mediaSwitching || sameCaptureRecovery;
@@ -476,7 +476,7 @@ function disconnect() {
   generation++;
   resumePendingMedia = null;
   sameCaptureRecovery = false;
-  if (sessionExpected && (cancelRetainedCapture || ws?.readyState !== WebSocket.OPEN)) void fetch('/stream/session', { method: 'POST', credentials: 'same-origin' }).catch(() => {});
+  if (sessionExpected && (stopSession || cancelRetainedCapture || ws?.readyState !== WebSocket.OPEN)) void fetch('/stream/session', { method: 'POST', credentials: 'same-origin' }).catch(() => {});
   sessionExpected = false; resumeDeadline = 0; clearFocusCapability();
   if (document.fullscreenElement) void document.exitFullscreen().catch(() => {});
   clearTimeout(retryTimer); clearTimeout(connectionTimer);
@@ -1082,7 +1082,14 @@ canvas.addEventListener('keydown', event => {
   else if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); if (!event.repeat) trackpad.click(); }
   else if (event.key === 'PageUp' || event.key === 'PageDown') { event.preventDefault(); trackpad.scroll(0, event.key === 'PageUp' ? -80 : 80); }
 });
-$('disconnect').addEventListener('click', disconnect);
+$('disconnect').addEventListener('click', () => {
+  releaseTouches();
+  if (typeof window.confirm !== 'function') {
+    $('error').textContent = 'This browser could not show the stop confirmation. Use Stop sharing on the host instead.'; return;
+  }
+  if (window.confirm('Stop sharing this desktop?\nThis ends video, audio and remote control for this session. Reconnect from a remembered browser or with a new invitation.'))
+    disconnect({ stopSession: true });
+});
 $('fullscreen').addEventListener('click', async () => {
   const attempt = ++fullscreenAttempt, mine = generation;
   $('orientation-help').hidden = true;

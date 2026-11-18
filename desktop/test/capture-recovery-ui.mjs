@@ -1,3 +1,4 @@
+import { confirmReceiverAction } from './browser-actions.mjs';
 // Real Chromium + owned loopback broker and synthetic native headers/input.
 // No screen, audio, clipboard, permission, private route or real device access.
 import { chromium } from 'playwright';
@@ -74,7 +75,7 @@ try{
    if(mode==='webrtc')assert.equal(controls[1].audio,false);
    await page.locator('#pause').click();await until(()=>!controls[1].paused);
    if(mode==='webrtc')await until(()=>controls[1].audio);
-   await page.getByRole('button',{name:'Disconnect',exact:true}).click();
+   await confirmReceiverAction(page);
    await until(()=>!receiver.status().connected);assert.equal(await firstBridge.restartNative(),false);assert.equal(captures,2);
    results.push({mode,...viewport,freshAuthorizationWithoutCodeEntry:true,freshHeader:true,clearedTyping:true,noTextReplay:true,nativeResumeConfirmed:true,pauseResumeConfirmed:true,audioChoiceRestored:mode==='webrtc',explicitDisconnectStopsRecovery:true,rtcOffers:mode==='webrtc'?2:0});
   }finally{await context.close();for(const native of natives)native.destroy();await receiver.shutdown();}
