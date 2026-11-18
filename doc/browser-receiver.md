@@ -49,8 +49,8 @@ after authentication. Treat the QR/code as access to the shared desktop.
 An authenticated browser can resume after refresh or a brief absence, up to five
 minutes, within the original session lifetime. Confirmed Disconnect, desktop
 Stop, host shutdown or expiry ends that capture. To start a new browser session,
-use an approved remembered browser only while the host still allows its approval,
-or request a fresh invitation. Correct a failed host start before creating
+use a paired browser to request access and wait for Allow on the host, or request
+a fresh invitation. Pairing alone never starts a new capture. Correct a failed host start before creating
 another code.
 
 ## Choose a connection
