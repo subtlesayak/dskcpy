@@ -174,12 +174,14 @@ test('fresh native codec parameters reach the existing RTC sender without releas
 });
 
 test('rejected native codec configuration uses only the existing negotiated media recovery grant', async t => {
- const f=await fixture(t,{inputPolicy:{keyboard:true},rtcMediaFactory:()=>({
+ const f=await fixture(t,{nativeHeaderDelayMs:25,inputPolicy:{keyboard:true},rtcMediaFactory:()=>({
   offer:async()=>({type:'offer',sdp:'synthetic'}),answer:async()=>{},close:async()=>{},
   configure:()=>{throw Error('Owned incompatible codec profile');},frame:async()=>{},sound:async()=>{},
  })});
  const first=await f.open(undefined,undefined,'stream/webrtc',MEDIA_FALLBACK_PROTOCOL);first.send(f.invitation.key);
- await until(()=>f.calls()===1);
+ // Wait for the parsed native header rather than the connect-start counter.
+ // Otherwise codec bytes can precede the fake SRD header under scheduler load.
+ await until(()=>first.received.some(message=>message.binary&&message.data.equals(header)));
  f.native().write(packet(0,1,Buffer.from('000000016742c01e0102030000000168ce3c80','hex')));
  await until(()=>first.received.some(m=>!m.binary&&JSON.parse(m.data).type==='rtc-offer'));
  const cookie=first.cookie.split(';')[0],closed=once(first,'close');

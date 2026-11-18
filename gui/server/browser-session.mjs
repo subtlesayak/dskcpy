@@ -607,6 +607,7 @@ export function createBrowserSession({ socket, onConnect, onClose, resumeMs, lif
     } catch { close(); }
   }
   return { start, attach, close, beginPresentation, endPresentation, attachController, detachController,
+    get presentationState() { return presentationState(); },
     get presentation() { return splitControl; }, get controllerConnected() { return Boolean(controller); },
     get mediaMode() { return mediaMode; }, get recovering() { return recovering; }, get cleanup() { return rtcCleanup; } };
 }

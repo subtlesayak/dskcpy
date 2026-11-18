@@ -20,6 +20,7 @@ app.whenReady().then(async () => {
   // Even accidental external renderer requests remain blocked in this fixture.
   session.defaultSession.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*'] }, (_details, callback) => callback({ cancel: true }));
   const { OwnedBackend } = await import(pathToFileURL(path.join(config.application, 'desktop/owned-backend.mjs')).href);
+  const { createStopAction } = await import(pathToFileURL(path.join(config.application, 'desktop/stop-action.mjs')).href);
   stage = 'owned-lifecycle-races';
   const lifecycle = await require('./owned-backend-utility.cjs')(OwnedBackend, utilityProcess.fork, config.ownedDirectory);
   backend = new OwnedBackend({ fork: utilityProcess.fork,
@@ -72,8 +73,12 @@ app.whenReady().then(async () => {
       joinUrl: 'https://example.invalid/join/synthetic#connect=synthetic-test-only', expiresAt: Date.now() + 300000 } };
     window.webContents.send('host:changed', state); return state;
   });
-  handle('stop', () => { state = { ...state, phase: 'ready', canStop: false, invitation: null };
-    window.webContents.send('host:changed', state); return state; });
+  let confirmStop = false, stopQuestions = 0, stopped = 0;
+  const requestStop = createStopAction({ snapshot: () => state,
+    confirm: async () => { stopQuestions++; return confirmStop; },
+    stop: async () => { stopped++; state = { ...state, phase: 'ready', canStop: false, invitation: null, presentation: null };
+      window.webContents.send('host:changed', state); return state; } });
+  handle('stop', () => requestStop());
   handle('copy-invitation', () => true);
   handle('set-open-at-login', enabled => {
     assert.equal(typeof enabled, 'boolean'); state.startup = { ...state.startup, requested: enabled, enabled };
@@ -107,10 +112,24 @@ app.whenReady().then(async () => {
     return { bridgeLoaded: true, nodeUnavailable: true, rendererStartStopEvents: true, syntheticCopy: copied, syntheticStartupIpc: true, rememberedDeviceIpc: true, usbPreloadIpc: true, utilityMissingAdbHandled: true, clipboardConsentIpc: true };
   })()`);
   stage = 'renderer-validation';
+  assert.equal(stopQuestions, 0, 'Cancel invitation does not prompt');
+  assert.equal(stopped, 1);
+  state = { ...state, phase: 'sharing', canStop: true, presentation: { ended: true, available: false,
+    controllerConnected: true, controllerActive: false, controllerAuthorized: true } };
+  window.webContents.send('host:changed', state);
+  stage = 'synthetic-stop-confirmation-ipc';
+  const cancelled = await window.webContents.executeJavaScript('window.dskcpyHost.stop()');
+  assert.equal(cancelled.phase, 'sharing'); assert.equal(cancelled.presentation.ended, true);
+  assert.equal(stopQuestions, 1); assert.equal(stopped, 1);
+  confirmStop = true;
+  const confirmed = await window.webContents.executeJavaScript('window.dskcpyHost.stop()');
+  assert.equal(confirmed.phase, 'ready'); assert.equal(confirmed.canStop, false);
+  assert.equal(stopQuestions, 2); assert.equal(stopped, 2);
   assert.deepEqual(errors, []); assert.equal(window.isVisible(), false);
   stage = 'utility-shutdown'; await backend.shutdown(); backend = null;
   stage = 'result-write';
   await writeFile(config.result, JSON.stringify({ ...check, ...lifecycle, utilityProcessIpc: true, utilityIdleRetirementIpc: true,
+    syntheticStopConfirmationIpc: true, realNativeDialog: false,
     bundledRuntime: process.versions.electron, hiddenWindow: true, nativeProgram: 'fake --help only',
     realInvitation: false, realDeviceEnrolled: false, screenCapture: false, permissionApis: false, tailscale: false,
     actualHostShellLaunched: false, desktopMediaQualified: false }, null, 2));

@@ -263,10 +263,14 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
     });
   }
   function status() {
+    const role = session?.presentationState;
     return { waiting: Boolean(invitation), connected: Boolean(session), clipboardAllowed: Boolean((invitation || session) && inputPolicy.clipboard),
       url: port ? viewerUrl() : null, remote: !['local', 'usb'].includes(mode),
       remoteAvailable: Boolean(remoteOrigin), mode, expiresAt, mediaMode: session?.mediaMode ?? null, recovering: Boolean(session?.recovering),
-      ...(presentationControl === true ? { presentation: session?.presentation === true, controllerConnected: session?.controllerConnected === true } : {}) };
+      ...(presentationControl === true ? { presentation: role?.presentation === true,
+        presentationEnded: role?.presentationEnded === true, presentationAvailable: role?.presentationAvailable === true,
+        controllerConnected: role?.controllerConnected === true, controllerActive: role?.controllerActive === true,
+        controllerAuthorized: role?.controllerAuthorized === true } : {}) };
   }
   function cancel() {
     clearControllerGrant();
