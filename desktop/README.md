@@ -159,6 +159,11 @@ PLAYWRIGHT_BROWSERS_PATH=desktop/.browsers node desktop/test/beginner-ui.mjs
 PLAYWRIGHT_BROWSERS_PATH=desktop/.browsers node desktop/test/usb-ui.mjs
 PLAYWRIGHT_BROWSERS_PATH=desktop/.browsers node desktop/test/remembered-ui.mjs
 PLAYWRIGHT_BROWSERS_PATH=desktop/.browsers node desktop/test/remembered-cookie.mjs
+PLAYWRIGHT_BROWSERS_PATH=desktop/.browsers node desktop/node_modules/playwright/cli.js install webkit
+PLAYWRIGHT_BROWSERS_PATH=desktop/.browsers node desktop/test/remembered-network.mjs chromium revoke
+PLAYWRIGHT_BROWSERS_PATH=desktop/.browsers node desktop/test/remembered-network.mjs chromium expiry
+PLAYWRIGHT_BROWSERS_PATH=desktop/.browsers node desktop/test/remembered-network.mjs webkit revoke
+PLAYWRIGHT_BROWSERS_PATH=desktop/.browsers node desktop/test/remembered-network.mjs webkit expiry
 ```
 
 Service integration uses a fake no-capture executable and a new ephemeral
@@ -175,6 +180,20 @@ JavaScript isolation at the matching path, browser and fixture-host restarts,
 and revocation with synthetic grants, then deletes the owned profile/registry.
 The temporary-session bootstrap is supplied by the fixture; this test does not
 claim a physical first-pairing, TLS, media, or Android browser result.
+
+The separate `remembered-network.mjs` check uses a disposable loopback HTTPS
+server and real Chromium/WebKit cookie and WSS handling. Its temporary browser
+accepts the fixture's self-signed certificate; HTTP routing and page CSP confine
+requests and WebSockets to that fixture. It changes no system trust. Enrollment
+and resume cookies come from actual network responses, without cookie injection.
+Both browser and fake host restart; a fresh ticket authenticates, transport loss
+resumes through the HttpOnly cookie without another capture, pause blocks access,
+and an unapproved context cannot replay a consumed ticket. Separate runs verify
+revoke and server-side expiry while the browser credential remains present.
+Expiry uses an injected registry clock and checks subsequent reconnect denial;
+it does not simulate browser/system time or prove live-session expiry timing.
+No real screen/audio/input, VPN, mobile OS, Safari app, or certificate trust is
+qualified. Temporary keys, profiles and registry are deleted after each run.
 
 ## Beginner release gates still open
 
