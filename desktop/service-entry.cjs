@@ -50,7 +50,7 @@ parent.on('message', async ({ data }) => {
       }
       case 'trusted-list': value = await api('/api/browser/trusted'); break;
       case 'trusted-action': {
-        if (!data.args || !['approve','reject','revoke','pause','resume'].includes(data.args.action)) throw new Error('Invalid device action');
+        if (!data.args || !['approve','reject','revoke','pause','resume','allow-stream','deny-stream'].includes(data.args.action)) throw new Error('Invalid device action');
         value = await api('/api/browser/trusted', data.args); break;
       }
       case 'prepare-receiver': value = await api('/api/browser/prepare', { mode: 'internet' }); break;

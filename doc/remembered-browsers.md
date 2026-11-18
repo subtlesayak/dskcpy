@@ -5,9 +5,9 @@ This source candidate adds opt-in remembered access alongside temporary invitati
 ## First connection
 
 1. Start the host with its existing private HTTPS/VPN setup. Connect using a normal temporary invitation.
-2. In the receiving browser, open **Options → Remember this browser**. Enter a readable name and select **Ask Mac to remember**. Use only your own browser profile.
-3. On the Mac dashboard or desktop app, review **Remembered devices** and select **Allow remembered access**. Approval permits full desktop viewing, audio and mouse/keyboard control for 90 days while the host is running.
-4. Bookmark the same private receiver address. Return in the same browser/profile with the private VPN connected. The receiver first tries the short session resume, then requests a fresh connection using its saved credential. **Reconnect to my Mac** allows a deliberate retry after Disconnect.
+2. In the receiving browser, open **Options → Remember this browser**. Enter a readable name and select **Request pairing**. Use only your own browser profile.
+3. On the host dashboard or desktop app, review **Remembered devices** and select **Allow remembered access**. Pairing lets this browser request streams for 90 days.
+4. Return to the same private HTTPS address in the same browser profile. A brief transport interruption can resume the same stream. For a new stream, select **Request to connect** and wait for someone at the computer to choose **Allow** or **Deny**. Select **Cancel request** to withdraw it. Requests expire after one minute.
 
 A remembered device never displaces another active receiver or temporary invitation. A single-window, view-only session cannot enroll a browser for full-desktop access. HTTP/USB/local preview cannot create remembered access.
 
@@ -16,7 +16,7 @@ A remembered device never displaces another active receiver or temporary invitat
 - **Stop sharing** ends the current stream and pauses remembered access. On the Mac, select **Enable remembered access** when ready to allow approved devices to return.
 - **Pause remembered access** prevents remembered reconnection and ends the current browser session.
 - **Revoke** removes one saved browser and terminates its associated session or pending ticket. Other devices and unrelated temporary invitations are preserved.
-- Receiver **Disconnect** ends that session and suppresses automatic retries in that tab. It preserves approval; select **Reconnect to my Mac** to connect again.
+- Receiver **Disconnect** ends that session and preserves the pairing. Select **Request to connect** for another stream, which needs a fresh host decision.
 - Clearing site cookies, changing browser/profile/address, expiry, or revocation requires pairing again.
 
 The Mac must be awake, online and running the host. Stored approval survives restarting this host service; its private receiver listens without creating an invitation or capturing until an approved browser connects. This does not start a stopped application, wake a powered-off computer, unlock FileVault, or configure unattended pre-login VPN access. The desktop app's separately opt-in login startup applies after user sign-in.
@@ -25,7 +25,9 @@ The Mac must be awake, online and running the host. Stored approval survives res
 
 The browser receives a random 256-bit credential in a host-only `Secure; HttpOnly; SameSite=Strict` cookie scoped to `/stream`. It never enters JavaScript storage, a URL, QR code or diagnostics. A provisional credential grants nothing until local owner approval. The host persists only SHA-256 hashes, readable names, exact HTTPS origins, grant times and bounded streaming preferences. No reusable plaintext credential is written by the host.
 
-Remote mutations require the exact configured HTTPS Origin and reject cross-site requests. Owner approval, pause and revoke stay on the existing guarded loopback control surface or validated desktop IPC. Tickets are one-use and expire after 15 seconds; granting a ticket alone does not start capture. Approval, expiry, pause and revocation are checked again before consuming a ticket. Registry writes are serialized, atomic and fail closed; corrupt/unwritable storage blocks remembered access. There are at most 20 grants, one current enrollment request and one connecting preparation. The existing authenticated media/input wire remains unchanged.
+Remote mutations require the exact configured HTTPS origin and reject cross-site requests. Pairing and stream approval stay on the existing guarded loopback control surface or validated desktop IPC. After the host allows a request, the requesting browser can claim a short-lived, one-use ticket. Capture starts only when that browser authenticates the stream with its ticket and paired cookie. Cancellation, expiry, pause and revocation are checked again before consuming a ticket. Registry writes are serialized, atomic and fail closed. The host accepts one live stream request at a time and reports busy to another requester. Pending stream requests are held in memory and expire on host restart. The media and input wire remains unchanged.
+
+This first approval flow uses one verified HTTPS receiver origin at a time. Cross-origin computer lists, renaming and forgetting from a shared client screen, and host identity across address changes require a separate client identity design.
 
 A remembered connection is bounded by the earlier of the configured session
 lifetime and its approval's absolute expiry. Starting shortly before approval

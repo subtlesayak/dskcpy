@@ -751,13 +751,12 @@ for (const policy of [{keyboard:true},{keyboard:true,clipboard:true,viewOnly:tru
   ws.send('clipboard-enable');const [code]=await once(ws,'close');assert.equal(code,1008);
 });
 
-test('a remembered grant cannot carry clipboard permission even if an internal caller supplies it',async t=>{
-  let native;const receiver=createBrowserReceiver({configuredPort:0,trustedDevices:{allowed:()=>true,snapshot:()=>({available:false,paused:false,devices:[]})},onConnect:async bridge=>{
-    assert.equal(bridge.clipboard,false);native=net.connect(bridge.port,'127.0.0.1');native.on('error',()=>{});await once(native,'connect');native.write(header);
-  }});t.after(async()=>{native?.destroy();await receiver.shutdown();});
-  const grant={id:'fixture',digest:'fixture',origin:'',expiresAt:Date.now()+43200000},invitation=await receiver.invite('local',{keyboard:true,clipboard:true},grant);grant.origin=invitation.url.slice(0,-1);
-  const ws=new WebSocket(invitation.url.replace('http:','ws:')+'stream',{origin:grant.origin});ws.on('error',()=>{});t.after(()=>ws.terminate());await once(ws,'open');
-  const first=once(ws,'message');ws.send(invitation.key);const [bytes,binary]=await first;assert.equal(binary,false);assert.equal(JSON.parse(bytes).clipboard,false);
+test('an internal invite caller cannot substitute a synthetic remembered grant for host approval', async t => {
+  const receiver = createBrowserReceiver({ configuredPort: 0, trustedDevices: { allowed: () => true } });
+  t.after(() => receiver.shutdown());
+  const grant = { id: 'fixture', digest: 'fixture', expiresAt: Date.now() + 60000, isCurrent: () => true };
+  await assert.rejects(receiver.invite('local', { keyboard: true, clipboard: true }, grant), /Connection approval/);
+  assert.equal(receiver.status().waiting, false);
 });
 
 test('native keyboard denial cancels clipboard and suppresses its queued private result',async t=>{

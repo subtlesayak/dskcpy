@@ -2,8 +2,9 @@ import { useEffect, useState } from 'react';
 
 export type TrustedDevices = { available: boolean; paused: boolean; storageError?: boolean;
   pending: { id: string; name: string; expiresAt: number }[];
+  streamRequest?: { id: string; name: string; expiresAt: number; permissions: string[] } | null;
   devices: { id: string; name: string; expiresAt: number }[] };
-export type DeviceAction = 'approve' | 'reject' | 'revoke' | 'pause' | 'resume';
+export type DeviceAction = 'approve' | 'reject' | 'revoke' | 'pause' | 'resume' | 'allow-stream' | 'deny-stream';
 export type DeviceAPI = { list(): Promise<TrustedDevices>; action(action: DeviceAction, id?: string): Promise<TrustedDevices> };
 async function request(body?: unknown): Promise<TrustedDevices> {
   const response = await fetch('/api/browser/trusted', body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {});
@@ -33,21 +34,26 @@ export default function TrustedDevicesPanel({ api = localAPI }: { api?: DeviceAP
   if (!state?.available && !state?.storageError) return null;
   return <section className="remembered-devices" aria-labelledby="remembered-title">
     <h2 id="remembered-title">Remembered devices</h2>
-    <p>Approve your own browser once so it can reconnect without a new code for 90 days. Access includes the entire desktop, audio, mouse and keyboard while this host is running. Keep the Mac awake and its private connection on.</p>
+    <p>Pair a browser you trust so it can request access without a new code for 90 days. Approve each new stream here.</p>
     {state?.storageError && <p role="alert">Device storage needs attention. Remembered access is blocked.</p>}
+    {state?.streamRequest && <div className="remembered-device-request">
+      <h3>Connection request</h3><p role="status"><strong>{state.streamRequest.name}</strong> wants to view and control the desktop and hear its audio.</p>
+      <button type="button" disabled={busy} onClick={() => action('allow-stream', state.streamRequest?.id)}>Allow</button>{' '}
+      <button type="button" disabled={busy} onClick={() => action('deny-stream', state.streamRequest?.id)}>Deny</button>
+    </div>}
     {state?.pending.map(device => <div key={device.id} className="remembered-device-request">
-      <strong>{device.name}</strong><p>Allow this browser to reconnect and control the entire desktop for 90 days?</p>
+      <strong>{device.name}</strong><p>Pair this browser for 90 days so it can request new streams?</p>
       <button type="button" disabled={busy} onClick={() => action('approve', device.id)}>Allow remembered access</button>{' '}
       <button type="button" disabled={busy} onClick={() => action('reject', device.id)}>Reject</button>
     </div>)}
     {state?.devices.length === 0 && <p>No remembered devices. Connect through a private invitation, then choose Options → Remember this browser on your receiving device.</p>}
     {Boolean(state?.devices.length) && <>
-      <p role="status">{state?.paused ? 'Remembered access is paused.' : 'Approved browsers may reconnect while this host is running.'}</p>
+      <p role="status">{state?.paused ? 'Remembered access is paused.' : 'Paired browsers can send connection requests.'}</p>
       <button type="button" disabled={busy} onClick={() => action(state?.paused ? 'resume' : 'pause')}>{state?.paused ? 'Enable remembered access' : 'Pause remembered access'}</button>
       <ul>{state?.devices.map(device => <li key={device.id}><strong>{device.name}</strong> · expires {new Date(device.expiresAt).toLocaleDateString()} {' '}
         <button type="button" disabled={busy} aria-label={`Revoke ${device.name}`} onClick={() => action('revoke', device.id)}>Revoke</button></li>)}</ul>
     </>}
-    <p>Stop sharing pauses remembered access too. Enable it here when you want approved devices to reconnect.</p>
+    <p>Host Stop pauses remembered access too. Enable it here when you want to receive connection requests.</p>
     {error && <p role="alert">{error}</p>}
   </section>;
 }
