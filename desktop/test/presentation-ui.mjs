@@ -75,6 +75,9 @@ try {
       }
     });
     await controllerContext.addInitScript(() => {
+      window.__testControllerSockets = [];
+      const OriginalSocket = WebSocket;
+      window.WebSocket = class extends OriginalSocket { constructor(...args) { super(...args); window.__testControllerSockets.push(this); } };
       window.__testAudioContexts = 0;
       if (window.AudioContext) { const Original = AudioContext; window.AudioContext = class extends Original { constructor(...args) { super(...args); window.__testAudioContexts++; } }; }
       const getter = Object.getOwnPropertyDescriptor(Document.prototype, 'hidden')?.get;
@@ -184,6 +187,22 @@ try {
     await confirmReceiverAction(controller, { name: 'End presentation' });
     await until(() => controller.locator('#controller-status').textContent().then(text => text.startsWith('Presentation ended')), 'separate End presentation');
     assert.equal(broker.status().controllerConnected, true); assert.equal(await bridge.restartNative(), false);
+    const beforeStatusRecovery = inputs.length;
+    const socketsBefore = await controller.evaluate(() => window.__testControllerSockets.length);
+    await controller.evaluate(() => window.__testControllerSockets.at(-1).close(4001, 'Owned transient status-page socket loss'));
+    await until(async () => await controller.evaluate(() => window.__testControllerSockets.length) > socketsBefore
+      && broker.status().controllerConnected
+      && await controller.locator('#controller-status').textContent().then(text => text.startsWith('Presentation ended')),
+    'ended presentation retains cookie-only controller status recovery');
+    assert.equal(nativeCalls,1,'status recovery cannot launch another capture');
+    assert.equal(await bridge.restartNative(),false,'status recovery cannot restart an ended presentation');
+    assert.equal(await controller.getByRole('button',{name:'Keyboard',exact:true}).isDisabled(),true);
+    assert.equal(await controller.getByRole('button',{name:'Click',exact:true}).isDisabled(),true);
+    // Detach/attach intentionally release old input. Permit only those cleanup
+    // messages; status recovery must not deliver a fresh press, move or text.
+    const freshInput=inputs.slice(beforeStatusRecovery).filter(packet=>[3,7,8,9,10,11].includes(packet[0])
+      && !(packet[0]===3&&packet[1]===3) && !(packet[0]===8&&packet[1]===2));
+    assert.deepEqual(freshInput.map(packet=>packet.toString('hex')),[],'status-only recovery delivers cleanup only, never fresh input');
     await confirmReceiverAction(controller, { name: 'Stop sharing' });
     await until(() => !broker.status().connected && native.destroyed, 'explicit whole-session Stop');
     assert.equal(held.size, 0); assert.deepEqual(errors, []);
@@ -192,7 +211,7 @@ try {
       keyboardFocusVisible: true, nativeFocusTraversal: engine === 'webkit' ? 'Option+Tab' : 'Tab', pointerPreferenceKeyboardAndReload: true, explicitModifierShortcut: true, secondaryClickPacket: variant.pointerButtons !== false, oldHostSecondaryClickDenied: variant.pointerButtons === false,
       autoKeyboardWithoutOptionsFocusSteal: true, suggestionReplacementAfterRepeatedFocus: true, simulatedVisibilityLifecycle: true,
       presentationContinued: true, controllerReload: true, noControllerMediaOrAudioContext: true,
-      cancelEndPreservedSession: true, separateEndPresentation: true, confirmedStop: true,
+      cancelEndPreservedSession: true, separateEndPresentation: true, endedControllerStatusRecovery: true, confirmedStop: true,
       nativeCalls, generatedFrames: frames, generatedAcks: acks, physicalDevice: false, castingQualified: false });
   } catch (error) {
     await writeFile(path.join(output, 'failure.json'), JSON.stringify({ variant, error: String(error.message).replace(/#controller=[A-Za-z0-9_-]+/g, '#controller=[redacted]'), errors,
