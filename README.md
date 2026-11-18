@@ -48,9 +48,13 @@ Mac hosting candidate, see [Build identity and compatible upgrades](doc/artifact
   native capability and OS input permissions. Optional Mac
   [typing framing](doc/browser-typing-view.md) follows a bounded caret/field hint,
   with last-tap framing for older hosts.
-- **Receiver tools:** adjustable touch-scroll speed, trackpad control, local pinch zoom, shortcut buttons and
-  separately authorized [text clipboard transfer](doc/browser-clipboard.md).
-- **Experimental separate controller:** an off-by-default [presentation and phone-controller prototype](doc/external-display-controller.md), with separate media/input roles and negotiated secondary click on matching hosts. Physical casting and background playback remain unqualified.
+- **Receiver tools:** adjustable touch-scroll speed, trackpad control, local
+  pinch zoom, shortcut buttons and separately authorized
+  [text clipboard transfer](doc/browser-clipboard.md).
+- **Experimental separate controller:** an off-by-default
+  [presentation and phone-controller prototype](doc/external-display-controller.md),
+  with separate media/input roles and negotiated secondary click on matching
+  hosts. Physical casting and background playback remain unqualified.
 - **Desktop app prototype:** guided private-network and account-free Android USB
   setup; see [implemented features and release gates](desktop/README.md).
 - **Local dashboard:** connection setup, wireless discovery, performance settings,
@@ -139,8 +143,9 @@ Then try [wireless pairing](gui/README.md#cable-free-android-setup) or
    connected device. For local preview, open the receiver link and paste its code.
 3. Wi-Fi, direct IP and Internet/VPN need the
    [secure-link setup](doc/browser-receiver.md#choose-a-connection) first.
-4. In the receiver, select **Disconnect**, or select **Stop browser stream** in
-   the dashboard, to end sharing.
+4. In the receiver, select **Disconnect** and confirm the stop request, or select
+   **Stop browser stream** in the dashboard, to end sharing. Cancel keeps the
+   receiver session running.
 
 The dashboard and receiver are different pages. The dashboard's localhost
 address is for the computer; use the generated receiver address on the phone.
@@ -184,7 +189,10 @@ options and encoder/monitor selection are in the
   older binaries do not advertise those capabilities.
 - Start with **1920 / 60 FPS / 12 Mbps**, then tune for your device and connection.
   Performance changes apply to the next stream.
-- Mac window mode is view-only. Audio starts off; a capable host can explicitly allow the selected window's entire application audio. See [application-audio scope and qualification](doc/browser-window-audio.md). Select the entire desktop for input.
+- Mac window mode is view-only. Audio starts off; a capable host can explicitly
+  allow the selected window's entire application audio. See
+  [application-audio scope and qualification](doc/browser-window-audio.md).
+  Select the entire desktop for input.
 - Computer volume and receiver playback mute are separate controls.
 - Decode-acknowledgement round trip is not physical touch-to-display latency.
   WebRTC send acknowledgements are not browser decode measurements either.

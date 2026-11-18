@@ -228,10 +228,11 @@ gates. Do not label this prototype universal or beginner-release-ready.
 ## Current remote recovery and power limits
 
 The existing receiver can resume the same browser session after a brief drop or
-background period, within about two minutes, while the host remains running.
-Keep Tailscale connected, reopen the same receiver tab and let it retry; refresh
-once if needed. Disconnect explicitly ends that session. An expired session or
-restarted host needs either an explicitly approved remembered browser in this
+background period, within five minutes and the original session lifetime, while
+the host remains running. Keep Tailscale connected, reopen the same receiver tab and let it retry; refresh
+once if needed. Confirming Disconnect explicitly ends that session; cancelling
+the confirmation keeps it running. An expired session or restarted host needs
+either an explicitly approved remembered browser in this
 source candidate or a new one-use invitation from the Mac. An old QR is not a
 remembered-device credential. The running Terminal baseline has not been
 updated by building this candidate.

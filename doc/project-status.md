@@ -8,9 +8,12 @@ the behavior it actually exercised.
 
 ## Merged implementation baseline
 
-The combined implementation review checkpoint is
-`30d55b66`, integrating PRs #45 and #47–#53 above `ab2c2f93` and the earlier
-#16–#44 baseline. Documentation-only updates may postdate this commit.
+The merged implementation baseline is
+[`d3822b42`](https://github.com/subtlesayak/dskcpy/commit/d3822b4202429a10757710a7ac4e34e0f4e90e90),
+which includes all eight PRs **#45 and #47–#53** above `ab2c2f93` and the earlier
+#16–#44 baseline. It has the same tree as the reviewed `cd9ae1e1` candidate,
+including the original cumulative-acknowledgement fix `30d55b66`.
+Documentation-only updates may postdate this commit.
 Merging source does not install a new app, replace an active receiver or
 qualify physical hardware.
 
@@ -34,27 +37,52 @@ cannot make a differently signed APK a compatible update.
 
 ## Automated verification
 
-The 18 November combined review passes 34 local Mac native tests in each
-normal, ASan/UBSan and pinned build. The initial Node run passes 548 tests
-with eight optional/fixture-dependent skips; the native log-pipe case requires
-the explicitly supplied built fixture. Both UI builds pass. Ten generated
-Chromium/WebKit presentation/controller flows and eight host role-status/Stop
-flows pass. Six owned-loopback HTTPS cases exercise real browser cookies,
-restart/resume, revocation, approval expiry and active-capture expiry; their
-self-signed certificate exception is confined to disposable browser contexts.
-They do not qualify system certificate trust.
+The final 18 November combined review passes **549 Node tests**, with seven
+optional skips and the built native log-pipe fixture enabled. Both UI builds
+pass. Local Apple-silicon and hosted Intel builds each pass **34 native tests**
+in every normal, ASan/UBSan and pinned configuration.
 
-Actual Android audio-player source compiles against cached API36 Java APIs
-with a declared identity-only BuildConfig fixture. Thirty-eight selected
-JUnit cases pass, including four acknowledgement regressions; two ordering
-assertions failed before the original queue fix. This direct-Java check is
-separate from the full Gradle/public-SDK gates in CI.
+Full Android SDK/Gradle validation passes **114 tests across 18 suites**, with
+zero failures, errors or skips, including all nine sender and eight PCM-tail
+cases. Both Android build variants, declared outputs, build-test signature and
+identity checks, and standalone-server compilation pass. Build-test signing does
+not establish compatibility with the key used for an existing phone installation.
+Windows passes 27 native tests and five required callback/runtime probes, plus
+unsigned desktop payload and hidden fake-IPC checks.
 
-Use [PR #53's checks](https://github.com/subtlesayak/dskcpy/pull/53/checks) for the
-combined candidate's exact head and terminal cross-platform outcomes. Earlier
-PR-head passes and capacity cancellations are historical evidence, not passes
-for this integration. The previous #38–#44 review passed all eight jobs in
+[Final integration CI 44289460747](https://github.com/subtlesayak/dskcpy/actions/runs/44289460747)
+finished with **six successful jobs and two infrastructure cancellations**.
+The ARM-native and Mac browser-media jobs acquired no runner and executed no
+test steps; their annotations identify hosted Mac ARM capacity constraints.
+The overall workflow is not green. All Mac browser-media test commands and
+equivalent ARM native, sanitizer, pinned-package and fake-IPC checks passed
+locally on the exact reviewed source. Local builds reused cached pinned
+dependencies. The CI synthetic merge `4bc093cf` and merged `d3822b42` baseline have identical trees;
+this evidence does not cover unmerged follow-ups.
+
+Generated/fake-effect browser checks cover nine ordinary media-transport cases,
+24 typing, 11 window-switching, nine WebKit video-preference, three test-muted
+application-audio, four trackpad, ten presentation/controller and eight host
+status/Stop flows. Six owned-loopback HTTPS cases verify real browser cookies,
+restart/resume, revocation, approval expiry and active-capture expiry. Their
+self-signed certificate exception is confined to disposable browser contexts;
+it does not qualify system certificate trust.
+
+Actual Android audio-player source also compiles against cached API36 Java APIs
+with a declared identity-only BuildConfig fixture. Thirty-eight selected JUnit
+cases pass; two cumulative-acknowledgement ordering assertions failed before
+the original fix. This direct-Java check is separate from full SDK/Gradle CI.
+
+The downloaded Intel CI archive independently verifies all 5,976 payload files,
+including the exact set of 74 shipped server/receiver source files, executable
+bits and primary Werift notice. Local unsigned Terminal and desktop stages
+verify 5,976 and 5,986 files respectively; the desktop payload checks 93
+first-party, five native and 35 required source files. Downloaded code was not
+executed, and neither candidate was installed or activated by this review.
+
+The previous #38–#44 review passed all eight jobs in
 [run 44041666101](https://github.com/subtlesayak/dskcpy/actions/runs/44041666101).
+That earlier result does not turn a later capacity cancellation into a pass.
 
 These tests use generated media, fake native effects or software decoding where
 specified. They do not establish physical input, audible playback, real encoder
@@ -95,6 +123,13 @@ Local checks, hosted-runner capacity cancellations and separate integrations are
 different evidence. The combined typing layout, actual AX providers and
 application-audio behavior still require physical qualification. The browser
 does not control the system keyboard's position or replace its IME.
+
+## Unmerged follow-ups
+
+Development installer images, paired-computer navigation/identity, host approval
+for each new stream and Gaming mode are separate ongoing work. They are not
+capabilities or qualified releases of the merged baseline above. Their remaining
+implementation and physical checks stay on the [roadmap](roadmap.md).
 
 ## Candidate-specific physical evidence
 
