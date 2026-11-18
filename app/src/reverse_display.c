@@ -18,6 +18,7 @@
 #include "reverse_h264.h"
 #include "reverse_audio.h"
 #include "reverse_touch.h"
+#include "reverse_pointer.h"
 #include "util/env.h"
 #include "util/binary.h"
 #include "util/log.h"
@@ -115,6 +116,7 @@ struct reverse_display_state {
     struct sc_receiver receiver;
     sc_mutex touch_mutex;
     struct sc_reverse_touch touch;
+    struct sc_reverse_pointer pointer; // Protected by touch_mutex; pending right-UP only.
     struct sc_windows_keyboard keyboard; // Protected by touch_mutex, including teardown.
     HWND clipboard_window; // Hidden message-only owner; only with explicit opt-in.
     enum sc_windows_key_result keyboard_status;
@@ -1661,8 +1663,8 @@ reverse_make_touch_info(const struct sc_reverse_touch_point *contact,
 }
 
 static bool
-reverse_send_mouse_event(const struct sc_reverse_touch_point *contact,
-                         DWORD button_flags) {
+reverse_make_mouse_event(const struct sc_reverse_touch_point *contact,
+                         DWORD button_flags, INPUT *output) {
     int virtual_left = GetSystemMetrics(SM_XVIRTUALSCREEN);
     int virtual_top = GetSystemMetrics(SM_YVIRTUALSCREEN);
     int virtual_width = GetSystemMetrics(SM_CXVIRTUALSCREEN);
@@ -1692,12 +1694,38 @@ reverse_send_mouse_event(const struct sc_reverse_touch_point *contact,
     input.mi.dy = (LONG) (y * 65535 / (virtual_height - 1));
     input.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE
                      | MOUSEEVENTF_VIRTUALDESK | button_flags;
+    *output = input;
+    return true;
+}
+
+static bool
+reverse_send_mouse_event(const struct sc_reverse_touch_point *contact,
+                         DWORD button_flags) {
+    INPUT input;
+    if (!reverse_make_mouse_event(contact, button_flags, &input)) return false;
     if (SendInput(1, &input, sizeof(input)) != 1) {
         LOGW("Could not inject the mouse fallback for Android touch: error %lu",
              (unsigned long) GetLastError());
         return false;
     }
     return true;
+}
+
+static size_t
+reverse_pointer_inject(void *userdata, const struct sc_reverse_pointer_event *events, size_t count) {
+    (void)userdata;
+    if (!count || count > 2) return 0;
+    INPUT inputs[2] = {0};
+    for (size_t i = 0; i < count; ++i) {
+        if (events[i].down) {
+            struct sc_reverse_touch_point point = {.x = events[i].x, .y = events[i].y};
+            if (!reverse_make_mouse_event(&point, MOUSEEVENTF_RIGHTDOWN, &inputs[i])) return 0;
+        } else {
+            // Cleanup must not move to an old coordinate after geometry changes.
+            inputs[i].type = INPUT_MOUSE; inputs[i].mi.dwFlags = MOUSEEVENTF_RIGHTUP;
+        }
+    }
+    return SendInput((UINT)count, inputs, sizeof(INPUT));
 }
 
 static enum sc_reverse_touch_result
@@ -1847,6 +1875,7 @@ reverse_receiver_on_keyboard(struct sc_receiver *receiver, const struct sc_devic
     sc_mutex_lock(&state->touch_mutex);
     // This recheck serializes injection against Stop and geometry cleanup.
     bool release = msg->type == DEVICE_MSG_TYPE_REVERSE_KEY && msg->reverse_key.action == 2;
+    if (!sc_reverse_pointer_release(&state->pointer) && !release) { sc_mutex_unlock(&state->touch_mutex); return; }
     if (release || !state->options->reverse_keyboard || !state->options->reverse_socket
             || atomic_load_explicit(&state->stopped, memory_order_acquire)
             || atomic_load_explicit(&state->fatal_error, memory_order_acquire)
@@ -1870,8 +1899,9 @@ static void
 reverse_cancel_touches(struct reverse_display_state *state) {
     sc_mutex_lock(&state->touch_mutex);
     bool cleared = sc_reverse_touch_cancel(&state->touch);
+    bool pointer_cleared = sc_reverse_pointer_release(&state->pointer);
     sc_mutex_unlock(&state->touch_mutex);
-    if (!cleared) {
+    if (!cleared || !pointer_cleared) {
         LOGW("Windows touch cleanup did not complete; new gestures are blocked");
     }
 }
@@ -1887,6 +1917,7 @@ reverse_check_touch_geometry(struct reverse_display_state *state) {
     if (left != state->touch_left || top != state->touch_top
             || width != state->touch_width || height != state->touch_height) {
         sc_reverse_touch_cancel(&state->touch);
+        sc_reverse_pointer_release(&state->pointer);
         if (!sc_windows_keyboard_release(&state->keyboard)) reverse_keyboard_status(state, SC_WINDOWS_KEY_BLOCKED);
         state->touch_left = left;
         state->touch_top = top;
@@ -1913,6 +1944,9 @@ reverse_inject_touch(struct reverse_display_state *state,
     if (!atomic_load_explicit(&state->stopped, memory_order_acquire)
             && !atomic_load_explicit(&state->video_paused, memory_order_acquire)) {
         reverse_check_touch_geometry(state);
+        if (!sc_reverse_pointer_release(&state->pointer)) {
+            sc_mutex_unlock(&state->touch_mutex); return;
+        }
         LONG x = 0, y = 0;
         if (action == SC_TOUCH_CANCEL || action == SC_TOUCH_UP
                 || reverse_map_position(state, &msg->reverse_touch.position, &x, &y)) {
@@ -1925,6 +1959,28 @@ reverse_inject_touch(struct reverse_display_state *state,
         }
     }
     sc_mutex_unlock(&state->touch_mutex);
+}
+
+static void
+reverse_receiver_on_pointer(struct sc_receiver *receiver, const struct sc_device_msg *msg, void *userdata) {
+    (void)receiver;
+    struct reverse_display_state *s = userdata;
+    sc_mutex_lock(&s->touch_mutex);
+    bool pending = s->pointer.pending_up;
+    if (!sc_reverse_pointer_release(&s->pointer) || pending) goto done;
+    if (!s->options->reverse_pointer_buttons || !s->options->reverse_keyboard || !s->options->reverse_socket
+            || atomic_load_explicit(&s->stopped, memory_order_acquire)
+            || atomic_load_explicit(&s->fatal_error, memory_order_acquire)
+            || atomic_load_explicit(&s->video_paused, memory_order_acquire)
+            || !atomic_load_explicit(&s->stream_ready, memory_order_acquire)) goto done;
+    reverse_check_touch_geometry(s);
+    LONG x, y;
+    if (!reverse_map_position(s, &msg->reverse_pointer.position, &x, &y)
+            || !sc_reverse_touch_cancel(&s->touch)
+            || GetAsyncKeyState(VK_RBUTTON) < 0) goto done;
+    if (!sc_reverse_pointer_click(&s->pointer, x, y)) LOGW("Secondary click was not delivered completely; pending release retained");
+done:
+    sc_mutex_unlock(&s->touch_mutex);
 }
 
 static void
@@ -1943,20 +1999,22 @@ reverse_receiver_on_scroll(struct sc_receiver *receiver,
                            const struct sc_device_msg *msg, void *userdata) {
     (void) receiver;
     struct reverse_display_state *state = userdata;
+    sc_mutex_lock(&state->touch_mutex);
     if (atomic_load_explicit(&state->stopped, memory_order_acquire)
             || atomic_load_explicit(&state->video_paused, memory_order_acquire)) {
-        return;
+        goto done;
     }
+    reverse_check_touch_geometry(state);
+    if (!sc_reverse_pointer_release(&state->pointer) || !sc_reverse_touch_cancel(&state->touch)) goto done;
     struct sc_reverse_touch_point point = {0};
     LONG x, y;
     if (!reverse_map_position(state, &msg->reverse_scroll.position, &x, &y)) {
-        return;
+        goto done;
     }
     point.x = x;
     point.y = y;
-    reverse_cancel_touches(state);
     if (!reverse_send_mouse_event(&point, 0)) {
-        return;
+        goto done;
     }
     INPUT events[2] = {0};
     unsigned count = 0;
@@ -1974,6 +2032,8 @@ reverse_receiver_on_scroll(struct sc_receiver *receiver,
     if (count && SendInput(count, events, sizeof(INPUT)) != count) {
         LOGW("Could not inject desktop scroll: error %lu", (unsigned long) GetLastError());
     }
+done:
+    sc_mutex_unlock(&state->touch_mutex);
 }
 
 static bool
@@ -2286,6 +2346,7 @@ sc_reverse_display_run(sc_socket video_socket, sc_socket control_socket,
         .mouse = reverse_touch_mouse,
     };
     sc_reverse_touch_init(&state.touch, !native_touch, &touch_callbacks, &state);
+    sc_reverse_pointer_init(&state.pointer, reverse_pointer_inject, &state);
 
     // The control socket is already configured by the server setup. Apply
     // the same low-latency TCP setting to the custom video stream.
@@ -2297,6 +2358,7 @@ sc_reverse_display_run(sc_socket video_socket, sc_socket control_socket,
 
     static const struct sc_receiver_callbacks receiver_cbs = {
         .on_ended = reverse_receiver_on_ended,
+        .on_reverse_pointer = reverse_receiver_on_pointer,
         .on_reverse_keyboard = reverse_receiver_on_keyboard,
         .on_reverse_clipboard = reverse_receiver_on_clipboard,
         .on_reverse_touch = reverse_receiver_on_touch,
@@ -2349,6 +2411,7 @@ sc_reverse_display_run(sc_socket video_socket, sc_socket control_socket,
             }
             sc_mutex_lock(&state.touch_mutex);
             reverse_check_touch_geometry(&state);
+            sc_reverse_pointer_release(&state.pointer);
             if (state.keyboard.release_pending && av_gettime_relative() >= state.keyboard_cleanup_after) {
                 state.keyboard_cleanup_after = av_gettime_relative() + 250000;
                 if (!sc_windows_keyboard_release(&state.keyboard)) reverse_keyboard_status(&state, SC_WINDOWS_KEY_BLOCKED);

@@ -349,6 +349,7 @@ struct scrcpy_options {
     bool reverse_text_focus_geometry; // Optional bounded field/caret rectangle, never contents.
     bool reverse_adaptive_video; // Experimental capable browser-host fixed levels.
     bool reverse_keyboard; // Browser-only Windows/Mac opt-in; never inferred from Android.
+    bool reverse_pointer_buttons; // Negotiated atomic secondary click; full-desktop browser only.
     bool reverse_clipboard; // Separate full-desktop, per-invitation clipboard consent.
     uint16_t reverse_socket; // Authenticated GUI proxy on loopback; no ADB.
     const char *start_app;

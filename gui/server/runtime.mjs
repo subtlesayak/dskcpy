@@ -113,6 +113,9 @@ export async function inspectReadiness(runtime, runCommand) {
     browserCaptureRecovery: platform === 'darwin' && macBackend && nativeHelp.includes('browser-capture-recovery-v1'),
     browserKeyboard: nativeHelp.includes('--reverse-keyboard') && ((platform === 'darwin' && macBackend)
       || (platform === 'win32' && supported && nativeHelp.includes('browser-keyboard-v1'))),
+    browserPointerButtons: supported && /(?:^|\s)--reverse-pointer-buttons(?:\s|$)/.test(nativeHelp)
+      && nativeHelp.includes('browser-pointer-buttons-v1') && nativeHelp.includes('--reverse-keyboard')
+      && (platform === 'darwin' && macBackend || platform === 'win32' && nativeHelp.includes('browser-keyboard-v1')),
     browserWindowAudio: platform === 'darwin' && macBackend && nativeHelp.includes('--reverse-window-audio') && nativeHelp.includes('window-app-audio-v1'),
     macWindowCapture: platform === 'darwin' && macBackend && nativeHelp.includes('--list-reverse-windows') && nativeHelp.includes('--reverse-window-owner'),
   }, checkedAt: new Date().toISOString() };

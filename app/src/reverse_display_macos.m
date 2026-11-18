@@ -7,6 +7,7 @@
 #import <Carbon/Carbon.h>
 
 #include "reverse_display.h"
+#include "reverse_macos_pointer.h"
 #include "reverse_macos_helpers.h"
 #include "reverse_watchdog.h"
 #include "reverse_audio.h"
@@ -62,7 +63,7 @@ struct mac_state {
     size_t display_pixels_wide, display_pixels_high;
     struct mac_contact contacts[2]; // Owned exclusively by the input thread.
     unsigned contact_count;
-    bool mouse_down, scrolling;
+    bool mouse_down, scrolling, pointer_enabled;
     CGPoint mouse_point, scroll_point;
     uint32_t window_id;
     uint32_t window_owner;
@@ -596,15 +597,40 @@ static void mac_audio_transition(struct mac_state *s) {
     sc_reverse_watchdog_set_paused(&s->audio_watchdog, !mac_audio_active(s), av_gettime_relative());
 }
 
-static void mac_mouse(struct mac_state *s, CGEventType type, CGPoint point) {
+static bool mac_mouse(struct mac_state *s, CGEventType type, CGPoint point) {
     CGEventRef event = CGEventCreateMouseEvent(NULL, type, point, kCGMouseButtonLeft);
-    if (event) { CGEventPost(kCGHIDEventTap, event); CFRelease(event); }
+    if (!event) return false;
+    CGEventPost(kCGHIDEventTap, event); CFRelease(event);
     s->mouse_point = point;
     if (type == kCGEventLeftMouseUp) atomic_store(&s->focus_probe_pending, true);
+    return true;
 }
-static void mac_cancel_input(struct mac_state *s) {
-    if (s->mouse_down) mac_mouse(s, kCGEventLeftMouseUp, s->mouse_point);
+static bool mac_cancel_input(struct mac_state *s) {
+    if (s->mouse_down && !mac_mouse(s, kCGEventLeftMouseUp, s->mouse_point)) return false;
     s->mouse_down = false; s->scrolling = false; s->contact_count = 0;
+    return true;
+}
+
+static void mac_pointer(struct sc_receiver *receiver, const struct sc_device_msg *msg, void *context) {
+    (void)receiver;
+    SCMacState *owner = (__bridge SCMacState *)context;
+    struct mac_state *s = &owner->state;
+    if (!s->pointer_enabled || !s->keyboard_enabled || s->window_id || mac_session_ended(s)
+            || atomic_load(&s->paused) || !AXIsProcessTrusted()
+            || CGEventSourceButtonState(kCGEventSourceStateCombinedSessionState, kCGMouseButtonRight)) return;
+    if (!mac_display_matches(s)) { mac_cancel_input(s); atomic_store(&s->disconnected, true); return; }
+    double x, y;
+    if (!sc_reverse_macos_point(&msg->reverse_pointer.position, s->display_bounds.origin.x, s->display_bounds.origin.y,
+            s->display_bounds.size.width, s->display_bounds.size.height, &x, &y)) return;
+    CGPoint point = CGPointMake(x, y);
+    CGEventRef events[2];
+    if (!sc_reverse_macos_pointer_prepare(point, events, CGEventCreateMouseEvent)) return;
+    // Allocate both before posting DOWN; never create a half-click on failure.
+    if (mac_cancel_input(s) && !mac_session_ended(s) && !atomic_load(&s->paused) && AXIsProcessTrusted()) {
+        CGEventPost(kCGHIDEventTap, events[0]); CGEventPost(kCGHIDEventTap, events[1]);
+        s->mouse_point = point;
+    }
+    CFRelease(events[0]); CFRelease(events[1]);
 }
 static void mac_cancel_keyboard(struct mac_state *s) {
     sc_mutex_lock(&s->keyboard_mutex);
@@ -974,6 +1000,7 @@ sc_reverse_display_macos_run(sc_socket video_socket, sc_socket control_socket, c
             s->window_audio_allowed = window && options->reverse_window_audio && options->reverse_audio
                 && options->reverse_window_owner && s->window_owner == options->reverse_window_owner;
             s->keyboard_enabled = options->reverse_keyboard && !window;
+            s->pointer_enabled = options->reverse_pointer_buttons && options->reverse_socket && s->keyboard_enabled;
             s->clipboard_enabled = options->reverse_clipboard && s->keyboard_enabled;
             double scale = s->display_pixels_wide / s->display_bounds.size.width;
             uint32_t source_width = window ? (uint32_t)ceil(window.frame.size.width * scale) : (uint32_t)s->display_pixels_wide;
@@ -997,7 +1024,7 @@ sc_reverse_display_macos_run(sc_socket video_socket, sc_socket control_socket, c
             sc_write32be(header + 8, s->width); sc_write32be(header + 12, s->height);
             if (net_send_all(video_socket, header, sizeof(header)) != sizeof(header)) return SCRCPY_EXIT_FAILURE;
             s->start_us = av_gettime_relative();
-            static const struct sc_receiver_callbacks callbacks = {.on_ended = mac_ended, .on_reverse_touch = mac_touch, .on_reverse_scroll = mac_scroll, .on_reverse_keyboard = mac_keyboard, .on_reverse_clipboard = mac_clipboard,
+            static const struct sc_receiver_callbacks callbacks = {.on_ended = mac_ended, .on_reverse_pointer = mac_pointer, .on_reverse_touch = mac_touch, .on_reverse_scroll = mac_scroll, .on_reverse_keyboard = mac_keyboard, .on_reverse_clipboard = mac_clipboard,
                 .on_reverse_frame_ack = mac_ack, .on_reverse_system_action = mac_action, .on_reverse_audio_ack = mac_audio_ack};
             struct sc_receiver receiver;
             if (!sc_receiver_init(&receiver, control_socket, &callbacks, (__bridge void *)owner)) return SCRCPY_EXIT_FAILURE;

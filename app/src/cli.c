@@ -56,6 +56,7 @@ enum {
     OPT_REVERSE_WINDOW_AUDIO,
     OPT_LIST_REVERSE_WINDOWS,
     OPT_REVERSE_KEYBOARD,
+    OPT_REVERSE_POINTER_BUTTONS,
     OPT_REVERSE_TEXT_FOCUS,
     OPT_REVERSE_TEXT_FOCUS_GEOMETRY,
     OPT_REVERSE_ADAPTIVE_VIDEO,
@@ -1030,6 +1031,11 @@ static const struct sc_option options[] = {
         .longopt_id = OPT_REVERSE_CLIPBOARD,
         .longopt = "reverse-clipboard",
         .text = "Opt in to browser-clipboard-v1 explicit text transfer on a full-desktop browser stream. Requires --reverse-keyboard. No background synchronization.",
+    },
+    {
+        .longopt_id = OPT_REVERSE_POINTER_BUTTONS,
+        .longopt = "reverse-pointer-buttons",
+        .text = "Opt in to browser-pointer-buttons-v1 atomic secondary click on a full-desktop browser socket. Requires --reverse-keyboard; never changes Android touch packets.",
     },
     {
         .longopt_id = OPT_REVERSE_KEYBOARD,
@@ -3132,6 +3138,9 @@ parse_args_with_getopt(struct scrcpy_cli_args *args, int argc, char *argv[],
             case OPT_REVERSE_KEYBOARD:
                 opts->reverse_keyboard = true;
                 break;
+            case OPT_REVERSE_POINTER_BUTTONS:
+                opts->reverse_pointer_buttons = true;
+                break;
             case OPT_REVERSE_CLIPBOARD:
                 opts->reverse_clipboard = true;
                 break;
@@ -3152,6 +3161,9 @@ parse_args_with_getopt(struct scrcpy_cli_args *args, int argc, char *argv[],
         return false;
     }
 
+    if (opts->reverse_pointer_buttons && !opts->reverse_keyboard) {
+        LOGE("--reverse-pointer-buttons requires --reverse-keyboard"); return false;
+    }
     if (opts->reverse_clipboard && !opts->reverse_keyboard) {
         LOGE("--reverse-clipboard requires --reverse-keyboard"); return false;
     }

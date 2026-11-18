@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRelativeTrackpad } from '../receiver/trackpad.mjs';
-function fixture({ scrollGain = () => 1 } = {}) {
+function fixture({ scrollGain = () => 1, pointerGain = () => 1, uniformPointer = false } = {}) {
   const packets = []; let time = 0;
   const geometry = { width: 1920, height: 1080, cssWidth: 400, cssHeight: 225 };
-  const pad = createRelativeTrackpad({ geometry: () => geometry, emit: p => packets.push(p), now: () => time, scrollGain });
+  const pad = createRelativeTrackpad({ geometry: () => geometry, emit: p => packets.push(p), now: () => time, scrollGain, pointerGain, uniformPointer });
   const event = (pointerId, clientX, clientY) => ({ pointerId, clientX, clientY });
   return { pad, packets, geometry, event, time: n => time = n };
 }
@@ -18,6 +18,19 @@ test('relative movement follows displacement, not contact position, across clutc
   pad.move(80, 0); assert.ok(Math.abs(pad.position().x - 1279 * .8) < .001);
   pad.move(1e9, -1e9); assert.equal(pad.position().x, 1279); assert.equal(pad.position().y, 0);
   assert.ok(packets.every(p => p.type === 'hover'));
+});
+test('pointer sensitivity is bounded and does not change finger-scroll distance', () => {
+  let gain = 2; const f = fixture({ pointerGain: () => gain });
+  f.pad.move(20, 0); assert.ok(Math.abs(f.pad.position().x - 1919 * .6) < .001);
+  gain = NaN; f.pad.move(20, 0); assert.ok(Math.abs(f.pad.position().x - 1919 * .65) < .001);
+  f.pad.down(f.event(1, 10, 10)); f.pad.down(f.event(2, 30, 10));
+  f.pad.pointerMove(f.event(1, 10, 30)); f.pad.pointerMove(f.event(2, 30, 30));
+  assert.equal(f.packets.filter(p => p.type === 'scroll').reduce((n, p) => n + p.dy, 0), -20);
+});
+test('a dedicated tall controller keeps equal horizontal and vertical pointer sensitivity', () => {
+  const f = fixture({ uniformPointer: true }); f.geometry.cssHeight = 700;
+  const before = f.pad.position(); f.pad.move(20, 20); const after = f.pad.position();
+  assert.ok(Math.abs((after.x - before.x) - (after.y - before.y)) < 1);
 });
 test('short tap clicks once; long holds, movement and cancelled contacts never click', () => {
   const { pad, packets, event, time } = fixture();
