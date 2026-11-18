@@ -55,6 +55,7 @@ jobs:
           node desktop/test/remembered-network.mjs chromium revoke
           node desktop/test/remembered-network.mjs chromium expiry
           node desktop/test/remembered-network.mjs chromium active-expiry
+          node desktop/test/paired-computers-ui.mjs chromium
           node desktop/test/capture-recovery-ui.mjs
           node desktop/test/usb-ui.mjs
           node desktop/test/clipboard-ui.mjs
@@ -118,6 +119,7 @@ jobs:
           node desktop/test/remembered-network.mjs webkit revoke
           node desktop/test/remembered-network.mjs webkit expiry
           node desktop/test/remembered-network.mjs webkit active-expiry
+          node desktop/test/paired-computers-ui.mjs webkit
       - name: Preserve sanitized synthetic-media results
         if: always()
         uses: actions/upload-artifact@v7

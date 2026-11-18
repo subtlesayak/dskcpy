@@ -33,11 +33,16 @@ const rtcDisplay = $('rtc-display');
 let presentationUI = null, presentationRole = false, presentationCapable = false;
 const away = () => receiverIsAway({ hidden: document.hidden, pictureInPictureElement: document.pictureInPictureElement, video: rtcDisplay, presentationMode: rtcDisplay.webkitPresentationMode,
   presentationPlayback: presentationRole && presentationUI?.backgroundPlayback === true });
-const remembered = rememberedBrowser({ connectApproved(key) {
+const remembered = rememberedBrowser({ canRequest: () => !ws && supported, canClaim: () => !away(), connectApproved(key) {
   if (away() || ws || !supported) return false;
   resumeAllowed = true; sessionExpected = false; resumeDeadline = 0;
   $('error').textContent = ''; connect(key); return true;
 } });
+if (location.protocol === 'https:') {
+  const computers = $('computers-link');
+  if (computers) computers.hidden = false;
+  if (window.opener) void import('./computer-link.mjs').then(({ linkComputerDirectory }) => linkComputerDirectory(remembered)).catch(() => {});
+}
 let rtcReceiver, mediaMode = 'webcodecs';
 let pointerButtonsSupported = false;
 let keyboardSupported = false, keyboardOpen = false, viewOnly = false, windowAudioAllowed = false, windowAudioUnavailable = false;
@@ -123,7 +128,7 @@ const pointers = new Map();
 const pendingAudioAcks = [];
 let generation = 0;
 let sessionExpected = false, retryTimer, connectionTimer, resumeDeadline = 0, probing = false;
-let resumeAllowed = true;
+let resumeAllowed = !(window.opener && location.hash === '#directory-access');
 let audioGeneration = 0, fullscreenAttempt = 0, playbackAttempt = 0;
 const mediaAcks = createMediaAcknowledger(send);
 const controlTrays = [
@@ -742,6 +747,8 @@ function connect(key = null, requestedMode = preferredMode) {
         if (mediaMode === 'webcodecs' && !('VideoDecoder' in window)) throw new Error('This connection needs WebCodecs. Use the private VPN link for browser-native video.');
         const restoring = sessionExpected;
         authenticated = true; sessionExpected = true;
+        if (window.opener && location.hash === '#directory-access')
+          window.history.replaceState(null, '', `${location.pathname}${location.search}`);
         qualitySupported = message.adaptiveVideo === true && message.viewOnly !== true;
         qualityAvailable = false;
         if (qualitySetting) qualitySetting.hidden = !qualitySupported;

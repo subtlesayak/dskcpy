@@ -27,6 +27,12 @@ const assets = new Map([
   ['/video-preference.mjs', ['video-preference.mjs', 'text/javascript; charset=utf-8']],
   ['/protocol.mjs', ['protocol.mjs', 'text/javascript; charset=utf-8']],
   ['/remembered.mjs', ['remembered.mjs', 'text/javascript; charset=utf-8']],
+  ['/computer-link.mjs', ['computer-link.mjs', 'text/javascript; charset=utf-8']],
+  ['/computers-common.mjs', ['computers-common.mjs', 'text/javascript; charset=utf-8']],
+  ['/computers/', ['computers.html', 'text/html; charset=utf-8']],
+  ['/computers/computers.mjs', ['computers.mjs', 'text/javascript; charset=utf-8']],
+  ['/computers/computers-common.mjs', ['computers-common.mjs', 'text/javascript; charset=utf-8']],
+  ['/computers/computers-sw.mjs', ['computers-sw.mjs', 'text/javascript; charset=utf-8']],
   ['/lifecycle.mjs', ['lifecycle.mjs', 'text/javascript; charset=utf-8']],
   ['/receiver.css', ['receiver.css', 'text/css; charset=utf-8']],
   ['/controller', ['controller.html', 'text/html; charset=utf-8']],
@@ -194,7 +200,7 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
         const hostIdentity = device && await trustedDevices.ensureIdentity();
         const busy = device && Boolean(trustedConnecting || invitation || session || (requestOpen() && connectionRequest.device.id !== device.id));
         json(200, { status: pending ? 'pending' : device ? 'approved' : 'unavailable', paused: trustedDevices.snapshot().paused,
-          streamApproval: true, ...(device && { hostIdentity, busy }) }); return;
+          streamApproval: true, ...(device && { hostIdentity, pairingId: device.id, busy }) }); return;
       }
       if (req.url === '/stream/trusted/forget') {
         const device = trustedDevices.find(cookieValue(req), remoteOrigin, true);
@@ -345,7 +351,8 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
     res.setHeader('Referrer-Policy', 'no-referrer');
     res.setHeader('X-Frame-Options', 'DENY');
     res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
-    res.setHeader('Content-Security-Policy', "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
+    const directory = req.url === '/computers/' || req.url === '/computers/computers-sw.mjs';
+    res.setHeader('Content-Security-Policy', `default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'${directory ? " https:; worker-src 'self'" : ''}; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`);
     // Public per-launch document paths prevent fragment-only reuse of stale
     // receiver scripts. They grant no access; authentication stays in /stream.
     const asset = assets.get(req.url)
