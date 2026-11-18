@@ -35,6 +35,21 @@ export function parseJoinFragment(fragment) {
   return /^#connect=([A-Za-z0-9_-]{32})$/.exec(fragment)?.[1] || null;
 }
 
+export function controllerJoinUrl(address, key) {
+  if (!/^[A-Za-z0-9_-]{43}$/.test(key)) throw Error('Invalid controller invitation.');
+  const url = new URL(address);
+  const local = url.protocol === 'http:' && ['127.0.0.1', 'localhost'].includes(url.hostname);
+  if ((!local && url.protocol !== 'https:') || url.username || url.password || url.pathname !== '/' || url.search || url.hash)
+    throw Error('Invalid controller address.');
+  url.pathname = `/controller/${crypto.randomUUID().replaceAll('-', '')}`;
+  url.hash = `controller=${key}`;
+  return url.href;
+}
+
+export function parseControllerFragment(fragment) {
+  return /^#controller=([A-Za-z0-9_-]{43})$/.exec(fragment)?.[1] || null;
+}
+
 export function ack(type, timestamp) {
   const bytes = new Uint8Array(9);
   bytes[0] = type;
@@ -139,6 +154,18 @@ export function createTouchScroll({ gain = () => 1 } = {}) {
       return result.dx || result.dy ? result : null;
     },
   };
+}
+
+// Optional browser-pointer-buttons-v1. Never reuse Android action_button bits.
+export function secondaryClickPacket(x, y, width, height) {
+  if (![width, height].every(n => Number.isInteger(n) && n > 0 && n <= 16384)
+      || ![x, y].every(Number.isFinite)) throw Error('Invalid pointer geometry.');
+  const bytes = new Uint8Array(14), data = new DataView(bytes.buffer);
+  bytes[0] = 11; // byte 1 is reserved action 0: one atomic secondary click.
+  data.setUint32(2, Math.max(0, Math.min(width - 1, Math.round(x))));
+  data.setUint32(6, Math.max(0, Math.min(height - 1, Math.round(y))));
+  data.setUint16(10, width); data.setUint16(12, height);
+  return bytes;
 }
 
 export function scrollPacket(x, y, width, height, dx, dy) {

@@ -28,6 +28,7 @@ enum sc_device_msg_type {
     DEVICE_MSG_TYPE_REVERSE_KEY,
     DEVICE_MSG_TYPE_REVERSE_TEXT,
     DEVICE_MSG_TYPE_REVERSE_CLIPBOARD,
+    DEVICE_MSG_TYPE_REVERSE_POINTER, // Optional browser-pointer-buttons-v1; never Android touch.
 };
 
 enum sc_reverse_system_action {
@@ -53,6 +54,7 @@ enum sc_reverse_system_action {
 struct sc_device_msg {
     enum sc_device_msg_type type;
     union {
+        struct { struct sc_position position; } reverse_pointer; // Atomic secondary click, action 0.
         struct { uint8_t action, modifiers; uint16_t usage; } reverse_key;
         struct { uint16_t length; char text[SC_REVERSE_TEXT_MAX + 1]; } reverse_text;
         struct sc_reverse_clipboard_request reverse_clipboard;

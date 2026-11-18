@@ -1007,6 +1007,25 @@ test('Windows browser keyboard is authenticated and fixed status IPC is not logg
  await f.request('/api/stream/stop',{});
 });
 
+test('secondary-click negotiation reaches native only through a capable authenticated browser bridge', async t => {
+  const directory=await mkdtemp(path.join(os.tmpdir(),'dskcpy-pointer-host-')); t.after(()=>rm(directory,{recursive:true,force:true}));
+  const binary=path.join(directory,'fixture.exe'); await writeFile(binary,'fake executable, never launched',{mode:0o755});
+  for (const [platform,capable] of [['darwin',true],['win32',true],['darwin',false]]) {
+    const reservation=net.createServer(); reservation.listen(0,'127.0.0.1'); await once(reservation,'listening');
+    const browserPort=reservation.address().port; await new Promise(resolve=>reservation.close(resolve));
+    const origin='https://pointer.example.test';
+    const f=await fixture(t,{platform,browserPort,environment:{...process.env,SCRCPY_GUI_BINARY:binary,DSKCPY_VIEWER_ORIGIN:origin},
+      readinessProbe:async()=>({...ready,features:{browserKeyboard:true,browserPointerButtons:capable}})});
+    const {body,code}=await f.request('/api/browser/invite',{browserTransport:'wifi',browserPointerButtons:true}); assert.equal(code,201);
+    assert.equal(f.children.length,0,'an invitation alone cannot start input or capture');
+    const ws=new WebSocket(`ws://127.0.0.1:${browserPort}/stream`,{origin,headers:{Host:'pointer.example.test'}});
+    ws.on('error',()=>{}); t.after(()=>ws.terminate());
+    await once(ws,'open'); ws.send(body.key); await waitFor(()=>f.children.length===1);
+    assert.equal(f.children[0].args.includes('--reverse-pointer-buttons'),capable);
+    await f.request('/api/stream/stop',{}); ws.terminate();
+  }
+});
+
 test('owner clipboard consent reaches native only for a capable full desktop private invitation', async t => {
   for (const [consent,capable,expected] of [[true,true,true],[false,true,false],[true,false,false]]) {
     const reservation=net.createServer();reservation.listen(0,'127.0.0.1');await once(reservation,'listening');const browserPort=reservation.address().port;await new Promise(r=>reservation.close(r));

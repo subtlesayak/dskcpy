@@ -145,6 +145,7 @@ export function buildScrcpyArgs(config, bridgePort) {
   if (config.connection === 'browser' && !config.windowId && config.browserKeyboard === true
       && config.browserTextFocus === true && config.browserTextFocusGeometry === true) args.push('--reverse-text-focus-geometry');
   if (config.connection === 'browser' && !config.windowId && config.browserKeyboard === true && config.browserClipboard === true) args.push('--reverse-clipboard');
+  if (config.connection === 'browser' && !config.windowId && config.browserKeyboard === true && config.browserPointerButtons === true) args.push('--reverse-pointer-buttons');
   if (config.connection === 'browser' && !config.windowId && config.browserAdaptiveVideo === true) args.push('--reverse-adaptive-video');
   if (config.windowOwnerPid) args.push(`--reverse-window-owner=${config.windowOwnerPid}`);
   return args;

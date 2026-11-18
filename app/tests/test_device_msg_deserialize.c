@@ -173,6 +173,22 @@ static void test_deserialize_reverse_scroll(void) {
     assert(sc_device_msg_deserialize(input, sizeof(input), &msg) == -1);
 }
 
+static void test_reverse_pointer(void) {
+    struct sc_device_msg msg;
+    uint8_t input[] = {11,0, 0,0,0,10, 0,0,0,20, 2,128, 1,224};
+    for (unsigned n = 0; n < sizeof(input); ++n) assert(sc_device_msg_deserialize(input, n, &msg) == 0);
+    assert(sc_device_msg_deserialize(input, sizeof(input), &msg) == 14);
+    assert(msg.type == DEVICE_MSG_TYPE_REVERSE_POINTER && msg.reverse_pointer.position.point.x == 10);
+    assert(msg.reverse_pointer.position.point.y == 20 && msg.reverse_pointer.position.screen_size.width == 640);
+    assert(msg.reverse_pointer.position.screen_size.height == 480);
+    input[1] = 1; assert(sc_device_msg_deserialize(input, sizeof(input), &msg) == -1); input[1] = 0;
+    input[10] = input[11] = 0; assert(sc_device_msg_deserialize(input, sizeof(input), &msg) == -1);
+    input[10] = 0x40; input[11] = 1; assert(sc_device_msg_deserialize(input, sizeof(input), &msg) == -1);
+    input[10] = 0; input[11] = 10; assert(sc_device_msg_deserialize(input, sizeof(input), &msg) == -1);
+    input[11] = 11; assert(sc_device_msg_deserialize(input, sizeof(input), &msg) == 14);
+    input[2] = 0xff; assert(sc_device_msg_deserialize(input, sizeof(input), &msg) == -1);
+}
+
 static void test_reverse_keyboard(void) {
     struct sc_device_msg msg;
     uint8_t key[] = {8, 0, 0, 4, 8};
@@ -199,7 +215,7 @@ static void test_bounded_message_vectors(void) {
         DEVICE_MSG_TYPE_UHID_OUTPUT, DEVICE_MSG_TYPE_REVERSE_TOUCH, DEVICE_MSG_TYPE_REVERSE_KEY,
         DEVICE_MSG_TYPE_REVERSE_TEXT, DEVICE_MSG_TYPE_REVERSE_CLIPBOARD, DEVICE_MSG_TYPE_REVERSE_SCROLL,
         DEVICE_MSG_TYPE_REVERSE_FRAME_ACK, DEVICE_MSG_TYPE_REVERSE_AUDIO_ACK,
-        DEVICE_MSG_TYPE_REVERSE_SYSTEM_ACTION};
+        DEVICE_MSG_TYPE_REVERSE_SYSTEM_ACTION, DEVICE_MSG_TYPE_REVERSE_POINTER};
     uint32_t state = UINT32_C(0x5ad15);
     // Exact-sized allocations make truncated reads visible under ASan. Every
     // successful parse must consume only available bytes and remain destroyable.
@@ -245,6 +261,7 @@ int main(int argc, char *argv[]) {
     test_deserialize_reverse_system_action();
     test_deserialize_reverse_scroll();
     test_reverse_keyboard();
+    test_reverse_pointer();
     struct sc_device_msg clip;
     const uint8_t read_clip[] = {10,0,0,0,0,7,0,0};
     for (unsigned n=0;n<sizeof(read_clip);++n) assert(sc_device_msg_deserialize(read_clip,n,&clip)==0);

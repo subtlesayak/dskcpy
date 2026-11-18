@@ -154,6 +154,10 @@ process_msg(struct sc_receiver *receiver, struct sc_device_msg *msg) {
             }
 
             break;
+        case DEVICE_MSG_TYPE_REVERSE_POINTER:
+            if (receiver->cbs->on_reverse_pointer)
+                receiver->cbs->on_reverse_pointer(receiver, msg, receiver->cbs_userdata);
+            break;
         case DEVICE_MSG_TYPE_REVERSE_TOUCH:
             if (receiver->cbs->on_reverse_touch) {
                 receiver->cbs->on_reverse_touch(receiver, msg,

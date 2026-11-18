@@ -104,6 +104,8 @@ jobs:
           node desktop/test/window-switch-ui.mjs webkit
           node desktop/test/window-audio-ui.mjs chromium
           node desktop/test/window-audio-ui.mjs webkit
+          node desktop/test/presentation-ui.mjs chromium
+          node desktop/test/presentation-ui.mjs webkit
       - name: Preserve sanitized synthetic-media results
         if: always()
         uses: actions/upload-artifact@v7
@@ -115,6 +117,7 @@ jobs:
             desktop/out/window-switch-*/
             desktop/out/typing-view-*/
             desktop/out/window-audio-*/
+            desktop/out/presentation-*/
           if-no-files-found: ignore
 
   native-windows:
@@ -156,7 +159,7 @@ jobs:
           SCRCPY_WINDOWS_RUNTIME_TEST_BINARY: .tmp/ci-native/app/scrcpy.exe
         run: |
           npm ci --prefix gui --ignore-scripts
-          DSKCPY_PAUSE_TEST_CC=gcc DSKCPY_REQUIRE_PAUSE_FIXTURE=1 DSKCPY_ENCODER_TEST_CC=gcc DSKCPY_REQUIRE_ENCODER_FIXTURE=1 node --test gui/server/telemetry.test.mjs gui/server/windows-runtime-native.test.mjs gui/server/windows-pause.test.mjs gui/server/windows-encoder.test.mjs
+          DSKCPY_PAUSE_TEST_CC=gcc DSKCPY_REQUIRE_PAUSE_FIXTURE=1 DSKCPY_ENCODER_TEST_CC=gcc DSKCPY_REQUIRE_ENCODER_FIXTURE=1 DSKCPY_POINTER_TEST_CC=gcc DSKCPY_REQUIRE_POINTER_FIXTURE=1 node --test gui/server/telemetry.test.mjs gui/server/windows-runtime-native.test.mjs gui/server/windows-pause.test.mjs gui/server/windows-encoder.test.mjs gui/server/windows-pointer.test.mjs
       - name: Assemble and inspect the unsigned Windows desktop prototype without capture
         env:
           MSYS2_PATH_TYPE: inherit

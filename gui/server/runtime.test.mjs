@@ -116,9 +116,14 @@ test('window and keyboard features require the real Mac backend and explicit nat
   const runtime = resolveRuntime(dir, { SCRCPY_GUI_BINARY: binary }, 'darwin');
   const probe = (extra) => async () => ({ stdout: `--reverse-display --reverse-socket ScreenCaptureKit/VideoToolbox ${extra}` });
   let status = await inspectReadiness(runtime, probe(''));
-  assert.deepEqual(status.features, { browserAdaptiveVideo: false, browserClipboard: false, browserTextFocus: false, browserTextFocusGeometry: false, browserCaptureRecovery: false, browserKeyboard: false, browserWindowAudio: false, macWindowCapture: false });
+  assert.deepEqual(status.features, { browserAdaptiveVideo: false, browserClipboard: false, browserTextFocus: false, browserTextFocusGeometry: false, browserCaptureRecovery: false, browserKeyboard: false, browserPointerButtons: false, browserWindowAudio: false, macWindowCapture: false });
   status = await inspectReadiness(runtime, probe('--reverse-keyboard --reverse-window --reverse-window-owner --list-reverse-windows'));
-  assert.deepEqual(status.features, { browserAdaptiveVideo: false, browserClipboard: false, browserTextFocus: false, browserTextFocusGeometry: false, browserCaptureRecovery: false, browserKeyboard: true, browserWindowAudio: false, macWindowCapture: true });
+  assert.deepEqual(status.features, { browserAdaptiveVideo: false, browserClipboard: false, browserTextFocus: false, browserTextFocusGeometry: false, browserCaptureRecovery: false, browserKeyboard: true, browserPointerButtons: false, browserWindowAudio: false, macWindowCapture: true });
+  for (const extra of ['--reverse-keyboard --reverse-pointer-buttons', '--reverse-pointer-buttons browser-pointer-buttons-v1', '--reverse-keyboard --reverse-pointer-buttons-unknown browser-pointer-buttons-v1']) {
+    status = await inspectReadiness(runtime, probe(extra)); assert.equal(status.features.browserPointerButtons, false);
+  }
+  status = await inspectReadiness(runtime, probe('--reverse-keyboard --reverse-pointer-buttons browser-pointer-buttons-v1'));
+  assert.equal(status.features.browserPointerButtons, true);
   status = await inspectReadiness(runtime, probe('--reverse-keyboard --reverse-text-focus'));
   assert.equal(status.features.browserTextFocus,true);
   assert.equal(status.features.browserTextFocusGeometry,false);
@@ -141,9 +146,11 @@ test('window and keyboard features require the real Mac backend and explicit nat
   status = await inspectReadiness(runtime, probe('--reverse-window-audio window-app-audio-v1'));
   assert.equal(status.features.browserWindowAudio,true);
   runtime.platform = 'win32'; status = await inspectReadiness(runtime, probe('--reverse-keyboard --reverse-window --reverse-window-owner --list-reverse-windows'));
-  assert.deepEqual(status.features, { browserAdaptiveVideo: false, browserClipboard: false, browserTextFocus: false, browserTextFocusGeometry: false, browserCaptureRecovery: false, browserKeyboard: false, browserWindowAudio: false, macWindowCapture: false });
+  assert.deepEqual(status.features, { browserAdaptiveVideo: false, browserClipboard: false, browserTextFocus: false, browserTextFocusGeometry: false, browserCaptureRecovery: false, browserKeyboard: false, browserPointerButtons: false, browserWindowAudio: false, macWindowCapture: false });
   status = await inspectReadiness(runtime, probe('--reverse-keyboard browser-keyboard-v1'));
-  assert.deepEqual(status.features,{browserAdaptiveVideo:false,browserClipboard:false,browserTextFocus:false,browserTextFocusGeometry:false,browserCaptureRecovery:false,browserKeyboard:true,browserWindowAudio:false,macWindowCapture:false});
+  assert.deepEqual(status.features,{browserAdaptiveVideo:false,browserClipboard:false,browserTextFocus:false,browserTextFocusGeometry:false,browserCaptureRecovery:false,browserKeyboard:true,browserPointerButtons:false,browserWindowAudio:false,macWindowCapture:false});
+  status = await inspectReadiness(runtime, probe('--reverse-keyboard browser-keyboard-v1 --reverse-pointer-buttons browser-pointer-buttons-v1'));
+  assert.equal(status.features.browserPointerButtons, true);
   status = await inspectReadiness(runtime, probe('browser-capture-recovery-v1'));
   assert.equal(status.features.browserCaptureRecovery,false);
   status = await inspectReadiness(runtime, probe('--reverse-adaptive-video browser-adaptive-video-v1'));
