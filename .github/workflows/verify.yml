@@ -52,6 +52,8 @@ jobs:
           node desktop/test/beginner-ui.mjs
           node desktop/test/remembered-ui.mjs
           node desktop/test/remembered-cookie.mjs
+          node desktop/test/remembered-network.mjs chromium revoke
+          node desktop/test/remembered-network.mjs chromium expiry
           node desktop/test/capture-recovery-ui.mjs
           node desktop/test/usb-ui.mjs
           node desktop/test/clipboard-ui.mjs
@@ -112,6 +114,8 @@ jobs:
           node desktop/test/presentation-ui.mjs webkit
           node desktop/test/host-presentation-ui.mjs chromium
           node desktop/test/host-presentation-ui.mjs webkit
+          node desktop/test/remembered-network.mjs webkit revoke
+          node desktop/test/remembered-network.mjs webkit expiry
       - name: Preserve sanitized synthetic-media results
         if: always()
         uses: actions/upload-artifact@v7
@@ -125,6 +129,7 @@ jobs:
             desktop/out/window-audio-*/
             desktop/out/presentation-*/
             desktop/out/host-presentation-*/
+            desktop/out/remembered-network-*/
           if-no-files-found: ignore
 
   native-windows:
