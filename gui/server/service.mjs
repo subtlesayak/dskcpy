@@ -922,8 +922,9 @@ export function createControlService({
       if (request.method === 'POST' && url.pathname === '/api/browser/trusted') {
         await nativeTrustPause;
         const body = await readJson(request);
-        if (!['approve', 'reject', 'revoke', 'pause', 'resume'].includes(body.action)
-            || (['approve', 'reject', 'revoke'].includes(body.action) && !/^[a-f0-9]{32}$/.test(body.id))) throw new Error('Invalid device action.');
+        const identified = ['approve', 'reject', 'revoke', 'allow-stream', 'deny-stream'];
+        if (!['pause', 'resume', ...identified].includes(body.action)
+            || (identified.includes(body.action) && !/^[a-f0-9]{32}$/.test(body.id))) throw new Error('Invalid device action.');
         writeJson(response, 200, await browserReceiver.trustAction(body.action, body.id)); return;
       }
       if (request.method === 'POST' && url.pathname === '/api/browser/prepare') {

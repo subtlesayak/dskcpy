@@ -33,7 +33,11 @@ const rtcDisplay = $('rtc-display');
 let presentationUI = null, presentationRole = false, presentationCapable = false;
 const away = () => receiverIsAway({ hidden: document.hidden, pictureInPictureElement: document.pictureInPictureElement, video: rtcDisplay, presentationMode: rtcDisplay.webkitPresentationMode,
   presentationPlayback: presentationRole && presentationUI?.backgroundPlayback === true });
-const remembered = rememberedBrowser({ reconnect: () => { resumeAllowed = true; void resumeSession(); } });
+const remembered = rememberedBrowser({ connectApproved(key) {
+  if (away() || ws || !supported) return false;
+  resumeAllowed = true; sessionExpected = false; resumeDeadline = 0;
+  $('error').textContent = ''; connect(key); return true;
+} });
 let rtcReceiver, mediaMode = 'webcodecs';
 let pointerButtonsSupported = false;
 let keyboardSupported = false, keyboardOpen = false, viewOnly = false, windowAudioAllowed = false, windowAudioUnavailable = false;
@@ -548,10 +552,7 @@ async function resumeSession() {
         fail('Sharing ended while restoring video. Reconnect with saved access or ask for a new invitation.');
         return;
       }
-      const ticket = await remembered.ticket();
-      if (mine !== generation || ws || away()) return;
-      if (ticket) { sessionExpected = false; resumeDeadline = 0; connect(ticket); }
-      else if (sessionExpected) { sessionExpected = false; fail('This session ended. Reconnect with a remembered browser or pair using a new invitation.'); }
+      if (sessionExpected) { sessionExpected = false; fail('This session ended. Request a new stream or connect with a new invitation.'); }
     }
   } catch (error) {
     if (mine === generation) $('error').textContent = error.message || 'Could not reconnect. Check the private connection.';
@@ -1013,6 +1014,7 @@ window.addEventListener('pagehide', () => {
 });
 window.addEventListener('pageshow', () => { updatePause(); void resumeSession(); });
 void resumeSession();
+void remembered.status();
 $('touch').addEventListener('click', () => {
   if (viewOnly) return;
   releaseTouches(); touchEnabled = !touchEnabled; updateArrowAvailability();

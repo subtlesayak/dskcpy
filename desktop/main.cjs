@@ -113,8 +113,9 @@ else {
     });
     handle('trusted-list', () => backend.request('trusted-list'));
     handle('trusted-action', (action, id) => {
-      if (!['approve', 'reject', 'revoke', 'pause', 'resume'].includes(action)
-          || (['approve', 'reject', 'revoke'].includes(action) && !/^[a-f0-9]{32}$/.test(id))) throw new Error('Invalid device action');
+      const identified = ['approve', 'reject', 'revoke', 'allow-stream', 'deny-stream'];
+      if (!['pause', 'resume', ...identified].includes(action)
+          || (identified.includes(action) && !/^[a-f0-9]{32}$/.test(id))) throw new Error('Invalid device action');
       return backend.request('trusted-action', { action, id });
     });
     handle('start', () => host.start());
