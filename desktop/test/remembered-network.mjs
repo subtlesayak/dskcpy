@@ -12,16 +12,16 @@ import { mkdtemp, readFile, writeFile, mkdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { createBrowserReceiver } from '../../gui/server/browser.mjs';
-import { createTrustedDevices } from '../../gui/server/trusted-devices.mjs';
+import { createTrustedDevices, TRUST_LIFETIME_MS } from '../../gui/server/trusted-devices.mjs';
 
 const engine=process.argv[2]||'chromium',finalGate=process.argv[3]||'revoke';
-if(!['chromium','webkit'].includes(engine)||!['revoke','expiry'].includes(finalGate))throw Error('Choose a supported browser and final gate');
+if(!['chromium','webkit'].includes(engine)||!['revoke','expiry','active-expiry'].includes(finalGate))throw Error('Choose a supported browser and final gate');
 const output=path.resolve(`desktop/out/remembered-network-${engine}-${finalGate}`);await mkdir(output,{recursive:true});
 const directory=await mkdtemp(path.join(os.tmpdir(),'dskcpy-browser-cookie-'));
 const filename=path.join(directory,'devices.json'),natives=new Set(),connections=new Set(),diagnostics=[],pageErrors=[];
-let receiver,context,anonymous,proxy,origin,captures=0,clock=Date.now(),passed=false;
+let receiver,context,anonymous,proxy,origin,captures=0,clockOffset=0,approvalDeadline,passed=false;
 const profile={maxSize:1600,maxFps:30,bitRateMbps:8},policy={keyboard:true,rememberProfile:profile};
-const until=async predicate=>{for(let i=0;i<200;i++){if(await predicate())return;await new Promise(r=>setTimeout(r,5));}throw Error('Cookie fixture state transition failed');};
+const until=async(predicate,timeoutMs=1000)=>{const deadline=Date.now()+timeoutMs;while(Date.now()<deadline){if(await predicate())return;await new Promise(r=>setTimeout(r,5));}throw Error('Cookie fixture state transition failed');};
 const html=`<!doctype html><html><body>
 <div id="remembered-join" hidden><button id="remembered-reconnect">Reconnect</button></div>
 <form id="remember-form"><label>Name<input id="device-name" value="Fixture browser" required></label><button id="remember-submit">Ask Mac to remember</button></form>
@@ -40,7 +40,7 @@ window.fixtureClose=()=>window.fixtureSocket?.close(4000);
 await client.status();window.fixtureReady=true;
 </script></body></html>`;
 async function create(){
- const trustedDevices=createTrustedDevices({filename,now:()=>clock});await trustedDevices.ready;
+ const trustedDevices=createTrustedDevices({filename,now:()=>Date.now()+clockOffset});await trustedDevices.ready;
  receiver=createBrowserReceiver({configuredPort:0,origin,trustedDevices,onConnect:async bridge=>{
   captures++;const socket=net.connect(bridge.port,'127.0.0.1');natives.add(socket);socket.on('error',()=>{});
   await once(socket,'connect');socket.write(Buffer.from('535244310000000100000280000001e0','hex'));
@@ -100,7 +100,11 @@ try{
  const pending=receiver.trustedStatus().pending;assert.equal(pending.length,1);assert.equal(captures,1);assert.equal(receiver.trustedStatus().devices.length,0);
  const cookie=(await context.cookies()).find(c=>c.name==='dskcpy_device_v1');assert.ok(cookie);assert.equal(cookie.httpOnly,true);assert.equal(cookie.secure,true);assert.equal(cookie.sameSite,'Strict');assert.equal(cookie.path,'/stream');assert.ok(cookie.expires>Date.now()/1000+89*86400);
  const matchingPath=await context.newPage();await matchingPath.goto(origin+'/stream/check');assert.equal(await matchingPath.evaluate(()=>document.cookie.includes('dskcpy_device_v1')),false);await matchingPath.close();
- await receiver.trustAction('approve',pending[0].id);await page.getByRole('status').filter({hasText:/Saved/}).waitFor();
+ // Active-expiry models an old recorded approval, then follows real time. It
+ // never changes the system/browser clock or the normal 90-day grant constant.
+ if(finalGate==='active-expiry')clockOffset=-TRUST_LIFETIME_MS+5000;
+ await receiver.trustAction('approve',pending[0].id);approvalDeadline=receiver.trustedStatus().devices[0].expiresAt;clockOffset=0;
+ await page.getByRole('status').filter({hasText:/Saved/}).waitFor();
  await page.evaluate(()=>window.fixtureClose());await until(()=>!receiver.status().connected);await context.close();context=null;
  for(const native of natives)native.destroy();await receiver.shutdown();await create();await receiver.standby();
  page=await openBrowser();assert.equal(await page.getByRole('button',{name:'Reconnect',exact:true}).isVisible(),true);
@@ -118,8 +122,13 @@ try{
  const other=await anonymous.newPage();await other.goto(origin);await other.waitForFunction(()=>window.fixtureReady);
  assert.equal(await other.evaluate(key=>window.fixtureAttach(key),ticket),false);assert.equal(diagnostics.at(-1).status,403);assert.equal(captures,2);await anonymous.close();anonymous=null;
  if(finalGate==='revoke')await receiver.trustAction('revoke',pending[0].id);
- else{clock=receiver.trustedStatus().devices[0].expiresAt+1;await page.evaluate(()=>window.fixtureClose());}
- await until(()=>!receiver.status().connected);await page.reload();await page.waitForFunction(()=>window.fixtureReady);
+ else if(finalGate==='expiry'){clockOffset=receiver.trustedStatus().devices[0].expiresAt+1-Date.now();await page.evaluate(()=>window.fixtureClose());}
+ if(finalGate==='active-expiry'){
+  await until(()=>!receiver.status().connected,6000);
+  assert.ok(Date.now()>=approvalDeadline-20,'active capture does not close before its approval deadline');
+  await page.waitForFunction(()=>window.fixtureSocket.readyState===WebSocket.CLOSED);
+ }else await until(()=>!receiver.status().connected);
+ await page.reload();await page.waitForFunction(()=>window.fixtureReady);
  assert.equal(await page.getByRole('button',{name:'Reconnect',exact:true}).isVisible(),false);
  assert.ok((await context.cookies()).some(c=>c.name==='dskcpy_device_v1'),'server denial with browser credential still present');assert.equal(await deniedRequest(page),403);assert.equal(captures,2);
  assert.deepEqual(pageErrors,[]);
@@ -133,6 +142,8 @@ try{
   persistedAcrossBrowserAndHostRestart:passed,browserWssTicketHandoff:passed,browserWssResumeCookieWithoutNewCapture:passed,
   pausedCookieDenied:passed,consumedTicketOccupiedSessionDenied:passed,
   revokedBrowserCannotReconnect:passed&&finalGate==='revoke',expiredBrowserCannotReconnect:passed&&finalGate==='expiry',
-  expiryClock:'injected registry clock, not browser/system time',realDeviceEnrolled:false,screenCapture:false,realMedia:false,pageErrors,diagnostics},null,2)+'\n');
+  activeCaptureEndsAtApprovalDeadline:passed&&finalGate==='active-expiry',
+  expiryClock:finalGate==='active-expiry'?'old approval modeled at enrollment; real elapsed deadline': 'injected registry clock, not browser/system time',
+  realDeviceEnrolled:false,screenCapture:false,realMedia:false,pageErrors,diagnostics},null,2)+'\n');
  await rm(directory,{recursive:true,force:true});
 }
