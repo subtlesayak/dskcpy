@@ -13,7 +13,7 @@ const browser = await chromium.launch({ headless: true, channel: 'chromium', arg
 const results = [];
 const until = async predicate => { for (let i = 0; i < 400; i++) { if (await predicate()) return; await new Promise(r => setTimeout(r, 10)); } throw Error('Trackpad fixture transition missing'); };
 try { for (const variant of [{ width: 390, height: 844 }, { width: 844, height: 390 }, { width: 320, height: 700, rtl: true }, { width: 640, height: 900, zoom: 2 }]) {
-  let native, pending = Buffer.alloc(0); const inputs = [], errors = [];
+  let native, pending = Buffer.alloc(0); const inputs = [], allInputs = [], errors = [];
   const receiver = createBrowserReceiver({ configuredPort: 0, onConnect: async bridge => {
     native = net.connect(bridge.port, '127.0.0.1'); native.on('error', () => {}); await once(native, 'connect');
     native.on('data', chunk => {
@@ -23,6 +23,7 @@ try { for (const variant of [{ width: 390, height: 844 }, { width: 844, height: 
         assert.ok(size, 'Unexpected fixture input'); if (pending.length < size) return;
         const packet = Buffer.from(pending.subarray(0, size)); pending = pending.subarray(size);
         assert.ok(validBrowserInput(packet, 640, 480, { keyboard: true }));
+        allInputs.push(packet);
         if ([3, 7].includes(type)) inputs.push(packet);
       }
     });
@@ -38,6 +39,25 @@ try { for (const variant of [{ width: 390, height: 844 }, { width: 844, height: 
     await until(() => page.locator('#display').evaluate(c => c.width === 640));
     if (variant.rtl) await page.locator('html').evaluate(el => el.dir = 'rtl');
     if (variant.zoom) await page.locator('html').evaluate((el, z) => el.style.zoom = z, variant.zoom);
+    await page.locator('#more').click();
+    await page.locator('#touch-help summary').click();
+    const speed = page.getByRole('slider', { name: 'Touch scroll speed', exact: true });
+    assert.equal(await speed.inputValue(), '2');
+    await speed.focus(); const beforeSpeed = allInputs.length;
+    await page.keyboard.press(variant.rtl ? 'ArrowLeft' : 'ArrowRight');
+    assert.equal(await speed.getAttribute('aria-valuetext'), '2.25 times');
+    assert.equal(await page.locator('#touch-scroll-speed-value').textContent(), '2.25×');
+    await page.keyboard.press('End');
+    assert.equal(await speed.inputValue(), '8');
+    await page.keyboard.press('Home');
+    for (let i = 0; i < 6; i++) await page.keyboard.press(variant.rtl ? 'ArrowLeft' : 'ArrowRight');
+    assert.equal(await speed.inputValue(), '2');
+    assert.equal(await page.evaluate(() => localStorage.getItem('dskcpy.touch-scroll-speed.v1')), '2');
+    assert.equal(allInputs.slice(beforeSpeed).some(p => p[0] === 8 && p[1] !== 2), false, 'Range keys stay on the phone');
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+    const speedBounds = await speed.boundingBox(); assert.ok(speedBounds.width >= 44 && speedBounds.height >= 44);
+    await page.screenshot({ path: path.join(output, `scroll-speed-${variant.width}-${!!variant.rtl}-${variant.zoom || 1}.png`), fullPage: true });
+    await page.locator('#close-options').click();
     await page.getByRole('button', { name: 'Trackpad mode', exact: true }).click();
     const canvas = page.locator('#display');
     // Trackpad mode exposes helper controls and resizes the stage. The product
@@ -71,6 +91,17 @@ try { for (const variant of [{ width: 390, height: 844 }, { width: 844, height: 
     await gesture('pointerdown', 3, .3, .3); await gesture('pointermove', 3, .4, .3); await gesture('pointerup', 3, .4, .3);
     await until(() => inputs.at(-1)?.[1] === 2); assert.equal(await page.locator('#drag-mode').getAttribute('aria-pressed'), 'true');
     await page.getByRole('button', { name: 'Release drag', exact: true }).click(); await until(() => inputs.at(-1)?.[1] === 3);
+    for (const direction of [-1, 1]) {
+      const begin = inputs.length, rectangle = await canvas.boundingBox();
+      await gesture('pointerdown', 41, .3, .5); await gesture('pointerdown', 42, .6, .5);
+      for (let i = 1; i <= 8; i++) {
+        const y = .5 - direction * i / 4 / rectangle.height;
+        await gesture('pointermove', 41, .3, y); await gesture('pointermove', 42, .6, y);
+      }
+      await gesture('pointerup', 42, .6, .5); await gesture('pointerup', 41, .3, .5);
+      await until(() => inputs.slice(begin).reduce((sum, p) => sum + (p[0] === 7 ? p.readInt32BE(17) : 0), 0) === direction * 4);
+      assert.ok(inputs.slice(begin).every(p => p[0] === 7), 'Fractional scroll does not click');
+    }
     const start = inputs.length;
     await gesture('pointerdown', 4, .3, .5); await gesture('pointerdown', 5, .6, .5); await gesture('pointermove', 5, .6, .3);
     await until(() => inputs.length > start); assert.equal(inputs.at(-1)[0], 7); assert.ok(inputs.at(-1).readInt32BE(17) > 0);
@@ -99,7 +130,7 @@ try { for (const variant of [{ width: 390, height: 844 }, { width: 844, height: 
     await until(() => page.locator('#drag-mode').getAttribute('aria-pressed').then(x => x === 'false'));
     await until(() => inputs.at(-1)?.[1] === 3);
     assert.deepEqual(errors, []);
-    results.push({ ...variant, relativePointer: true, oneTap: true, explicitDragRelease: true, twoFingerScroll: true, keyboardAlternative: true, resizeCancelsHold: true, realNativeInput: false });
+    results.push({ ...variant, relativePointer: true, oneTap: true, explicitDragRelease: true, twoFingerScroll: true, fractionalScroll: true, scrollSpeedKeyboardControl: true, keyboardAlternative: true, resizeCancelsHold: true, realNativeInput: false });
   } catch(error) {
     console.error(JSON.stringify({variant,error:error.message,inputs:inputs.length,pageErrors:errors,
       state:await page.evaluate(()=>({status:document.querySelector('#status').textContent,error:document.querySelector('#error').textContent,

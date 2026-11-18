@@ -119,6 +119,28 @@ export function touchPacket(action, id, x, y, width, height) {
 
 // Scroll deltas are viewport pixels, positive right/down. Separate from touch
 // contacts so a swipe cannot turn into a pressed mouse button/text selection.
+// Preserve subpixel finger motion before the integer wire representation.
+// Only fractional residue survives an update; the existing 120px packet cap
+// never becomes a queue that keeps scrolling after the gesture ends.
+export function createTouchScroll({ gain = () => 1 } = {}) {
+  let x = 0, y = 0, previousGain;
+  return {
+    reset() { x = y = 0; previousGain = undefined; },
+    move(dx, dy) {
+      if (![dx, dy].every(Number.isFinite)) return null;
+      const requested = gain();
+      const scale = Number.isFinite(requested) && requested >= .5 && requested <= 8 ? requested : 1;
+      if (scale !== previousGain) { x = y = 0; previousGain = scale; }
+      const nextX = x + dx * scale, nextY = y + dy * scale;
+      if (![nextX, nextY].every(Number.isFinite)) return null;
+      const wholeX = Math.trunc(nextX), wholeY = Math.trunc(nextY);
+      x = nextX - wholeX; y = nextY - wholeY;
+      const result = { dx: Math.max(-120, Math.min(120, wholeX)), dy: Math.max(-120, Math.min(120, wholeY)) };
+      return result.dx || result.dy ? result : null;
+    },
+  };
+}
+
 export function scrollPacket(x, y, width, height, dx, dy) {
   const bytes = new Uint8Array(21), data = new DataView(bytes.buffer);
   bytes[0] = 7;
