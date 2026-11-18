@@ -64,6 +64,10 @@ A separate fault test drops the first authentication reply after host approval.
 Before the final fix, reload left the receiver on the join page; both engines
 now resume the same capture without a new approval. This simulated fault does
 not establish the cause of the earlier physical Home/return failure.
+CI also exposed a codec-fixture ordering race: two tests could send media before
+the fake native header. A controlled 25 ms header delay reproduces the failures;
+waiting for the parsed header fixes them without altering codec assertions,
+timeouts or production media code.
 Hosted checks must be matched to the exact paired review head. Core native,
 Android and package results below are separately identified baseline evidence.
 
