@@ -38,6 +38,9 @@ not approve a new stream. Cancellation waits for the host response. If the host
 cannot confirm it, the browser says the request was cancelled locally and that
 the pending host request will expire. An unresponsive receiver tab releases the
 list controls after ten seconds. These actions never stop an established stream.
+An interrupted bootstrap after Allow can resume only the same already approved
+capture. If no valid session remains, a new paired stream needs another host
+decision. A lost authentication reply does not silently grant another capture.
 
 ## Credential and consent boundaries
 

@@ -8,7 +8,7 @@ the behavior it actually exercised.
 
 ## Merged implementation baseline
 
-The paired-computer implementation review checkpoint is `7424a3bf`, integrating
+The paired-computer implementation review checkpoint is `dd361a2e`, integrating
 the three paired-only handoff commits through `f588240d` above documentation
 baseline `e2fa022a`. It adds host approval for every new paired stream, verified
 host identity and a multi-computer browser directory, plus the reviewed pending
@@ -60,6 +60,10 @@ passes afterward. The first repair also exposed an early cancellation result;
 the final fix recovers only the owning browser's pending request ID and awaits
 the host acknowledgement. These are disposable profiles, fake capture and
 fixture-only certificate exceptions; no live app, device or system trust changed.
+A separate fault test drops the first authentication reply after host approval.
+Before the final fix, reload left the receiver on the join page; both engines
+now resume the same capture without a new approval. This simulated fault does
+not establish the cause of the earlier physical Home/return failure.
 Hosted checks must be matched to the exact paired review head. Core native,
 Android and package results below are separately identified baseline evidence.
 
