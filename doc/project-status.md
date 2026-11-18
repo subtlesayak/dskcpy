@@ -82,7 +82,6 @@ not qualify a release:
 | [#41](https://github.com/subtlesayak/dskcpy/pull/41) | Owned-service setup/Quit serialization and atomic idle-retirement veto. | `cf2483b9` |
 | [#43](https://github.com/subtlesayak/dskcpy/pull/43) | Primary runtime notice included in Terminal packages and safely reused by desktop staging. | `4300e39f` |
 | [#44](https://github.com/subtlesayak/dskcpy/pull/44) | Optional bounded Mac caret/field geometry for typing framing, separately subscribed and gated. No text contents or reported secure fields are exposed. | `037dde29` |
-
 | [#45](https://github.com/subtlesayak/dskcpy/pull/45) | Fractional touch scrolling and adjustable speed; deterministic native-header fixture ordering. | `f42dca3c` |
 | [#47](https://github.com/subtlesayak/dskcpy/pull/47) | Browser Stop confirmation. The equivalent #48 change is preserved once. | `c6295ff9` |
 | [#48](https://github.com/subtlesayak/dskcpy/pull/48) | Default-off separate presentation/controller roles and negotiated secondary click. | `e6c44435` |
