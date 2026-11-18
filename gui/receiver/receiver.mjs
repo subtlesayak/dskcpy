@@ -35,6 +35,11 @@ const away = () => receiverIsAway({ hidden: document.hidden, pictureInPictureEle
   presentationPlayback: presentationRole && presentationUI?.backgroundPlayback === true });
 const remembered = rememberedBrowser({ canRequest: () => !ws && supported, canClaim: () => !away(), connectApproved(key) {
   if (away() || ws || !supported) return false;
+  // The host has approved this request. Retire the new-tab guard before the
+  // handshake so a lost authentication reply cannot strand the already
+  // approved capture on reload. The cookie still grants only session resume.
+  if (window.opener && location.hash === '#directory-access')
+    window.history.replaceState(null, '', `${location.pathname}${location.search}`);
   resumeAllowed = true; sessionExpected = false; resumeDeadline = 0;
   $('error').textContent = ''; connect(key); return true;
 } });

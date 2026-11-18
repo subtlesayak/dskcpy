@@ -29,7 +29,7 @@ async function until(check, label) {
   assert.fail(label);
 }
 async function proxyHost(tls, hostname, filename) {
-  let broker, captures = 0, offline = false;
+  let broker, captures = 0, offline = false, holdBootstrap = false;
   const natives = new Set(), sockets = new Set();
   const requestOptions = req => ({ hostname: '127.0.0.1', port: broker.port, path: req.url, method: req.method, headers: req.headers });
   const proxy = https.createServer(tls, (req, res) => {
@@ -50,7 +50,8 @@ async function proxyHost(tls, hostname, filename) {
       if (remoteHead.length) socket.write(remoteHead);
       socket.on('error', () => remote.destroy()); remote.on('error', () => socket.destroy());
       socket.on('close', () => remote.destroy()); remote.on('close', () => socket.destroy());
-      socket.pipe(remote); remote.pipe(socket);
+      socket.pipe(remote);
+      remote.on('data', chunk => { if (!holdBootstrap) socket.write(chunk); });
     });
     upstream.on('response', response => { response.resume(); socket.end(`HTTP/1.1 ${response.statusCode} Rejected\r\nConnection: close\r\n\r\n`); });
     upstream.on('error', () => socket.destroy()); upstream.end();
@@ -59,6 +60,7 @@ async function proxyHost(tls, hostname, filename) {
   const origin = `https://${hostname}:${proxy.address().port}`;
   const host = {
     origin, get broker() { return broker; }, get captures() { return captures; },
+    holdBootstrap(value) { holdBootstrap = value; },
     setOffline(value) { offline = value; if (value) for (const socket of sockets) socket.destroy(); },
     async close() {
       for (const socket of [...sockets, ...natives]) socket.destroy();
@@ -80,11 +82,12 @@ async function proxyHost(tls, hostname, filename) {
 const button = (page, name) => page.getByRole('button', { name, exact: true });
 
 async function addComputer(directory, host, waitName) {
+  const priorCaptures = host.captures;
   const invite = await host.broker.invite('internet', policy);
   await directory.getByLabel('Computer address or invitation link').fill(`${host.origin}/#connect=${invite.key}`);
   const opened = directory.waitForEvent('popup'); await button(directory, 'Add computer').click();
   const receiver = await opened;
-  await until(() => host.captures === 1, 'First invitation should start the simulated capture');
+  await until(() => host.captures === priorCaptures + 1, 'Invitation should start one simulated capture');
   await button(receiver, 'Options').click();
   await receiver.getByText('Remember this browser', { exact: true }).click();
   await receiver.getByLabel('Device name').fill(waitName);
@@ -232,8 +235,25 @@ try {
   await directory.getByRole('status').filter({ hasText: 'Computer forgotten' }).waitFor();
   assert.equal(a.broker.trustedStatus().devices.length, 0);
   assert.equal(moved.broker.trustedStatus().devices.length, 1);
+  // Drop the initial server acknowledgement only after the host has approved
+  // and the broker has created its capture. Reload must recover that exact
+  // approved session, rather than retain the new-tab guard forever.
+  const priorBootstrapCaptures = a.captures;
+  await addComputer(directory, a, 'Bootstrap fixture browser');
+  const bootstrapName = await directory.locator('#paired-computers li').last().getByRole('heading').innerText();
+  receiver = await select(directory, bootstrapName);
+  a.holdBootstrap(true);
+  await a.broker.trustAction('allow-stream', a.broker.trustedStatus().streamRequest.id);
+  await until(() => a.captures === priorBootstrapCaptures + 2, 'Approved capture should start before the dropped acknowledgement');
+  a.holdBootstrap(false);
+  await receiver.reload();
+  await receiver.locator('#stream-panel').waitFor();
+  assert.equal(a.captures, priorBootstrapCaptures + 2, 'A lost initial acknowledgement must resume the same capture');
+  assert.equal(a.broker.trustedStatus().streamRequest, null);
+  a.broker.cancel(); await receiver.close();
+
   assert.deepEqual(errors, []);
-  console.log(`${engine}: two-host list, pending reload/cancel, bounded handoff, denial, approved request, signed address change and isolated forget passed.`);
+  console.log(`${engine}: two-host list, pending reload/cancel, bounded handoff, denial, approved request, signed address change, isolated forget and lost-auth-reply same-capture resume passed.`);
 } finally {
   await context?.close();
   for (const host of hosts) await host.close();
