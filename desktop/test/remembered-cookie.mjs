@@ -44,12 +44,12 @@ async function upstream(request) {
   });
 }
 const html = `<!doctype html><html><body>
-<div id="remembered-join" hidden><button id="remembered-reconnect">Reconnect</button></div>
+<div id="remembered-join" hidden><button id="remembered-reconnect">Request to connect</button><button id="remembered-cancel" hidden>Cancel request</button><p id="remembered-connection-status" role="status"></p></div>
 <form id="remember-form"><label>Name<input id="device-name" value="Fixture browser" required></label><button id="remember-submit">Ask Mac to remember</button></form>
 <p id="remember-status" role="status"></p><section id="remember-device"></section>
 <script type="module">
 import { rememberedBrowser } from '/remembered.mjs';
-const client = rememberedBrowser({ reconnect: async () => { window.fixtureTicket = await client.ticket(); } });
+const client = rememberedBrowser({ connectApproved: key => { window.fixtureTicket = key; return true; } });
 await client.status(); window.fixtureReady = true;
 </script></body></html>`;
 try {
@@ -63,7 +63,7 @@ try {
     if (url.origin !== origin) { externalRequests++; await route.abort(); return; }
     if (['/', '/stream/check'].includes(url.pathname)) { await route.fulfill({ contentType: 'text/html', body: html }); return; }
     if (url.pathname === '/remembered.mjs') { await route.fulfill({ contentType: 'text/javascript', body: await readFile('gui/receiver/remembered.mjs', 'utf8') }); return; }
-    if (['/stream/remember','/stream/remember/status','/stream/trusted/connect'].includes(url.pathname)) { await route.fulfill(await upstream(req)); return; }
+    if (['/stream/remember','/stream/remember/status','/stream/trusted/connect','/stream/trusted/status','/stream/trusted/cancel'].includes(url.pathname)) { await route.fulfill(await upstream(req)); return; }
     await route.fulfill({ status: 404, body: '' });
   });
   let context = await chromium.launchPersistentContext(path.join(directory, 'browser-profile'), launchOptions); browser = context;
@@ -75,7 +75,7 @@ try {
     domain: new URL(origin).hostname, path: '/stream', secure: true, httpOnly: true, sameSite: 'Strict' }]);
   let page = await context.newPage(); await page.goto(origin); await page.waitForFunction(() => window.fixtureReady);
   await page.getByRole('button', { name: 'Ask Mac to remember' }).click();
-  await page.getByRole('status').filter({ hasText: /Waiting for approval/ }).waitFor();
+  await page.getByRole('status').filter({ hasText: /Waiting for pairing approval/ }).waitFor();
   const pending = receiver.trustedStatus().pending; assert.equal(pending.length, 1);
   assert.equal(captures, 1); assert.equal(receiver.trustedStatus().devices.length, 0);
   const cookie = (await context.cookies()).find(c => c.name === 'dskcpy_device_v1');
@@ -84,21 +84,24 @@ try {
   const matchingPath = await context.newPage(); await matchingPath.goto(origin + '/stream/check');
   assert.equal(await matchingPath.evaluate(() => document.cookie.includes('dskcpy_device_v1')), false); await matchingPath.close();
   await receiver.trustAction('approve', pending[0].id);
-  await page.getByRole('status').filter({ hasText: /Saved/ }).waitFor();
+  await page.getByRole('status').filter({ hasText: /Paired/ }).waitFor();
   await page.close(); nodeViewer.close(4000); await until(() => !receiver.status().connected);
   await context.close(); browser = null;
   for (const native of natives) native.destroy(); await receiver.shutdown(); await create(); await receiver.standby();
   context = await chromium.launchPersistentContext(path.join(directory, 'browser-profile'), launchOptions); browser = context;
   await attachRoutes(context);
   page = await context.newPage(); await page.goto(origin); await page.waitForFunction(() => window.fixtureReady);
-  assert.equal(await page.getByRole('button', { name: 'Reconnect', exact: true }).isVisible(), true);
-  await page.getByRole('button', { name: 'Reconnect', exact: true }).click();
+  assert.equal(await page.getByRole('button', { name: 'Request to connect', exact: true }).isVisible(), true);
+  await page.getByRole('button', { name: 'Request to connect', exact: true }).click();
+  await page.getByRole('status').filter({ hasText: 'Waiting for host approval' }).waitFor();
+  assert.equal(await page.evaluate(() => window.fixtureTicket), undefined);
+  await receiver.trustAction('allow-stream', receiver.trustedStatus().streamRequest.id);
   await page.waitForFunction(() => typeof window.fixtureTicket === 'string');
   assert.match(await page.evaluate(() => window.fixtureTicket), /^[A-Za-z0-9_-]{32}$/);
   assert.equal(captures, 1); // requesting a short ticket alone never captures
   await receiver.trustAction('revoke', pending[0].id);
   await page.reload(); await page.waitForFunction(() => window.fixtureReady);
-  assert.equal(await page.getByRole('button', { name: 'Reconnect', exact: true }).isVisible(), false);
+  assert.equal(await page.getByRole('button', { name: 'Request to connect', exact: true }).isVisible(), false);
   assert.equal(externalRequests, 0);
   const output = 'desktop/out/remembered-cookie'; await mkdir(output, { recursive: true });
   await writeFile(path.join(output, 'result.json'), JSON.stringify({ syntheticHttpsOrigin: true, realTlsTested: false,

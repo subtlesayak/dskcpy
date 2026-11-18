@@ -162,7 +162,7 @@ function App() {
         <p id="startup-note" className="hint" role="status">{!state.startup.available ? 'Available after installing the packaged app. On a Mac, keep it in Applications.'
           : state.startup.error || (state.startup.requiresApproval || (state.startup.requested && !state.startup.enabled)
             ? 'Allow dskcpy in your system’s login or startup settings to finish setup.'
-            : 'The app opens in the menu bar or system tray. Approved remembered devices may reconnect when access is enabled.')}</p>
+            : 'The app opens in the menu bar or system tray. Paired browsers can request a stream when access is enabled.')}</p>
       </details>}
     </main>
     <footer>{usb ? <Usb size={16} aria-hidden="true" /> : <Wifi size={16} aria-hidden="true" />}<span>{usb ? 'USB browser sharing works with an authorized Android data connection. iPhone and iPad use the private network option.' : 'For remote access, both devices need Tailscale access to this computer.'}</span></footer>
