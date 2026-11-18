@@ -48,8 +48,9 @@ Mac hosting candidate, see [Build identity and compatible upgrades](doc/artifact
   native capability and OS input permissions. Optional Mac
   [typing framing](doc/browser-typing-view.md) follows a bounded caret/field hint,
   with last-tap framing for older hosts.
-- **Receiver tools:** trackpad control, local pinch zoom, shortcut buttons and
+- **Receiver tools:** adjustable touch-scroll speed, trackpad control, local pinch zoom, shortcut buttons and
   separately authorized [text clipboard transfer](doc/browser-clipboard.md).
+- **Experimental separate controller:** an off-by-default [presentation and phone-controller prototype](doc/external-display-controller.md), with separate media/input roles and negotiated secondary click on matching hosts. Physical casting and background playback remain unqualified.
 - **Desktop app prototype:** guided private-network and account-free Android USB
   setup; see [implemented features and release gates](desktop/README.md).
 - **Local dashboard:** connection setup, wireless discovery, performance settings,

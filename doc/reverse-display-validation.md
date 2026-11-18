@@ -478,3 +478,31 @@ Physical Safari/iOS, phone scroll feel and orientation restrictions, full networ
 mode coverage, long soaks and motion-to-photon measurements remain outstanding.
 No installer, signed desktop release, virtual monitor or Windows Ink driver is
 provided by this slice.
+
+## Android audio source reconciliation (17 November 2026)
+
+The five audio source/test files from the previously prepared receiver candidate
+now apply cleanly to this integration checkout and match that candidate's bytes.
+They retain partial PCM output, bound it to 15,360 bytes/80 ms, remove the fixed
+60 ms AudioTrack flush, retain unaccepted compressed input and invalidate old
+audio epochs across mute/background transitions. Startup, service, Activity,
+native host and wire-format code are unchanged.
+
+The player compiles locally against the cached API 36 Android-all jar with Java
+8 language/API targeting. The current audio/packet/message-sender subset passes
+26 JUnit tests, including the eight PCM-tail cases. The older frozen verifier
+references the replaced DeviceMessageQueueTest, so its old 33-test count is not
+attributed to current source. A broader direct-Java run executes 110 tests with
+three preserved, unrelated display-parser assertion failures: the full
+Android-all jar exposes hidden FLAG_TRUSTED (128), whereas those tests explicitly
+assume the public SDK omits it (131 versus 3). Parser code and assertions were
+not changed. A local identity-only BuildConfig fixture is derived from the
+repository properties; it is not AGP-generated output.
+
+Full Gradle compilation, generated identity and unit coverage remain required CI
+gates. The debug job verifies at least eight passing, unskipped PCM-tail cases
+and retains only suite names/counts, excluding test output and environment data.
+CI debug signatures are build-test artifacts, not the approved development-key
+lineage for a retained-data phone upgrade. A matching signed APK and physical
+USB/Wi-Fi audio/mute/Home/long-session tests remain open. No APK is installed,
+no new key is authorized, and this does not fix or identify the startup stall.

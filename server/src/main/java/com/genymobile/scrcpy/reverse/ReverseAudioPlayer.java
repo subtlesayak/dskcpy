@@ -38,8 +38,11 @@ final class ReverseAudioPlayer implements ReversePacketReader.AudioSink {
     private AudioTrack track;
     private MediaCodec codec; // Owned only by the audio thread.
     private Thread thread;
-    private long writtenFrames;
-    private long headBase;
+    private final ReverseAudioPcmBuffer pendingPcm = new ReverseAudioPcmBuffer();
+    private final MediaCodec.BufferInfo outputInfo = new MediaCodec.BufferInfo();
+    private volatile long audioEpoch;
+    private long decoderEpoch = -1; // Owned by the audio thread.
+    private byte[] configuredHead; // Retained only to restart the decoder after mute/Home.
     private long decodedFrames;
     private boolean reportedPlayback;
     private boolean reportedSignal;
@@ -79,23 +82,20 @@ final class ReverseAudioPlayer implements ReversePacketReader.AudioSink {
         if (requested && !hasFocus) status("Phone audio paused by another app");
     }
     private void applyEnabled(boolean value) {
-        if (enabled == value) return;
-        enabled = value;
-        if (!value) ack(queue.clearData());
+        long dropped = -1;
         synchronized (trackLock) {
+            if (enabled == value) return;
+            enabled = value;
+            ++audioEpoch;
+            // Serialize admission with the transition so an old packet cannot
+            // enter the queue just after mute cleared it.
+            if (!value) dropped = queue.clearData();
             if (track != null) {
-                if (value) {
-                    // Focus/pause transitions can coalesce on the host. The
-                    // existing track must resume even without a fresh config.
-                    track.play();
-                } else {
-                    track.pause(); track.flush();
-                    writtenFrames = 0;
-                    headBase = playbackHead(track);
-                    reportedPlayback = false;
-                }
+                if (value) track.play();
+                else { track.pause(); track.flush(); reportedPlayback = false; }
             }
         }
+        ack(dropped);
         sender.send(DeviceMessage.createReverseSystemAction(value
                 ? DeviceMessage.REVERSE_SYSTEM_ACTION_AUDIO_ENABLE : DeviceMessage.REVERSE_SYSTEM_ACTION_AUDIO_DISABLE));
     }
@@ -106,10 +106,11 @@ final class ReverseAudioPlayer implements ReversePacketReader.AudioSink {
         focusRequest = null;
     }
     private void ack(long pts) { if (pts >= 0) sender.send(DeviceMessage.createReverseAudioAck(pts)); }
-    private static long playbackHead(AudioTrack output) { return ((long) output.getPlaybackHeadPosition()) & 0xffffffffL; }
     @Override public void accept(ReversePacketReader.Packet packet) {
-        if (stopped || (!enabled && packet.flags == ReversePacketReader.AUDIO_PACKET)) { ack(packet.ptsUs); return; }
-        ack(queue.offer(packet, System.nanoTime()));
+        synchronized (trackLock) {
+            if (stopped || (!enabled && packet.flags == ReversePacketReader.AUDIO_PACKET)) { ack(packet.ptsUs); return; }
+            ack(queue.offer(packet, System.nanoTime(), audioEpoch));
+        }
     }
 
     private static ByteBuffer nativeLong(long value) {
@@ -120,6 +121,7 @@ final class ReverseAudioPlayer implements ReversePacketReader.AudioSink {
         if (head.length != 19 || head[0] != 'O' || head[1] != 'p' || head[2] != 'u' || head[3] != 's'
                 || head[4] != 'H' || head[5] != 'e' || head[6] != 'a' || head[7] != 'd'
                 || head[8] != 1 || head[9] != 2 || head[18] != 0) throw new IOException("Unsupported Opus header");
+        configuredHead = head.clone();
         releaseDecoder();
         int skip = (head[10] & 255) | (head[11] & 255) << 8;
         MediaFormat format = MediaFormat.createAudioFormat("audio/opus", 48000, 2);
@@ -143,8 +145,7 @@ final class ReverseAudioPlayer implements ReversePacketReader.AudioSink {
                 track = builder.build();
             } else track = new AudioTrack(attributes, pcm, Math.max(minimum, 7680), AudioTrack.MODE_STREAM, AudioManager.AUDIO_SESSION_ID_GENERATE);
             if (track.getState() != AudioTrack.STATE_INITIALIZED) throw new IOException("Audio output initialization failed");
-            writtenFrames = 0;
-            headBase = playbackHead(track);
+            decoderEpoch = audioEpoch;
             reportedPlayback = false;
             if (enabled) track.play();
         }
@@ -152,12 +153,25 @@ final class ReverseAudioPlayer implements ReversePacketReader.AudioSink {
         Ln.i("Phone audio configured: Opus 48 kHz stereo, generation " + generation);
         status("Phone audio connected");
     }
-    private void drain() {
-        if (codec == null) return;
-        MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
-        int id;
-        while (true) {
-            id = codec.dequeueOutputBuffer(info, 0);
+    /** Returns false while a fresh, partially written PCM block needs another try. */
+    private boolean drain() {
+        if (codec == null) return true;
+        while (!stopped) {
+            if (pendingPcm.hasPending()) {
+                synchronized (trackLock) {
+                    if (!enabled || track == null) { pendingPcm.clear(); return true; }
+                    int bytes = pendingPcm.write(pcm -> track.write(pcm, pcm.remaining(), AudioTrack.WRITE_NON_BLOCKING),
+                            audioEpoch, System.nanoTime());
+                    decodedFrames += bytes / 4;
+                    if (bytes > 0 && !reportedPlayback) {
+                        reportedPlayback = true;
+                        Ln.i("Phone audio playback started, generation " + generation);
+                        status("Phone audio playing");
+                    }
+                }
+                if (pendingPcm.hasPending()) return false;
+            }
+            int id = codec.dequeueOutputBuffer(outputInfo, 0);
             if (id == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
                 MediaFormat actual = codec.getOutputFormat();
                 if (actual.getInteger(MediaFormat.KEY_SAMPLE_RATE) != 48000 || actual.getInteger(MediaFormat.KEY_CHANNEL_COUNT) != 2
@@ -167,100 +181,105 @@ final class ReverseAudioPlayer implements ReversePacketReader.AudioSink {
                 }
                 continue;
             }
-            if (id < 0) break;
-            ByteBuffer pcm = codec.getOutputBuffer(id);
-            if (pcm != null && info.size > 0 && (info.flags & MediaCodec.BUFFER_FLAG_CODEC_CONFIG) == 0) {
-                synchronized (trackLock) {
-                    if (enabled && track != null) {
-                        pcm.position(info.offset); pcm.limit(info.offset + info.size);
-                        if (!reportedSignal) {
-                            ByteBuffer samples = pcm.duplicate().order(ByteOrder.LITTLE_ENDIAN);
-                            while (samples.remaining() >= 2) {
-                                short sample = samples.getShort();
-                                if (sample > 64 || sample < -64) {
-                                    reportedSignal = true;
-                                    Ln.i("Phone audio received non-silent PCM");
-                                    break;
+            if (id < 0) return true;
+            try {
+                ByteBuffer pcm = codec.getOutputBuffer(id);
+                if (pcm != null && outputInfo.size > 0 && (outputInfo.flags & MediaCodec.BUFFER_FLAG_CODEC_CONFIG) == 0) {
+                    synchronized (trackLock) {
+                        if (enabled && track != null && decoderEpoch == audioEpoch) {
+                            pcm.position(outputInfo.offset); pcm.limit(outputInfo.offset + outputInfo.size);
+                            if (!reportedSignal) {
+                                ByteBuffer samples = pcm.duplicate().order(ByteOrder.LITTLE_ENDIAN);
+                                while (samples.remaining() >= 2) {
+                                    short sample = samples.getShort();
+                                    if (sample > 64 || sample < -64) {
+                                        reportedSignal = true;
+                                        Ln.i("Phone audio received non-silent PCM");
+                                        break;
+                                    }
                                 }
                             }
-                        }
-                        long played = (playbackHead(track) - headBase) & 0xffffffffL;
-                        if (writtenFrames - played > 2880) {
-                            track.pause(); track.flush(); track.play();
-                            writtenFrames = 0; headBase = playbackHead(track);
-                        }
-                        int bytes = track.write(pcm, info.size, AudioTrack.WRITE_NON_BLOCKING);
-                        if (bytes < 0) throw new IllegalStateException("Audio output write failed");
-                        writtenFrames += bytes / 4;
-                        decodedFrames += bytes / 4;
-                        if (bytes > 0 && !reportedPlayback) {
-                            reportedPlayback = true;
-                            Ln.i("Phone audio playback started, generation " + generation);
-                            status("Phone audio playing");
+                            // AudioTrack already bounds its device-specific queue.
+                            // A fixed 60-ms flush can repeatedly empty an actual
+                            // 80-ms device buffer. Keep only one bounded PCM tail
+                            // and retry short writes without flushing healthy audio.
+                            pendingPcm.offer(pcm, decoderEpoch, System.nanoTime());
                         }
                     }
                 }
+            } finally {
+                codec.releaseOutputBuffer(id, false);
             }
-            codec.releaseOutputBuffer(id, false);
         }
+        return true;
+    }
+    private void audioFailed() {
+        enabled = false;
+        configuredHead = null;
+        releaseDecoder();
+        ack(queue.clear());
+        status("Phone audio unavailable; video continues");
+        Ln.w("Phone audio decoder/output unavailable; video continues");
+        sender.send(DeviceMessage.createReverseSystemAction(DeviceMessage.REVERSE_SYSTEM_ACTION_AUDIO_DISABLE));
     }
     private void run() {
+        ReverseAudioBuffer.Entry entry = null;
         try {
             while (!stopped) {
-                ReverseAudioBuffer.Entry entry = queue.poll();
-                if (entry != null) {
+                try {
+                    if (decoderEpoch != audioEpoch) {
+                        // Recreate from the last validated header, even when rapid
+                        // mute/resume coalesces on the host and sends no new config.
+                        releaseDecoder();
+                        decoderEpoch = audioEpoch;
+                        if (enabled && configuredHead != null) configure(configuredHead);
+                    }
+                    if (!drain()) { Thread.sleep(2); continue; }
+                    if (entry == null) entry = queue.poll();
+                    if (entry == null) continue;
                     ReversePacketReader.Packet packet = entry.packet;
-                    try {
-                        if (packet.flags == ReversePacketReader.AUDIO_CONFIG) configure(packet.data);
-                        else if (packet.flags == ReversePacketReader.AUDIO_UNAVAILABLE) {
-                            releaseDecoder(); status("Desktop audio unavailable");
-                        } else {
-                            if (enabled && codec != null && !entry.stale(System.nanoTime())) {
+                    if (packet.flags == ReversePacketReader.AUDIO_CONFIG) {
+                        configure(packet.data);
+                        entry = null;
+                    } else if (packet.flags == ReversePacketReader.AUDIO_UNAVAILABLE) {
+                        configuredHead = null;
+                        releaseDecoder();
+                        status("Desktop audio unavailable");
+                        entry = null;
+                    } else {
+                        boolean consumed = false;
+                        synchronized (trackLock) {
+                            if (!enabled || entry.epoch != audioEpoch || codec == null || entry.stale(System.nanoTime())) consumed = true;
+                            else {
                                 int id = codec.dequeueInputBuffer(0);
                                 if (id >= 0) {
                                     ByteBuffer input = codec.getInputBuffer(id);
                                     if (input == null || input.capacity() < packet.data.length) throw new IOException("Audio packet too large");
                                     input.clear(); input.put(packet.data);
                                     codec.queueInputBuffer(id, 0, packet.data.length, packet.ptsUs, 0);
+                                    consumed = true;
                                 }
                             }
-                            ack(packet.ptsUs);
                         }
-                        drain();
-                    } catch (IOException | RuntimeException e) {
-                        enabled = false;
-                        releaseDecoder();
-                        ack(queue.clear());
-                        ack(packet.ptsUs);
-                        status("Phone audio unavailable; video continues");
-                        Ln.w("Phone audio decoder/output unavailable; video continues");
-                        sender.send(DeviceMessage.createReverseSystemAction(DeviceMessage.REVERSE_SYSTEM_ACTION_AUDIO_DISABLE));
+                        if (consumed) { ack(packet.ptsUs); entry = null; }
+                        else Thread.sleep(2); // Retain fresh input; do not ACK a packet the codec never accepted.
                     }
-                } else {
-                    try { drain(); }
-                    catch (RuntimeException error) {
-                        enabled = false;
-                        releaseDecoder();
-                        ack(queue.clear());
-                        status("Phone audio unavailable; video continues");
-                        sender.send(DeviceMessage.createReverseSystemAction(DeviceMessage.REVERSE_SYSTEM_ACTION_AUDIO_DISABLE));
-                    }
+                } catch (IOException | RuntimeException error) {
+                    if (entry != null && entry.packet.flags == ReversePacketReader.AUDIO_PACKET) ack(entry.packet.ptsUs);
+                    entry = null;
+                    audioFailed();
                 }
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-        } catch (RuntimeException e) {
-            enabled = false;
-            ack(queue.clear());
-            status("Phone audio unavailable; video continues");
-            sender.send(DeviceMessage.createReverseSystemAction(DeviceMessage.REVERSE_SYSTEM_ACTION_AUDIO_DISABLE));
-            Ln.w("Phone audio output stopped; video continues");
         } finally {
+            if (entry != null && entry.packet.flags == ReversePacketReader.AUDIO_PACKET) ack(entry.packet.ptsUs);
             releaseDecoder();
             Ln.i("Phone audio output frames: " + decodedFrames);
         }
     }
     private void releaseDecoder() {
+        pendingPcm.clear();
         synchronized (trackLock) {
             if (track != null) { track.release(); track = null; }
         }

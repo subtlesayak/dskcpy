@@ -1,6 +1,6 @@
 # Project status and verification
 
-Updated **17 November 2026 (IST)**. This is a dated development snapshot;
+Updated **18 November 2026 (IST)**. This is a dated development snapshot;
 draft branches and their CI results may advance after this update.
 dskcpy requires a source build; no signed, ready-to-install desktop release is
 available. A build, simulated regression or short device test qualifies only
@@ -8,11 +8,11 @@ the behavior it actually exercised.
 
 ## Merged implementation baseline
 
-The implementation baseline is
-`faef20ef7488c5933257b56b0ec24f4edb0d0566`, the combined implementation review
-checkpoint for PRs #38–#41, #43 and #44 above the earlier #16–#37 baseline.
-Documentation-only updates may postdate this commit. Merging source does not
-install a new app, replace an active receiver or qualify physical hardware.
+The combined implementation review checkpoint is
+`30d55b66`, integrating PRs #45 and #47–#53 above `ab2c2f93` and the earlier
+#16–#44 baseline. Documentation-only updates may postdate this commit.
+Merging source does not install a new app, replace an active receiver or
+qualify physical hardware.
 
 | Area | Implemented changes |
 | --- | --- |
@@ -20,6 +20,8 @@ install a new app, replace an active receiver or qualify physical hardware.
 | Browser input | Matching Mac and [Windows hosts](windows-browser-keyboard.md) support opt-in desktop keyboard and committed text. [Trackpad](browser-trackpad.md), [local zoom](browser-view-zoom.md) and [shortcut buttons](browser-shortcuts.md) are implemented. [Text clipboard transfer](browser-clipboard.md) requires separate invitation permission and current-viewer opt-in; remembered access excludes it. |
 | Recovery and video quality | Classified Mac display/sleep recovery, receiver audio-intent restoration, [negotiated media fallback](browser-media-recovery.md), bounded codec parameter updates and duplicate-Resume input protection are implemented. [Adaptive video](adaptive-browser-video.md), checked [Windows encoder replacement](windows-adaptive-video.md) and local video preferences remain subject to driver/device qualification. |
 | Mac windows | The owner can approve [two to eight windows](browser-window-switching.md) for temporary receiver switching. Previews stay in receiver memory. Control remains off. Optional [application audio](browser-window-audio.md) is off by default, covers the selected window's entire application and requires explicit consent; it never falls back to desktop or microphone audio. |
+| Separate presentation/controller | The [experimental prototype](external-display-controller.md) is off by default. Separate authenticated media/input roles, secondary click on matching native hosts, status-only recovery after End presentation and host role status are implemented. Stop requires explicit confirmation. Casting and physical background/audio behavior remain unqualified. |
+| Receiver audio and access expiry | Android retains bounded partial PCM writes and unaccepted codec input, clears stale audio epochs and avoids a fixed healthy-output flush. Pending cumulative video/audio acknowledgements retain the greatest timestamp independently. Remembered approval expiry also ends active capture within its original grant. These are source/software fixes, not a physical stutter diagnosis. |
 | Builds and diagnostics | Separate [Apple-silicon and Intel Mac builds](mac-host-architectures.md), pinned dependencies, payload manifests and startup diagnostics are implemented. The primary Werift notice is included and verified in both Terminal and desktop packages. Minimum-OS, installation, signing and physical media qualification remain open. |
 | Artifact identity and upgrades | Android version code is **50002**, distinct from inherited wire version **4.1** and reverse protocol **1**. A read-only preflight checks APK package, version and signing-certificate compatibility. Existing Android-to-computer operation is retained. |
 
@@ -32,17 +34,27 @@ cannot make a differently signed APK a compatible update.
 
 ## Automated verification
 
-The combined implementation review passes 32 local Mac native tests in each
-normal, ASan/UBSan and pinned build; 504 Node tests pass with seven optional skips.
-Both UI builds pass. Generated-media checks cover 24 Chromium/WebKit typing
-flows and three application-audio flows; five owner-consent and six native
-permission-guidance UI cases use fake effects.
+The 18 November combined review passes 34 local Mac native tests in each
+normal, ASan/UBSan and pinned build. The initial Node run passes 548 tests
+with eight optional/fixture-dependent skips; the native log-pipe case requires
+the explicitly supplied built fixture. Both UI builds pass. Ten generated
+Chromium/WebKit presentation/controller flows and eight host role-status/Stop
+flows pass. Six owned-loopback HTTPS cases exercise real browser cookies,
+restart/resume, revocation, approval expiry and active-capture expiry; their
+self-signed certificate exception is confined to disposable browser contexts.
+They do not qualify system certificate trust.
 
-The combined cross-platform workflow and exact source results are on
-[PR #44's checks](https://github.com/subtlesayak/dskcpy/pull/44/checks). Always match
-the tested head and terminal result. The earlier `8052ce8c` baseline passed all
-eight jobs in [master run 43571452662](https://github.com/subtlesayak/dskcpy/actions/runs/43571452662);
-that historical pass does not qualify a later integration or installed app.
+Actual Android audio-player source compiles against cached API36 Java APIs
+with a declared identity-only BuildConfig fixture. Thirty-eight selected
+JUnit cases pass, including four acknowledgement regressions; two ordering
+assertions failed before the original queue fix. This direct-Java check is
+separate from the full Gradle/public-SDK gates in CI.
+
+Use [PR #53's checks](https://github.com/subtlesayak/dskcpy/pull/53/checks) for the
+combined candidate's exact head and terminal cross-platform outcomes. Earlier
+PR-head passes and capacity cancellations are historical evidence, not passes
+for this integration. The previous #38–#44 review passed all eight jobs in
+[run 44041666101](https://github.com/subtlesayak/dskcpy/actions/runs/44041666101).
 
 These tests use generated media, fake native effects or software decoding where
 specified. They do not establish physical input, audible playback, real encoder
@@ -70,6 +82,14 @@ not qualify a release:
 | [#41](https://github.com/subtlesayak/dskcpy/pull/41) | Owned-service setup/Quit serialization and atomic idle-retirement veto. | `cf2483b9` |
 | [#43](https://github.com/subtlesayak/dskcpy/pull/43) | Primary runtime notice included in Terminal packages and safely reused by desktop staging. | `4300e39f` |
 | [#44](https://github.com/subtlesayak/dskcpy/pull/44) | Optional bounded Mac caret/field geometry for typing framing, separately subscribed and gated. No text contents or reported secure fields are exposed. | `037dde29` |
+| [#45](https://github.com/subtlesayak/dskcpy/pull/45) | Fractional touch scrolling and adjustable speed; deterministic native-header fixture ordering. | `f42dca3c` |
+| [#47](https://github.com/subtlesayak/dskcpy/pull/47) | Browser Stop confirmation. The equivalent #48 change is preserved once. | `c6295ff9` |
+| [#48](https://github.com/subtlesayak/dskcpy/pull/48) | Default-off separate presentation/controller roles and negotiated secondary click. | `e6c44435` |
+| [#49](https://github.com/subtlesayak/dskcpy/pull/49) | Status-only controller recovery after End presentation. | `6ed7d2cd` |
+| [#50](https://github.com/subtlesayak/dskcpy/pull/50) | Narrow host role status and explicit host Stop confirmation. | `93a08ca0` |
+| [#51](https://github.com/subtlesayak/dskcpy/pull/51) | Real-browser HTTPS remembered-access matrix. | `3d5cf005` |
+| [#52](https://github.com/subtlesayak/dskcpy/pull/52) | Original approval deadline also bounds active capture. | `7eda814f` |
+| [#53](https://github.com/subtlesayak/dskcpy/pull/53) | Reconciled prepared Android partial-write/epoch audio patch; combined review adds cumulative ACK ordering fix. | `83dbfad4` |
 
 Local checks, hosted-runner capacity cancellations and separate integrations are
 different evidence. The combined typing layout, actual AX providers and

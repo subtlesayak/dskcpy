@@ -15,6 +15,44 @@ public class DeviceMessageSenderSessionTest {
         assertEquals(DeviceMessage.TYPE_REVERSE_AUDIO_ACK, take(sender).getType());
         assertEquals(DeviceMessage.TYPE_REVERSE_FRAME_ACK, take(sender).getType());
     }
+    @Test public void cumulativeAcknowledgementsKeepMaximumPendingTimestamp() throws Exception {
+        DeviceMessageSender sender = sender();
+        sender.send(DeviceMessage.createReverseAudioAck(20));
+        sender.send(DeviceMessage.createReverseAudioAck(10));
+        assertEquals(20, take(sender).getFramePts());
+        sender.send(DeviceMessage.createReverseFrameAck(40));
+        sender.send(DeviceMessage.createReverseFrameAck(30));
+        assertEquals(40, take(sender).getFramePts());
+    }
+    @Test public void cumulativeAcknowledgementsCoalesceIndependentlyWithoutOverflow() throws Exception {
+        DeviceMessageSender sender = sender();
+        sender.send(DeviceMessage.createReverseAudioAck(Long.MAX_VALUE));
+        sender.send(DeviceMessage.createReverseFrameAck(7));
+        sender.send(DeviceMessage.createReverseAudioAck(0));
+        sender.send(DeviceMessage.createReverseFrameAck(9));
+        DeviceMessage frame = take(sender), audio = take(sender);
+        assertEquals(DeviceMessage.TYPE_REVERSE_FRAME_ACK, frame.getType());
+        assertEquals(9, frame.getFramePts());
+        assertEquals(DeviceMessage.TYPE_REVERSE_AUDIO_ACK, audio.getType());
+        assertEquals(Long.MAX_VALUE, audio.getFramePts());
+    }
+    @Test public void drainedQueueDoesNotRetainTimestampAcrossNewCapture() throws Exception {
+        DeviceMessageSender sender = sender();
+        sender.send(DeviceMessage.createReverseAudioAck(20));
+        assertEquals(20, take(sender).getFramePts());
+        sender.send(DeviceMessage.createReverseAudioAck(1));
+        assertEquals(1, take(sender).getFramePts());
+    }
+    @Test public void stopDiscardsPendingAcknowledgementsBeforeRestart() throws Exception {
+        DeviceMessageSender sender = sender();
+        sender.send(DeviceMessage.createReverseAudioAck(20));
+        sender.stop();
+        sender.send(DeviceMessage.createReverseAudioAck(30));
+        assertNull(take(sender));
+        sender.start();
+        sender.stop();
+        sender.join();
+    }
     @Test public void newestAudioToggleSurvivesAFullQueue() throws Exception {
         DeviceMessageSender sender = sender();
         for (int i = 0; i < 32; i++) action(sender, DeviceMessage.REVERSE_SYSTEM_ACTION_VOLUME_DOWN);

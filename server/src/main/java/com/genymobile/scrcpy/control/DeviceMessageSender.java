@@ -50,12 +50,17 @@ public final class DeviceMessageSender {
 
             if (msg.getType() == DeviceMessage.TYPE_REVERSE_FRAME_ACK
                     || msg.getType() == DeviceMessage.TYPE_REVERSE_AUDIO_ACK) {
-                // Frame acknowledgements are cumulative. Keep only the newest
-                // pending one so video flow control never delays touch input.
+                // Acknowledgements are cumulative, but decoder and lifecycle
+                // threads may enqueue them out of timestamp order. Keep the
+                // greatest pending PTS for this type, not the last arrival.
+                // Do not retain a watermark after dequeue or across captures.
                 Iterator<DeviceMessage> iterator = queue.iterator();
                 while (iterator.hasNext()) {
-                    if (iterator.next().getType()
-                            == msg.getType()) {
+                    DeviceMessage pending = iterator.next();
+                    if (pending.getType() == msg.getType()) {
+                        if (pending.getFramePts() > msg.getFramePts()) {
+                            msg = pending;
+                        }
                         iterator.remove();
                     }
                 }
