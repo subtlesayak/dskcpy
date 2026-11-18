@@ -40,6 +40,16 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, summary:focus
 #remembered-join h2 { font-size: 1.25rem; }
 #paired-computers { list-style: none; margin: 0; padding: 0; }
 #paired-computers li { border: 1px solid #405461; border-radius: 12px; padding: 16px; }
+#paired-computers li + li { margin-block-start: 12px; }
+#paired-computers h2 { font-size: 1.125rem; margin: 0; overflow-wrap: anywhere; }
+#paired-computers li p { overflow-wrap: anywhere; }
+#edit-computer { color: inherit; background: #101b22; border: 1px solid #627d8c; border-radius: 12px; width: min(28rem, calc(100% - 32px)); max-height: calc(100dvh - 32px); }
+#edit-computer::backdrop { background: rgb(0 0 0 / .65); }
+#edit-computer form { margin: 8px; }
+#edit-computer h2 { margin: 0; font-size: 1.25rem; }
+#add-help, #directory-status, #add-error, #edit-error { margin: 0; }
+#directory-status:not(:empty) { margin-block: 12px; }
+.directory-origin { overflow-wrap: anywhere; }
 #paired-name { margin: 0; overflow-wrap: anywhere; }
 #paired-availability { margin-block: 6px 12px; }
 .paired-actions { display: flex; flex-wrap: wrap; gap: 8px; }
