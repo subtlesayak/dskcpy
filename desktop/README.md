@@ -162,8 +162,10 @@ PLAYWRIGHT_BROWSERS_PATH=desktop/.browsers node desktop/test/remembered-cookie.m
 PLAYWRIGHT_BROWSERS_PATH=desktop/.browsers node desktop/node_modules/playwright/cli.js install webkit
 PLAYWRIGHT_BROWSERS_PATH=desktop/.browsers node desktop/test/remembered-network.mjs chromium revoke
 PLAYWRIGHT_BROWSERS_PATH=desktop/.browsers node desktop/test/remembered-network.mjs chromium expiry
+PLAYWRIGHT_BROWSERS_PATH=desktop/.browsers node desktop/test/remembered-network.mjs chromium active-expiry
 PLAYWRIGHT_BROWSERS_PATH=desktop/.browsers node desktop/test/remembered-network.mjs webkit revoke
 PLAYWRIGHT_BROWSERS_PATH=desktop/.browsers node desktop/test/remembered-network.mjs webkit expiry
+PLAYWRIGHT_BROWSERS_PATH=desktop/.browsers node desktop/test/remembered-network.mjs webkit active-expiry
 ```
 
 Service integration uses a fake no-capture executable and a new ephemeral
@@ -190,8 +192,12 @@ Both browser and fake host restart; a fresh ticket authenticates, transport loss
 resumes through the HttpOnly cookie without another capture, pause blocks access,
 and an unapproved context cannot replay a consumed ticket. Separate runs verify
 revoke and server-side expiry while the browser credential remains present.
-Expiry uses an injected registry clock and checks subsequent reconnect denial;
-it does not simulate browser/system time or prove live-session expiry timing.
+The `expiry` gate uses an injected registry clock and checks subsequent
+reconnect denial. The `active-expiry` gate models an old recorded approval near
+its deadline, returns to real elapsed time, then verifies that the active capture
+ends at that deadline after transport resume. Neither changes browser/system
+time. The session limit is the earlier of the configured lifetime and the
+remaining remembered approval; reconnect cannot renew either deadline.
 No real screen/audio/input, VPN, mobile OS, Safari app, or certificate trust is
 qualified. Temporary keys, profiles and registry are deleted after each run.
 

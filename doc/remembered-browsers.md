@@ -27,6 +27,14 @@ The browser receives a random 256-bit credential in a host-only `Secure; HttpOnl
 
 Remote mutations require the exact configured HTTPS Origin and reject cross-site requests. Owner approval, pause and revoke stay on the existing guarded loopback control surface or validated desktop IPC. Tickets are one-use and expire after 15 seconds; granting a ticket alone does not start capture. Approval, expiry, pause and revocation are checked again before consuming a ticket. Registry writes are serialized, atomic and fail closed; corrupt/unwritable storage blocks remembered access. There are at most 20 grants, one current enrollment request and one connecting preparation. The existing authenticated media/input wire remains unchanged.
 
+A remembered connection is bounded by the earlier of the configured session
+lifetime and its approval's absolute expiry. Starting shortly before approval
+expires does not grant another full session. Transport resume, media recovery
+and controller pairing retain the original deadline. Expiry uses the normal
+session-close path to release held input and end all associated roles; a saved
+cookie cannot start or resume an expired grant. Temporary invitations retain
+their existing configured lifetime.
+
 The source library defaults to no persistent registry. Real launcher entry points explicitly use the user's dskcpy data directory; Electron uses its own application data directory. Tests supply disposable directories and fake capture only.
 
 ## PiP and validation limits
@@ -52,15 +60,21 @@ injected: the browser receives the temporary resume and enrollment cookies from
 the WSS and HTTP responses. It covers approval, HttpOnly/Secure/SameSite/path
 properties, profile and host restart, ticket handoff, transport resume without a
 new capture, pause/resume, denial from a separate unapproved context, revoke and
-server-side expiry with the browser cookie still present. The expiry case uses
-an injected registry clock to check reconnect denial, not active-session timing.
+server-side expiry with the browser cookie still present. The `expiry` case uses
+an injected registry clock to check reconnect denial. The `active-expiry` case
+models an old approval ending shortly, then follows real elapsed time through
+transport resume and automatic active-session closure. A loopback regression
+also verifies held touch/key release at that deadline. No system/browser clock
+is changed; this is software evidence, not physical-device expiry qualification.
 
 The old intercepted-origin fixture did not expose cookies on its WebKit routed
 requests. A separate network fixture avoids treating that interception behavior
 as a production enrollment defect. Another initial replay assertion used a
 second tab in the approved context, which legitimately had its resume cookie;
 the negative test now uses a separate, unapproved context. Cookie, origin and
-replay assertions remain enforced. No production authentication code changed.
+replay assertions remain enforced. Those fixture corrections preserve the
+existing credential policy; the active-session fix changes only the lifetime
+bound when a remembered ticket is consumed.
 
 Only disposable browser contexts accept the owned self-signed TLS certificate,
 with other origins blocked and same-origin WSS constrained by CSP. This is not

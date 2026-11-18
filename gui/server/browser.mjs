@@ -373,7 +373,11 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
         const accepted = invitation && candidate.length === invitation.length
           && timingSafeEqual(candidate, invitation);
         candidate.fill(0);
+        // Approval is a deadline, not just permission to start another full
+        // session. Its remaining time also bounds active media/controller life.
+        const grantLifetimeMs = trustedTicket ? trustedTicket.expiresAt - Date.now() : lifetimeMs;
         if (!accepted || session || (trustedTicket && (!trustedDevices.allowed(trustedTicket.id, trustedTicket.digest)
+          || !Number.isSafeInteger(grantLifetimeMs) || grantLifetimeMs <= 0
           || req.headers.origin !== trustedTicket.origin || req.headers.host !== new URL(trustedTicket.origin).host))) {
           if (++failures >= 10) cancel();
           ws.close(1008, 'Session key rejected or expired.');
@@ -384,7 +388,7 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
         for (const other of sockets) if (other !== ws) other.terminate();
         const deviceId = trustedTicket?.id; trustedTicket = null;
         const token = Buffer.from(req.resumeToken);
-        const active = createBrowserSession({ socket: ws, onConnect, resumeMs, lifetimeMs, nativeEndGraceMs, rtcMediaFactory,
+        const active = createBrowserSession({ socket: ws, onConnect, resumeMs, lifetimeMs: Math.min(lifetimeMs, grantLifetimeMs), nativeEndGraceMs, rtcMediaFactory,
           presentationControl: presentationControl === true,
           onControllerLeave: () => { if (controllerGrant?.session === active) clearControllerGrant(); },
           mediaMode, rtcBind, ...inputPolicy, onRetireWindow, onChange, onClose: () => {

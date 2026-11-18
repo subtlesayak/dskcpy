@@ -8,20 +8,22 @@ import os from 'node:os';
 import path from 'node:path';
 import { WebSocket } from 'ws';
 import { createBrowserReceiver } from './browser.mjs';
-import { createTrustedDevices } from './trusted-devices.mjs';
+import { createTrustedDevices, TRUST_LIFETIME_MS } from './trusted-devices.mjs';
+import { touchPacket } from '../receiver/protocol.mjs';
 const origin = 'https://host.example';
 const policy = { keyboard: true, rememberProfile: { maxSize: 1600, maxFps: 30, bitRateMbps: 8 } };
 async function until(predicate) {
   for (let i = 0; i < 200; i++) { if (predicate()) return; await new Promise(r => setTimeout(r, 5)); }
   assert.fail('Expected state transition');
 }
-async function fixture(t, { viewOnly = false, beforeTrusted = async () => {} } = {}) {
+async function fixture(t, { viewOnly = false, beforeTrusted = async () => {}, now = Date.now } = {}) {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'dskcpy-browser-trust-'));
   const filename = path.join(dir, 'devices.json');
-  let store = createTrustedDevices({ filename }); await store.ready;
-  const natives = new Set(); let captures = 0, receiver;
+  let store = createTrustedDevices({ filename, now }); await store.ready;
+  const natives = new Set(), controls = []; let captures = 0, receiver;
   const options = { configuredPort: 0, origin, trustedDevices: store, onConnect: async bridge => {
     captures++; const native = net.connect(bridge.port, '127.0.0.1'); natives.add(native); native.on('error', () => {});
+    native.on('data',chunk=>controls.push(chunk));
     await once(native, 'connect'); native.write(Buffer.from('535244310000000100000280000001e0', 'hex'));
   }, onTrustedConnect: async device => { await beforeTrusted(); return receiver.invite('internet', { ...policy, rememberProfile: device.profile }, device); } };
   receiver = createBrowserReceiver(options);
@@ -34,17 +36,18 @@ async function fixture(t, { viewOnly = false, beforeTrusted = async () => {} } =
         body: JSON.parse(bytes || '{}'), cookie: res.headers['set-cookie']?.[0] }));
     }); req.on('error', reject); req.end(JSON.stringify(body));
   });
-  const connect = async (key, requestOrigin = origin, requestHost = 'host.example') => {
-    const ws = new WebSocket(`ws://127.0.0.1:${receiver.port}/stream`, { origin: requestOrigin, headers: { Host: requestHost } });
+  const connect = async (key, requestOrigin = origin, requestHost = 'host.example', cookie) => {
+    const ws = new WebSocket(`ws://127.0.0.1:${receiver.port}/stream`, { origin: requestOrigin, headers: { Host: requestHost, ...(cookie ? {Cookie:cookie} : {}) } });
     ws.on('error', () => {}); ws.received = [];
     ws.on('upgrade', res => ws.cookie = res.headers['set-cookie']?.[0].split(';')[0]);
     ws.on('message', (data, binary) => ws.received.push({ data, binary }));
-    await once(ws, 'open'); ws.send(key); return ws;
+    await once(ws, 'open'); if(key)ws.send(key); return ws;
   };
   return { get receiver() { return receiver; }, get store() { return store; }, post, connect, invitation, captures: () => captures,
+    controls:()=>Buffer.concat(controls), clearControls:()=>{controls.length=0;},
     async restart() {
       for (const native of natives) native.destroy(); await receiver.shutdown();
-      store = createTrustedDevices({ filename }); await store.ready;
+      store = createTrustedDevices({ filename, now }); await store.ready;
       receiver = createBrowserReceiver({ ...options, trustedDevices: store }); await receiver.standby();
     } };
 }
@@ -154,4 +157,28 @@ test('trusted reconnect tickets are bound to the approved private receiver origi
   await assert.rejects(f.connect(ticket.body.key, `http://127.0.0.1:${f.receiver.port}`, `127.0.0.1:${f.receiver.port}`), /403/);
   assert.equal(f.captures(), 1); assert.equal(f.receiver.status().waiting, true);
   const returning = await f.connect(ticket.body.key); await until(() => f.captures() === 2); returning.close(4000);
+});
+
+test('an active remembered capture and its resume cannot outlive the approval deadline', { timeout:5000 }, async t => {
+  // Model an old approval whose absolute deadline is near now; neither the
+  // system clock nor the ordinary 90-day enrollment lifetime is changed.
+  let offset=-TRUST_LIFETIME_MS+700;
+  const f=await fixture(t,{now:()=>Date.now()+offset});const {ws,cookie}=await enroll(f);
+  const deadline=f.store.snapshot().devices[0].expiresAt;offset=0;
+  ws.close(4000);await until(()=>!f.receiver.status().connected);
+  const ticket=await f.post('trusted/connect',cookie);assert.equal(ticket.status,201);
+  const returning=await f.connect(ticket.body.key);await until(()=>returning.received.some(m=>m.binary));
+  assert.equal(f.captures(),2);const resumeCookie=returning.cookie;
+  const disconnected=once(returning,'close');returning.close(4001);await disconnected;
+  const resumed=await f.connect(null,origin,'host.example',resumeCookie);await until(()=>resumed.received.some(m=>m.binary));
+  assert.equal(f.captures(),2,'transport resume cannot create a new capture or approval');
+  resumed.send('resume');resumed.ping();await once(resumed,'pong');f.clearControls();
+  const held=Buffer.from(touchPacket(0,0,20,20,640,480)),key=Buffer.from([8,0,0,4,1]);
+  resumed.send(held);resumed.send(key);await until(()=>f.controls().includes(held)&&f.controls().includes(key));
+  await until(()=>!f.receiver.status().connected);
+  assert.ok(Date.now()>=deadline-20,'approval expiry does not end an otherwise valid session early');
+  await until(()=>f.controls().includes(Buffer.from(touchPacket(3,0,20,20,640,480)))&&f.controls().includes(Buffer.from([8,2,0,0,0])));
+  assert.equal((await f.post('trusted/connect',cookie)).status,403);
+  assert.equal(f.captures(),2);assert.equal(f.receiver.status().waiting,false);
+  await assert.rejects(f.connect(null,origin,'host.example',resumeCookie),/403/);
 });

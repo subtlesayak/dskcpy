@@ -755,7 +755,7 @@ test('a remembered grant cannot carry clipboard permission even if an internal c
   let native;const receiver=createBrowserReceiver({configuredPort:0,trustedDevices:{allowed:()=>true,snapshot:()=>({available:false,paused:false,devices:[]})},onConnect:async bridge=>{
     assert.equal(bridge.clipboard,false);native=net.connect(bridge.port,'127.0.0.1');native.on('error',()=>{});await once(native,'connect');native.write(header);
   }});t.after(async()=>{native?.destroy();await receiver.shutdown();});
-  const grant={id:'fixture',digest:'fixture',origin:''},invitation=await receiver.invite('local',{keyboard:true,clipboard:true},grant);grant.origin=invitation.url.slice(0,-1);
+  const grant={id:'fixture',digest:'fixture',origin:'',expiresAt:Date.now()+43200000},invitation=await receiver.invite('local',{keyboard:true,clipboard:true},grant);grant.origin=invitation.url.slice(0,-1);
   const ws=new WebSocket(invitation.url.replace('http:','ws:')+'stream',{origin:grant.origin});ws.on('error',()=>{});t.after(()=>ws.terminate());await once(ws,'open');
   const first=once(ws,'message');ws.send(invitation.key);const [bytes,binary]=await first;assert.equal(binary,false);assert.equal(JSON.parse(bytes).clipboard,false);
 });
