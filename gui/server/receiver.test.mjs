@@ -22,7 +22,7 @@ const parameters = new Uint8Array([0, 0, 1, 0x67, 0x64, 0, 0x28, 0, 0, 1, 0x68, 
 
 // Deterministic lifecycle tests against the actual receiver script. These model
 // delayed browser callbacks; rendered/device QA is separate from this harness.
-function receiver(t, { portrait = false, lockFails = false, webRtc = false, webCodecs = true, qrKey = '', keyboard = false, viewOnly = false, visualHeight = 0, webAudio = false, textFocus = false, keyboardStatus = false, clipboard = false, clipboardAPI = undefined, virtualKeyboard = null, now = () => Date.now(), resumable = false, mediaFallback = false, adaptiveVideo = false, windowSwitch = false, windowAudio = false, rtcOffer = async () => {} } = {}) {
+function receiver(t, { portrait = false, lockFails = false, webRtc = false, webCodecs = true, qrKey = '', keyboard = false, viewOnly = false, visualHeight = 0, webAudio = false, textFocus = false, keyboardStatus = false, clipboard = false, clipboardAPI = undefined, virtualKeyboard = null, now = () => Date.now(), resumable = false, mediaFallback = false, adaptiveVideo = false, windowSwitch = false, windowAudio = false, touchScrollSpeed = 1, scrollStorage = undefined, rtcOffer = async () => {} } = {}) {
   const timers = new Set(), sockets = [], decoders = [], orientation = [], rtcReceivers = [];
   let resize;
   const animationFrames = [];
@@ -107,6 +107,7 @@ function receiver(t, { portrait = false, lockFails = false, webRtc = false, webC
     }
   }
   const window = new Target(); window.isSecureContext = true;
+  if (scrollStorage !== undefined) window.localStorage = scrollStorage;
   if (webAudio) window.AudioDecoder = SoundDecoder;
   if (visualHeight) { window.visualViewport = new Target(); window.visualViewport.height = visualHeight; }
   if (webCodecs) { window.VideoDecoder = Decoder; window.EncodedVideoChunk = true; }
@@ -135,6 +136,9 @@ function receiver(t, { portrait = false, lockFails = false, webRtc = false, webC
     setInterval: (fn, ms) => { const timer = setInterval(fn, ms); timers.add(timer); return timer; }, clearInterval,
   });
   vm.runInContext(source, context, { filename: 'receiver.mjs' });
+  // Keep existing coordinate tests at their explicit 1× baseline; null exercises
+  // the product default. This uses the same setting event as the actual range.
+  if (touchScrollSpeed !== null) { $('touch-scroll-speed').value = String(touchScrollSpeed); $('touch-scroll-speed').emit('input'); }
   t.after(() => { for (const timer of timers) clearTimeout(timer); });
   if (!qrKey) { $('session-key').value = 'x'.repeat(32); $('join-form').emit('submit'); }
   const socket = sockets[0]; socket.emit('open');
@@ -300,6 +304,89 @@ test('two-finger scroll emits no touch-down and never clicks with the remaining 
   pointer(h, 'pointerup', 2, 200, 160); pointer(h, 'pointermove', 1, 100, 120); pointer(h, 'pointerup', 1, 100, 120);
   assert.equal(inputs(h).length, 2); assert.ok(inputs(h).every((data) => data[0] === 7));
   assert.equal(inputs(h).reduce((sum, data) => sum + data.readInt32BE(17), 0), 40);
+  h.$('disconnect').emit('click');
+});
+
+test('fractional two-finger scroll retains small movements in both directions', (t) => {
+  for (const direction of [-1, 1]) {
+    const h = receiver(t);
+    h.$('touch-scroll-speed').value = '1'; h.$('touch-scroll-speed').emit('input');
+    h.$('trackpad-mode').emit('click');
+    pointer(h, 'pointerdown', 1, 100, 200); pointer(h, 'pointerdown', 2, 200, 200);
+    for (let i = 1; i <= 8; i++) {
+      pointer(h, 'pointermove', 1, 100, 200 - direction * i / 4);
+      pointer(h, 'pointermove', 2, 200, 200 - direction * i / 4);
+    }
+    pointer(h, 'pointerup', 2, 200, 200 - direction * 2);
+    pointer(h, 'pointerup', 1, 100, 200 - direction * 2);
+    const scrolls = inputs(h).filter(p => p[0] === 7);
+    assert.equal(scrolls.reduce((sum, p) => sum + p.readInt32BE(17), 0), direction * 2);
+    assert.ok(scrolls.every(p => validBrowserInput(p, 640, 480)));
+    h.$('disconnect').emit('click');
+  }
+});
+
+test('fractional direct-touch scrolling retains movement after the drag threshold', (t) => {
+  const h = receiver(t);
+  h.$('touch-scroll-speed').value = '1'; h.$('touch-scroll-speed').emit('input');
+  pointer(h, 'pointerdown', 1, 200, 200); pointer(h, 'pointermove', 1, 200, 190);
+  for (let i = 1; i <= 8; i++) pointer(h, 'pointermove', 1, 200, 190 - i / 4);
+  pointer(h, 'pointerup', 1, 200, 188);
+  assert.equal(inputs(h).filter(p => p[0] === 7).reduce((sum, p) => sum + p.readInt32BE(17), 0), 12);
+  h.$('disconnect').emit('click');
+});
+
+test('touch scrolling defaults to 2× and accepts bounded live adjustments without changing the mouse wheel', t => {
+  const h = receiver(t, { touchScrollSpeed: null });
+  assert.equal(h.$('touch-scroll-speed').value, '2');
+  assert.equal(h.$('touch-scroll-speed').attrs.get('aria-valuetext'), '2 times');
+  const swipe = id => {
+    const before = inputs(h).length;
+    pointer(h, 'pointerdown', id, 200, 200); pointer(h, 'pointermove', id, 200, 160); pointer(h, 'pointerup', id, 200, 160);
+    return inputs(h).slice(before).filter(p => p[0] === 7).reduce((sum, p) => sum + p.readInt32BE(17), 0);
+  };
+  assert.equal(swipe(1), 80);
+  h.$('touch-scroll-speed').value = '1.5'; h.$('touch-scroll-speed').emit('input');
+  assert.equal(h.$('touch-scroll-speed-value').textContent, '1.5×'); assert.equal(swipe(2), 60);
+  for (const invalid of ['0', '9', '1.3', 'Infinity', 'bad']) {
+    h.$('touch-scroll-speed').value = invalid; h.$('touch-scroll-speed').emit('input');
+    assert.equal(h.$('touch-scroll-speed').value, '1.5');
+  }
+  h.$('touch-scroll-speed').value = '8'; h.$('touch-scroll-speed').emit('input');
+  assert.equal(swipe(4), 120, 'High sensitivity retains the existing packet bound');
+  assert.equal(inputs(h).some(p => p[0] === 7 && Math.abs(p.readInt32BE(17)) > 120), false);
+  const before = inputs(h).length;
+  h.$('display').emit('wheel', { clientX: 200, clientY: 200, deltaX: 0, deltaY: 40, deltaMode: 0 });
+  assert.equal(inputs(h).slice(before).at(-1).readInt32BE(17), 40);
+  h.$('touch').emit('click'); const count = inputs(h).length; swipe(3);
+  assert.equal(inputs(h).length, count);
+  h.$('disconnect').emit('click');
+});
+
+test('explicit scroll speed is restored locally; malformed or denied storage keeps scrolling usable', t => {
+  const values = new Map(); const storage = { getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value) };
+  const first = receiver(t, { touchScrollSpeed: null, scrollStorage: storage });
+  assert.equal(values.has('dskcpy.touch-scroll-speed.v1'), false);
+  first.$('touch-scroll-speed').value = '3'; first.$('touch-scroll-speed').emit('input');
+  assert.equal(values.get('dskcpy.touch-scroll-speed.v1'), '3'); first.$('disconnect').emit('click');
+  const second = receiver(t, { touchScrollSpeed: null, scrollStorage: storage });
+  assert.equal(second.$('touch-scroll-speed').value, '3'); second.$('disconnect').emit('click');
+  values.set('dskcpy.touch-scroll-speed.v1', 'unusable');
+  const malformed = receiver(t, { touchScrollSpeed: null, scrollStorage: storage });
+  assert.equal(malformed.$('touch-scroll-speed').value, '2'); malformed.$('disconnect').emit('click');
+  const denied = receiver(t, { touchScrollSpeed: null, scrollStorage: { getItem() { throw Error('Denied'); }, setItem() { throw Error('Denied'); } } });
+  denied.$('touch-scroll-speed').value = '1.5'; assert.doesNotThrow(() => denied.$('touch-scroll-speed').emit('input'));
+  assert.equal(denied.$('touch-scroll-speed').value, '1.5'); denied.$('disconnect').emit('click');
+});
+
+test('scroll residue is discarded on controller pause instead of leaking into the next gesture', t => {
+  const h = receiver(t); h.$('trackpad-mode').emit('click');
+  const gesture = (id, distance) => {
+    pointer(h, 'pointerdown', id, 100, 200); pointer(h, 'pointerdown', id + 1, 200, 200);
+    pointer(h, 'pointermove', id, 100, 200 - distance); pointer(h, 'pointermove', id + 1, 200, 200 - distance);
+  };
+  gesture(1, .75); h.$('pause').emit('click'); h.$('pause').emit('click'); gesture(3, .25);
+  assert.equal(inputs(h).filter(p => p[0] === 7).reduce((sum, p) => sum + p.readInt32BE(17), 0), 0);
   h.$('disconnect').emit('click');
 });
 

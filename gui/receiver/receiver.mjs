@@ -5,7 +5,7 @@ import { createDesktopView } from './view.mjs';
 import { createTypingView } from './typing-view.mjs';
 import { createRelativeTrackpad } from './trackpad.mjs';
 import { receiverIsAway } from './lifecycle.mjs';
-import { BROWSER_RESUME_MS, MEDIA_FALLBACK_PROTOCOL, focusGeometry, avcCodec, avcParameters, touchPacket, scrollPacket, takeDecodedTimestamps, fitDisplay, createMediaAcknowledger, needsControlsRow, parseJoinFragment } from './protocol.mjs';
+import { BROWSER_RESUME_MS, MEDIA_FALLBACK_PROTOCOL, focusGeometry, createTouchScroll, avcCodec, avcParameters, touchPacket, scrollPacket, takeDecodedTimestamps, fitDisplay, createMediaAcknowledger, needsControlsRow, parseJoinFragment } from './protocol.mjs';
 import { createRtcReceiver } from './rtc.mjs';
 import { createVideoReceiver } from './video.mjs';
 import { createVideoFeedback } from './video-feedback.mjs';
@@ -146,6 +146,30 @@ const windowChooser = windowChooserPresent ? createWindowChooser({document,trigg
 let openControlTray = null;
 const viewNavigationActive = () => viewPresent && openControlTray === 'view';
 let selectDrag = false, touchGesture = null, trackpadMode = false;
+const scrollSpeedControl = $('touch-scroll-speed'), scrollSpeedReadout = $('touch-scroll-speed-value');
+const scrollSpeedKey = 'dskcpy.touch-scroll-speed.v1';
+const validScrollSpeed = value => Number.isFinite(value) && value >= .5 && value <= 8 && Number.isInteger(value * 4);
+let touchScrollGain = scrollSpeedControl ? 2 : 1;
+try {
+  const saved = Number(window.localStorage?.getItem(scrollSpeedKey));
+  if (scrollSpeedControl && validScrollSpeed(saved)) touchScrollGain = saved;
+} catch { /* Storage may be unavailable; finger scrolling still works. */ }
+const directFingerScroll = createTouchScroll({ gain: () => touchScrollGain });
+function paintScrollSpeed() {
+  if (!scrollSpeedControl) return;
+  scrollSpeedControl.value = String(touchScrollGain);
+  scrollSpeedControl.setAttribute('aria-valuetext', `${touchScrollGain} times`);
+  if (scrollSpeedReadout) scrollSpeedReadout.textContent = `${touchScrollGain}×`;
+}
+paintScrollSpeed();
+scrollSpeedControl?.addEventListener('input', () => {
+  const value = Number(scrollSpeedControl.value);
+  if (validScrollSpeed(value)) {
+    touchScrollGain = value; directFingerScroll.reset(); trackpad.resetScroll();
+    try { window.localStorage?.setItem(scrollSpeedKey, String(value)); } catch { /* Session choice remains usable. */ }
+  }
+  paintScrollSpeed();
+});
 const trackpadPresent = ['trackpad-mode', 'trackpad-cursor', 'trackpad-help'].every(id => $(id));
 let trackMoveTimer, pendingTrackMove;
 function canSendPointer() {
@@ -175,7 +199,7 @@ function trackpadPacket(p) {
 const trackpad = createRelativeTrackpad({ geometry: () => {
   const rect = canvas.getBoundingClientRect();
   return { width: canvas.width, height: canvas.height, cssWidth: rect.width, cssHeight: rect.height };
-}, emit: trackpadPacket, changed: paintTrackpad });
+}, emit: trackpadPacket, changed: paintTrackpad, scrollGain: () => touchScrollGain });
 function paintTrackpad() {
   if (!trackpadPresent) return;
   $('trackpad-mode').disabled = !canSendPointer(); $('trackpad-mode').hidden = viewOnly;
@@ -413,6 +437,7 @@ function audioUnavailable() {
   $('error').textContent = 'Opus audio is unavailable in this browser. Video can continue.';
 }
 function releaseTouches(includeKeyboard = true) {
+  directFingerScroll.reset();
   desktopView.cancel();
   trackpad.release();
   clearTimeout(trackMoveTimer); trackMoveTimer = null; pendingTrackMove = null;
@@ -966,9 +991,11 @@ canvas.addEventListener('pointerdown', (event) => {
   if (p.touch) {
     const center = touchCenter();
     if (center.count === 1) {
+      directFingerScroll.reset();
       touchGesture = { start: center, last: center, scrolling: false, multiple: false };
       if (selectDrag) sendContact(p, 0);
     } else {
+      directFingerScroll.reset();
       cancelSentTouches();
       touchGesture.multiple = true; touchGesture.scrolling = true; touchGesture.last = center;
     }
@@ -987,8 +1014,8 @@ canvas.addEventListener('pointermove', (event) => {
   if (p.sent && !touchGesture.multiple) { sendContact(p, 2); return; }
   if (!touchGesture.scrolling && Math.hypot(center.clientX - touchGesture.start.clientX, center.clientY - touchGesture.start.clientY) < 8) return;
   touchGesture.scrolling = true;
-  send(scrollPacket(center.x, center.y, canvas.width, canvas.height,
-    touchGesture.last.clientX - center.clientX, touchGesture.last.clientY - center.clientY));
+  const delta = directFingerScroll.move(touchGesture.last.clientX - center.clientX, touchGesture.last.clientY - center.clientY);
+  if (delta) send(scrollPacket(center.x, center.y, canvas.width, canvas.height, delta.dx, delta.dy));
   touchGesture.last = center;
 });
 for (const [name, actionCode] of [['pointerup', 1], ['pointercancel', 3], ['lostpointercapture', 3]]) {
@@ -1002,6 +1029,7 @@ for (const [name, actionCode] of [['pointerup', 1], ['pointercancel', 3], ['lost
       sendContact(p, 0); sendContact(p, 1);
     }
     pointers.delete(event.pointerId);
+    if (p.touch) directFingerScroll.reset();
     if (!touchCenter().count) touchGesture = null;
   });
 }

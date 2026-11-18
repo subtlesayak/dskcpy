@@ -26,6 +26,7 @@ async function fixture(t, options = {}) {
     native = net.connect(bridge.port, '127.0.0.1');
     native.on('error', () => {});
     await once(native, 'connect');
+    if (options.nativeHeaderDelayMs) await new Promise(resolve => setTimeout(resolve, options.nativeHeaderDelayMs));
     native.write(options.headers?.[calls-1] || header);
   }, ...options });
   t.after(async () => { native?.destroy(); await receiver.shutdown(); });
@@ -147,12 +148,14 @@ test('legacy in-band PPS completes the cached configuration for a replacement RT
 
 test('fresh native codec parameters reach the existing RTC sender without releasing input or audio', async t => {
  const updates=[],frames=[];
- const f=await fixture(t,{inputPolicy:{keyboard:true},rtcMediaFactory:()=>({
+ const f=await fixture(t,{nativeHeaderDelayMs:25,inputPolicy:{keyboard:true},rtcMediaFactory:()=>({
   offer:async()=>({type:'offer',sdp:'synthetic'}),answer:async()=>{},close:async()=>{},
   configure:bytes=>updates.push(Buffer.from(bytes)),frame:async(...args)=>frames.push(args),sound:async()=>{},
  })});
  const ws=await f.open(undefined,undefined,'stream/webrtc');ws.send(f.invitation.key);
- await until(()=>f.calls()===1);
+ // A started connect is not a parsed SRD header. Keep codec bytes behind the
+ // fake native header even when the transport's connect callback is delayed.
+ await until(()=>ws.received.some(message=>message.binary&&message.data.equals(header)));
  const first=Buffer.from('000000016742c01e0102030000000168ce3c80','hex');
  f.native().write(packet(0,1,first));await until(()=>ws.received.some(m=>!m.binary&&JSON.parse(m.data).type==='rtc-offer'));
  const chunks=[];f.native().on('data',b=>chunks.push(b));

@@ -1,7 +1,9 @@
+import { createTouchScroll } from './protocol.mjs';
 // Relative gestures over a fitted video surface. Only local coordinates live
 // here; authentication, lifecycle gating and transport belong to the receiver.
-export function createRelativeTrackpad({ geometry, emit, changed = () => {}, now = () => performance.now() }) {
+export function createRelativeTrackpad({ geometry, emit, changed = () => {}, now = () => performance.now(), scrollGain = () => 1 }) {
   let x = .5, y = .5, dragging = false, gesture = null;
+  const fingerScroll = createTouchScroll({ gain: scrollGain });
   const points = new Map();
   const bounds = () => {
     const g = geometry();
@@ -13,6 +15,7 @@ export function createRelativeTrackpad({ geometry, emit, changed = () => {}, now
   };
   const output = (type, extra = {}) => { const p = position(); return p ? emit({ type, ...p, ...extra }) !== false : false; };
   function release() {
+    fingerScroll.reset();
     if (dragging) output('cancel');
     dragging = false; points.clear(); gesture = null; changed();
   }
@@ -33,6 +36,7 @@ export function createRelativeTrackpad({ geometry, emit, changed = () => {}, now
   };
   return {
     position, move, click, release,
+    resetScroll: () => fingerScroll.reset(),
     hasPointer(id) { return points.has(id); },
     reset() { release(); x = y = .5; changed(); },
     get dragging() { return dragging; },
@@ -44,6 +48,7 @@ export function createRelativeTrackpad({ geometry, emit, changed = () => {}, now
     down({ pointerId, clientX, clientY }) {
       if (!bounds() || ![clientX, clientY].every(Number.isFinite) || points.has(pointerId)) return;
       if (points.size >= 2) { release(); return; }
+      fingerScroll.reset();
       points.set(pointerId, { x: clientX, y: clientY });
       if (points.size === 1) gesture = { x: clientX, y: clientY, at: now(), moved: false, multiple: false, wasDragging: dragging };
       else {
@@ -60,7 +65,8 @@ export function createRelativeTrackpad({ geometry, emit, changed = () => {}, now
       if (gesture.multiple) {
         if (points.size !== 2) return;
         const c = center();
-        output('scroll', { dx: gesture.last.x - c.x, dy: gesture.last.y - c.y });
+        const delta = fingerScroll.move(gesture.last.x - c.x, gesture.last.y - c.y);
+        if (delta) output('scroll', delta);
         gesture.last = c; return;
       }
       if (Math.hypot(clientX - gesture.x, clientY - gesture.y) >= 8) gesture.moved = true;
@@ -68,6 +74,7 @@ export function createRelativeTrackpad({ geometry, emit, changed = () => {}, now
     },
     up({ pointerId }) {
       if (!points.has(pointerId)) return;
+      fingerScroll.reset();
       points.delete(pointerId);
       if (points.size) return;
       const tap = gesture && !gesture.multiple && !gesture.moved && !gesture.wasDragging && now() - gesture.at <= 500;
