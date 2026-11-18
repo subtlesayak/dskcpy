@@ -8,18 +8,24 @@ the behavior it actually exercised.
 
 ## Merged implementation baseline
 
-The merged implementation baseline is
-[`d3822b42`](https://github.com/subtlesayak/dskcpy/commit/d3822b4202429a10757710a7ac4e34e0f4e90e90),
-which includes all eight PRs **#45 and #47–#53** above `ab2c2f93` and the earlier
-#16–#44 baseline. It has the same tree as the reviewed `cd9ae1e1` candidate,
-including the original cumulative-acknowledgement fix `30d55b66`.
-Documentation-only updates may postdate this commit.
+The paired-computer implementation review checkpoint is `dd361a2e`, integrating
+the three paired-only handoff commits through `f588240d` above documentation
+baseline `e2fa022a`. It adds host approval for every new paired stream, verified
+host identity and a multi-computer browser directory, plus the reviewed pending
+request reload/cancellation fix. Documentation-only commits may postdate it.
+
+The earlier core baseline
+[`d3822b42`](https://github.com/subtlesayak/dskcpy/commit/d3822b4202429a10757710a7ac4e34e0f4e90e90)
+contains all eight PRs **#45 and #47–#53**, including the original cumulative
+acknowledgement fix `30d55b66`. Native and Android receiver code are unchanged by
+the paired-computer review.
 Merging source does not install a new app, replace an active receiver or
 qualify physical hardware.
 
 | Area | Implemented changes |
 | --- | --- |
 | Guided host and access | The [desktop app prototype](../desktop/README.md) guides Android USB and private-network setup. Actual native Mac input-permission status is shown separately from shell readiness. Owned-service setup/Quit is serialized, with an atomic idle-retirement veto for active sharing. Remembered access and account-free USB/LAN paths remain available. |
+| Paired computers | A saved browser can request a new stream; the host must explicitly Allow or Deny each one. Persistent verified host identity supports a local multi-computer directory, rename, signed address checks and selective Forget. An address change requires pairing again. Directory reload/cancellation recovery does not renew approval or stop an established stream. See [pairing and consent](remembered-browsers.md). |
 | Browser input | Matching Mac and [Windows hosts](windows-browser-keyboard.md) support opt-in desktop keyboard and committed text. [Trackpad](browser-trackpad.md), [local zoom](browser-view-zoom.md) and [shortcut buttons](browser-shortcuts.md) are implemented. [Text clipboard transfer](browser-clipboard.md) requires separate invitation permission and current-viewer opt-in; remembered access excludes it. |
 | Recovery and video quality | Classified Mac display/sleep recovery, receiver audio-intent restoration, [negotiated media fallback](browser-media-recovery.md), bounded codec parameter updates and duplicate-Resume input protection are implemented. [Adaptive video](adaptive-browser-video.md), checked [Windows encoder replacement](windows-adaptive-video.md) and local video preferences remain subject to driver/device qualification. |
 | Mac windows | The owner can approve [two to eight windows](browser-window-switching.md) for temporary receiver switching. Previews stay in receiver memory. Control remains off. Optional [application audio](browser-window-audio.md) is off by default, covers the selected window's entire application and requires explicit consent; it never falls back to desktop or microphone audio. |
@@ -37,7 +43,37 @@ cannot make a differently signed APK a compatible update.
 
 ## Automated verification
 
-The final 18 November combined review passes **549 Node tests**, with seven
+### Paired-computer review
+
+The reviewed integration passes **556 Node tests**, with seven optional skips
+and the unchanged native log-pipe fixture enabled. Both UI builds pass. The
+actual two-host HTTPS/WSS fixture passes in Chromium and WebKit, including
+browser restart, wrong-binding denial, pending reload/cancel, unresponsive-tab
+timeout, host denial/approval, same-session reload, signed address changes and
+selective Forget. Offline directory-origin selection is tested in Chromium;
+WebKit runs that directory online. Sixteen broker tests cover approval and
+identity boundaries, including cancellation/expiry during awaited preparation,
+single-use approval and protection of established streams from stale cancellation.
+
+The pending-reload cancellation regression timed out before the review fix and
+passes afterward. The first repair also exposed an early cancellation result;
+the final fix recovers only the owning browser's pending request ID and awaits
+the host acknowledgement. These are disposable profiles, fake capture and
+fixture-only certificate exceptions; no live app, device or system trust changed.
+A separate fault test drops the first authentication reply after host approval.
+Before the final fix, reload left the receiver on the join page; both engines
+now resume the same capture without a new approval. This simulated fault does
+not establish the cause of the earlier physical Home/return failure.
+CI also exposed a codec-fixture ordering race: two tests could send media before
+the fake native header. A controlled 25 ms header delay reproduces the failures;
+waiting for the parsed header fixes them without altering codec assertions,
+timeouts or production media code.
+Hosted checks must be matched to the exact paired review head. Core native,
+Android and package results below are separately identified baseline evidence.
+
+### Earlier core platform qualification
+
+The final 18 November core review passes **549 Node tests**, with seven
 optional skips and the built native log-pipe fixture enabled. Both UI builds
 pass. Local Apple-silicon and hosted Intel builds each pass **34 native tests**
 in every normal, ASan/UBSan and pinned configuration.
@@ -126,9 +162,9 @@ does not control the system keyboard's position or replace its IME.
 
 ## Unmerged follow-ups
 
-Development installer images, paired-computer navigation/identity, host approval
-for each new stream and Gaming mode are separate ongoing work. They are not
-capabilities or qualified releases of the merged baseline above. Their remaining
+Development installer images, additional browser recovery changes and Gaming
+mode are separate ongoing work. They are not capabilities or qualified releases
+of the paired-computer baseline above. Their remaining
 implementation and physical checks stay on the [roadmap](roadmap.md).
 
 ## Candidate-specific physical evidence
@@ -152,6 +188,16 @@ over a private VPN across different networks/mobile data. Two-finger scrolling
 moved immediately but too little distance; sensitivity is under separate
 investigation. This is not a measured latency result. New-layout readability,
 focused AX geometry and audible application audio are not qualified by that report.
+
+### Separately approved paired-browser installation
+
+The installed `7a7a5914` derivative received a human report of an approved paired
+join with Android Edge over Wi-Fi through a private Tailscale connection. A
+repeat Home/return resumed the same paired stream. An earlier Home/return
+showed the connection-code page; its exact cause remains unconfirmed. This is
+candidate-specific picture/session evidence, not an audio or measured latency
+result. The new pending-request reload/cancellation fix was not installed or
+physically tested by this review.
 
 ### Earlier USB browser audio and input candidate
 

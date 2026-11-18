@@ -38,6 +38,9 @@ Mac hosting candidate, see [Build identity and compatible upgrades](doc/artifact
   the session; stopping ends it.
 - **Browser receiving:** authenticated WebRTC H.264/Opus and one-use QR
   invitations, plus a WebCodecs path for Android USB browser tunnels.
+- **Paired computers:** save verified hosts in this browser and
+  [request each new stream](doc/remembered-browsers.md) without a new QR code.
+  The host must choose Allow; pairing does not grant unattended streaming.
 - **Mac window sharing:** select one window, or explicitly approve a small
   [window-switching list](doc/browser-window-switching.md). Sharing stays view-only.
   Audio starts off; optional [application audio](doc/browser-window-audio.md)

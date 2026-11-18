@@ -27,6 +27,12 @@ const assets = new Map([
   ['/video-preference.mjs', ['video-preference.mjs', 'text/javascript; charset=utf-8']],
   ['/protocol.mjs', ['protocol.mjs', 'text/javascript; charset=utf-8']],
   ['/remembered.mjs', ['remembered.mjs', 'text/javascript; charset=utf-8']],
+  ['/computer-link.mjs', ['computer-link.mjs', 'text/javascript; charset=utf-8']],
+  ['/computers-common.mjs', ['computers-common.mjs', 'text/javascript; charset=utf-8']],
+  ['/computers/', ['computers.html', 'text/html; charset=utf-8']],
+  ['/computers/computers.mjs', ['computers.mjs', 'text/javascript; charset=utf-8']],
+  ['/computers/computers-common.mjs', ['computers-common.mjs', 'text/javascript; charset=utf-8']],
+  ['/computers/computers-sw.mjs', ['computers-sw.mjs', 'text/javascript; charset=utf-8']],
   ['/lifecycle.mjs', ['lifecycle.mjs', 'text/javascript; charset=utf-8']],
   ['/receiver.css', ['receiver.css', 'text/css; charset=utf-8']],
   ['/controller', ['controller.html', 'text/html; charset=utf-8']],
@@ -50,7 +56,9 @@ export function receiverOrigin(value) {
 export function createBrowserReceiver({ configuredPort = 27180, origin,
   tls, rtcBind = '127.0.0.1', onConnect, onChange = () => {}, invitationMs = 300000, authMs = 5000,
   resumeMs = BROWSER_RESUME_MS, lifetimeMs = 12 * 60 * 60 * 1000, nativeEndGraceMs = 15000, rtcMediaFactory, trustedDevices, onTrustedConnect, onRetireWindow,
-  presentationControl = false, controllerInvitationMs = 300000 } = {}) {
+  presentationControl = false, controllerInvitationMs = 300000, connectionRequestMs = 60000 } = {}) {
+  if (!Number.isSafeInteger(connectionRequestMs) || connectionRequestMs < 1 || connectionRequestMs > 120000)
+    throw Error('Invalid connection approval lifetime.');
   if (presentationControl === true && (!Number.isInteger(controllerInvitationMs) || controllerInvitationMs < 1 || controllerInvitationMs > 300000))
     throw Error('Controller invitation lifetime must be between one millisecond and five minutes.');
   const remoteOrigin = receiverOrigin(origin);
@@ -63,7 +71,8 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
   let session = null;
   let controllerGrant = null, controllerExpiry;
   let expiresAt = null;
-  let trustedTicket = null, enrollment = null, trustedConnecting = false, accessGeneration = 0;
+  let trustedTicket = null, enrollment = null, connectionRequest = null, trustedConnecting = false;
+  const revoking = new Set();
   let rememberProfile = null;
   const deviceCookie = 'dskcpy_device_v1';
   let inputPolicy = { keyboard: false, viewOnly: false };
@@ -114,12 +123,21 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
 
   const cookieValue = req => (req.headers.cookie || '').split(';').map(p => p.trim())
     .find(p => p.startsWith(`${deviceCookie}=`))?.slice(deviceCookie.length + 1);
+  const matchesTicketDevice = (req, ticket) => trustedDevices?.find(cookieValue(req), ticket.origin)?.id === ticket.id;
   const sameOrigin = req => req.headers.origin === remoteOrigin
     && req.headers.host === new URL(remoteOrigin).host && req.headers['sec-fetch-site'] !== 'cross-site';
   const enrollmentActive = () => enrollment && enrollment.expiresAt > Date.now() && enrollment.source === session;
+  const requestOpen = (request = connectionRequest) => request && request.expiresAt > Date.now()
+    && ['pending', 'allowed', 'claiming', 'issued'].includes(request.status)
+    && !revoking.has(request.device.id)
+    && trustedDevices?.allowed(request.device.id, request.device.digest);
   function trustedStatus() {
+    const request = connectionRequest;
     return { ...(trustedDevices?.snapshot() || { available: false, paused: true, devices: [] }),
-      pending: enrollmentActive() ? [{ id: enrollment.id, name: enrollment.name, expiresAt: enrollment.expiresAt }] : [] };
+      pending: enrollmentActive() ? [{ id: enrollment.id, name: enrollment.name, expiresAt: enrollment.expiresAt }] : [],
+      streamRequest: requestOpen(request) && request.status === 'pending'
+        ? { id: request.id, name: request.device.name, expiresAt: request.expiresAt, permissions: ['view', 'audio', 'control'] }
+        : null };
   }
   async function trustAction(action, id) {
     await trustedDevices?.ready;
@@ -133,12 +151,20 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
       if (enrollment === pending) enrollment = null;
     } else if (action === 'reject') {
       if (enrollment?.id === id) enrollment = null;
+    } else if (action === 'allow-stream' || action === 'deny-stream') {
+      const request = connectionRequest;
+      if (!requestOpen(request) || request.id !== id || request.status !== 'pending') throw Error('This connection request expired. Ask the device to try again.');
+      if (action === 'allow-stream' && (invitation || session)) throw Error('The host already has an invitation or session.');
+      request.status = action === 'allow-stream' ? 'allowed' : 'denied';
     } else if (action === 'revoke') {
-      accessGeneration++;
+      if (revoking.has(id)) return trustedStatus();
+      revoking.add(id);
+      if (connectionRequest?.device.id === id) connectionRequest = null;
       if (trustedTicket?.id === id || session?.deviceId === id) cancel();
-      await trustedDevices.revoke(id);
+      try { await trustedDevices.revoke(id); }
+      finally { revoking.delete(id); }
     } else if (action === 'pause') {
-      accessGeneration++; trustedDevices.block(); cancel(); await trustedDevices.pause(true);
+      trustedDevices.block(); cancel(); await trustedDevices.pause(true);
     } else if (action === 'resume') {
       await trustedDevices.pause(false); await ensureListening('internet');
     } else throw new Error('Unknown device action.');
@@ -171,25 +197,65 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
         const token = cookieValue(req), digest = token && deviceDigest(token);
         const pending = enrollmentActive() && enrollment.digest === digest;
         const device = trustedDevices.find(token, remoteOrigin, true);
-        json(200, { status: pending ? 'pending' : device ? 'approved' : 'unavailable', paused: trustedDevices.snapshot().paused }); return;
+        const hostIdentity = device && await trustedDevices.ensureIdentity();
+        const busy = device && Boolean(trustedConnecting || invitation || session || (requestOpen() && connectionRequest.device.id !== device.id));
+        // Only the paired browser that owns this pending request may recover
+        // its id after a tab reload. This identifier grants no stream access.
+        const ownRequest = device && requestOpen() && connectionRequest.device.id === device.id
+          && connectionRequest.device.digest === device.digest;
+        json(200, { status: pending ? 'pending' : device ? 'approved' : 'unavailable', paused: trustedDevices.snapshot().paused,
+          streamApproval: true, requestId: ownRequest ? connectionRequest.id : null,
+          ...(device && { hostIdentity, pairingId: device.id, busy }) }); return;
       }
-      if (req.url !== '/stream/trusted/connect') { json(404, {}); return; }
+      if (req.url === '/stream/trusted/forget') {
+        const device = trustedDevices.find(cookieValue(req), remoteOrigin, true);
+        if (device) await trustAction('revoke', device.id);
+        res.setHeader('Set-Cookie', `${deviceCookie}=; HttpOnly; Secure; SameSite=Strict; Path=/stream; Max-Age=0`);
+        json(200, { status: 'forgotten' }); return;
+      }
       const device = trustedDevices.find(cookieValue(req), remoteOrigin);
-      if (!device) { json(403, { error: trustedDevices.snapshot().paused ? 'Remembered access is paused on the host.' : 'Pair this browser again using a new invitation.' }); return; }
+      if (!device || revoking.has(device.id)) { json(403, { error: trustedDevices.snapshot().paused ? 'Remembered access is paused on the host.' : 'Pair this browser again using a new invitation.' }); return; }
+      if (req.url === '/stream/trusted/connect') {
+        if (body.action !== 'request' || Object.keys(body).length !== 1) { json(400, { error: 'Request a new stream from an updated receiver.' }); return; }
+        if (trustedConnecting || invitation || session || (requestOpen() && connectionRequest.device.id !== device.id)) {
+          json(409, { error: 'The host is busy with another request, invitation or session.' }); return;
+        }
+        if (!requestOpen()) {
+          connectionRequest = { id: randomBytes(16).toString('hex'), device, expiresAt: Math.min(Date.now() + connectionRequestMs, device.expiresAt), status: 'pending' };
+          onChange();
+        }
+        json(202, { id: connectionRequest.id, status: connectionRequest.status, expiresAt: connectionRequest.expiresAt }); return;
+      }
+      const request = connectionRequest;
+      if (!request || body.id !== request.id || request.device.id !== device.id || request.device.digest !== device.digest || request.expiresAt <= Date.now()) {
+        json(200, { status: 'expired' }); return;
+      }
+      if (req.url === '/stream/trusted/cancel') {
+        if (trustedTicket?.requestId === request.id) cancel();
+        else { request.status = 'cancelled'; onChange(); }
+        json(200, { status: 'cancelled' }); return;
+      }
+      if (request.status !== 'allowed') { json(200, { status: request.status }); return; }
       if (trustedConnecting || invitation || session) { json(409, { error: 'The host already has an active connection or invitation. Try again when it is free.' }); return; }
       trustedConnecting = true;
-      const mine = accessGeneration;
+      request.status = 'claiming';
+      const grant = { ...device, requestId: request.id, requestExpiresAt: request.expiresAt,
+        isCurrent: () => !closed && connectionRequest === request && requestOpen(request) };
+      request.grant = grant;
       try {
         let result;
-        try { result = await onTrustedConnect(device); }
+        try { result = await onTrustedConnect(grant); }
         catch (error) {
-          if (error.code === 'HOST_BUSY') { json(409, { error: 'The previous session is still closing. Reconnecting shortly.' }); return; }
+          if (!grant.isCurrent()) { json(200, { status: 'cancelled' }); return; }
+          if (error.code === 'HOST_BUSY') { request.status = 'allowed'; json(409, { error: 'The previous session is still closing.' }); return; }
+          request.status = 'failed';
           throw new Error('The host could not start sharing. Check its capture permissions and connection.');
         }
-        if (mine !== accessGeneration || !trustedDevices.allowed(device.id, device.digest)) {
-          if (trustedTicket?.id === device.id) cancel();
-          throw new Error('Remembered access was paused or revoked.');
+        if (!grant.isCurrent()) {
+          if (trustedTicket?.requestId === request.id) cancel();
+          json(200, { status: 'cancelled' }); return;
         }
+        request.status = 'issued';
         json(201, { key: result.key });
       } finally { trustedConnecting = false; }
     } catch (error) { json(400, { error: error.message }); }
@@ -277,7 +343,7 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
     clearTimeout(expiryTimer);
     invitation?.fill(0);
     invitation = null;
-    trustedTicket = null; enrollment = null;
+    trustedTicket = null; enrollment = null; connectionRequest = null;
     expiresAt = null;
     session?.close();
     for (const socket of sockets) socket.terminate();
@@ -290,7 +356,8 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
     res.setHeader('Referrer-Policy', 'no-referrer');
     res.setHeader('X-Frame-Options', 'DENY');
     res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
-    res.setHeader('Content-Security-Policy', "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
+    const directory = req.url === '/computers/' || req.url === '/computers/computers-sw.mjs';
+    res.setHeader('Content-Security-Policy', `default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'${directory ? " https:; worker-src 'self'" : ''}; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`);
     // Public per-launch document paths prevent fragment-only reuse of stale
     // receiver scripts. They grant no access; authentication stays in /stream.
     const asset = assets.get(req.url)
@@ -302,7 +369,17 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
       res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ service: 'dskcpy-browser-receiver', instance: healthInstance }));
       return;
     }
-    if (['/stream/remember', '/stream/remember/status', '/stream/trusted/connect'].includes(req.url)) { await trustedRequest(req, res); return; }
+    const challenge = /^\/pairing-identity\?challenge=([a-f0-9]{64})$/.exec(req.url)?.[1];
+    if (challenge && req.method === 'GET' && remoteOrigin && req.headers.host === new URL(remoteOrigin).host) {
+      // Public proof of installation identity only. This route reads no
+      // cookies, exposes no browser enrollment or session state, and grants no access.
+      await trustedDevices?.ready;
+      const proof = trustedDevices?.proveIdentity?.(remoteOrigin, challenge);
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.writeHead(proof ? 200 : 404, { 'Content-Type': 'application/json' }).end(JSON.stringify(proof || {}));
+      return;
+    }
+    if (['/stream/remember', '/stream/remember/status', '/stream/trusted/connect', '/stream/trusted/status', '/stream/trusted/cancel', '/stream/trusted/forget'].includes(req.url)) { await trustedRequest(req, res); return; }
     if (['/stream/controller/invite', '/stream/controller/session', '/stream/controller/leave', '/stream/controller/stop', '/stream/controller/end-presentation'].includes(req.url)) {
       await controllerRequest(req, res); return;
     }
@@ -353,7 +430,7 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
     if (closed || !['/stream', '/stream/webrtc'].includes(req.url)
         || (resume && mediaMode !== session.mediaMode)
         || !allowedHost(req.headers.host) || !allowedOrigin(req.headers.origin)
-        || (!resume && trustedTicket && (req.headers.origin !== trustedTicket.origin
+        || (!resume && trustedTicket && (!matchesTicketDevice(req, trustedTicket) || req.headers.origin !== trustedTicket.origin
           || req.headers.host !== new URL(trustedTicket.origin).host))
         || (!resume && (!invitation || session || failures >= 10)) || sockets.size >= 4) {
       socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');
@@ -376,7 +453,7 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
         // Approval is a deadline, not just permission to start another full
         // session. Its remaining time also bounds active media/controller life.
         const grantLifetimeMs = trustedTicket ? trustedTicket.expiresAt - Date.now() : lifetimeMs;
-        if (!accepted || session || (trustedTicket && (!trustedDevices.allowed(trustedTicket.id, trustedTicket.digest)
+        if (!accepted || session || (trustedTicket && (!trustedTicket.isCurrent() || !matchesTicketDevice(req, trustedTicket)
           || !Number.isSafeInteger(grantLifetimeMs) || grantLifetimeMs <= 0
           || req.headers.origin !== trustedTicket.origin || req.headers.host !== new URL(trustedTicket.origin).host))) {
           if (++failures >= 10) cancel();
@@ -386,7 +463,9 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
         invitation.fill(0); invitation = null;
         clearTimeout(expiryTimer); expiresAt = null;
         for (const other of sockets) if (other !== ws) other.terminate();
-        const deviceId = trustedTicket?.id; trustedTicket = null;
+        const deviceId = trustedTicket?.id;
+        if (trustedTicket) connectionRequest = null;
+        trustedTicket = null;
         const token = Buffer.from(req.resumeToken);
         const active = createBrowserSession({ socket: ws, onConnect, resumeMs, lifetimeMs: Math.min(lifetimeMs, grantLifetimeMs), nativeEndGraceMs, rtcMediaFactory,
           presentationControl: presentationControl === true,
@@ -442,7 +521,7 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
       throw Error('Window switching requires an explicitly selected view-only window session.');
     await ensureListening(connection);
     if (invitation || session) throw new Error('A browser session is already open. Stop it first.');
-    if (grant && !trustedDevices?.allowed(grant.id, grant.digest)) throw new Error('Remembered access was paused or revoked.');
+    if (closed || (grant && (connectionRequest?.grant !== grant || !grant.isCurrent()))) throw new Error('Connection approval is no longer available.');
     trustedTicket = grant;
     rememberProfile = policy.rememberProfile || null;
     mode = connection;
@@ -458,14 +537,14 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
     if (windowGroup) inputPolicy.windowGroup = windowGroup;
     invitation = randomBytes(24);
     failures = 0;
-    const duration = grant ? 15000 : invitationMs;
+    const duration = grant ? Math.min(15000, grant.requestExpiresAt - Date.now()) : invitationMs;
     expiresAt = new Date(Date.now() + duration).toISOString();
     expiryTimer = setTimeout(cancel, duration);
     onChange();
     return { key: invitation.toString('base64url'), ...status() };
   }
   async function shutdown() {
-    if (closed) return; closed = true; accessGeneration++;
+    if (closed) return; closed = true;
     cancel();
     await pendingCleanup;
     wss.close();

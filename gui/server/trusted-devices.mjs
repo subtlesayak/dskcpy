@@ -1,4 +1,4 @@
-import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, randomBytes, sign, timingSafeEqual } from 'node:crypto';
 import { mkdir, open, rename, rm } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import path from 'node:path';
@@ -20,10 +20,18 @@ function validEntry(d) {
     && Object.keys(d.profile).every(k => ['maxSize', 'maxFps', 'bitRateMbps'].includes(k))
     && Object.values(d.profile).every(v => Number.isFinite(v) && v > 0 && v <= 8192);
 }
-// Store only hashes of 256-bit browser credentials. No reusable plaintext
-// password/token, native paths, device addresses or one-use invitation is saved.
+function parseIdentity(encoded) {
+  if (typeof encoded !== 'string' || !/^[A-Za-z0-9_-]{100,200}$/.test(encoded)) throw Error('Invalid host identity.');
+  const privateKey = createPrivateKey({ key: Buffer.from(encoded, 'base64url'), format: 'der', type: 'pkcs8' });
+  if (privateKey.asymmetricKeyType !== 'ec' || privateKey.asymmetricKeyDetails?.namedCurve !== 'prime256v1') throw Error('Invalid host identity.');
+  const spki = createPublicKey(privateKey).export({ format: 'der', type: 'spki' });
+  return { privateKey, publicIdentity: { fingerprint: createHash('sha256').update(spki).digest('hex'), publicKey: spki.toString('base64url') } };
+}
+// Browser credentials are stored only as hashes. The separate private signing
+// key identifies this installation and cannot authorize a stream.
 export function createTrustedDevices({ filename, now = Date.now } = {}) {
   let data = { version: 1, paused: false, devices: [] }, failed = false, serial = Promise.resolve();
+  let identity;
   const ready = (async () => {
     if (!filename) return;
     let file;
@@ -36,6 +44,7 @@ export function createTrustedDevices({ filename, now = Date.now } = {}) {
           || loaded.devices.length > 20 || !loaded.devices.every(validEntry)
           || new Set(loaded.devices.map(d => d.id)).size !== loaded.devices.length
           || new Set(loaded.devices.map(d => d.digest)).size !== loaded.devices.length) throw new Error();
+      if (Object.hasOwn(loaded, 'hostKey')) identity = parseIdentity(loaded.hostKey);
       data = loaded;
     } catch (error) { if (error.code !== 'ENOENT') { failed = true; data.paused = true; } }
     finally { await file?.close(); }
@@ -66,7 +75,28 @@ export function createTrustedDevices({ filename, now = Date.now } = {}) {
     return { available: Boolean(filename) && !failed, paused: data.paused, storageError: failed,
       devices: data.devices.filter(d => d.expiresAt > now()).map(({ digest, profile, origin, ...publicDevice }) => publicDevice) };
   }
+  const hostIdentity = () => failed ? null : identity?.publicIdentity || null;
+  function ensureIdentity() {
+    if (hostIdentity()) return Promise.resolve(hostIdentity());
+    return mutate(async () => {
+      if (!identity) {
+        const { privateKey } = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+        data.hostKey = privateKey.export({ format: 'der', type: 'pkcs8' }).toString('base64url');
+        const candidate = parseIdentity(data.hostKey);
+        await save();
+        identity = candidate;
+      }
+      return hostIdentity();
+    });
+  }
   return { ready, snapshot, find,
+    ensureIdentity,
+    proveIdentity(origin, challenge) {
+      if (!hostIdentity()) return null;
+      const message = Buffer.from(JSON.stringify(['dskcpy-host-v1', origin, challenge]));
+      const signature = sign('sha256', message, { key: identity.privateKey, dsaEncoding: 'ieee-p1363' }).toString('base64url');
+      return { ...hostIdentity(), signature };
+    },
     enabled: id => !failed && !data.paused && data.devices.some(d => d.id === id && d.expiresAt > now()),
     allowed: (id, digest) => !failed && !data.paused && data.devices.some(d => d.id === id && d.digest === digest && d.expiresAt > now()),
     approve: d => mutate(async () => {

@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Paired computers · dskcpy</title>
+  <link rel="stylesheet" href="/receiver.css">
+  <script type="module" src="/computers/computers.mjs"></script>
+</head>
+<body>
+  <main>
+    <section id="join-panel" aria-labelledby="directory-title">
+      <a class="brand" href="/">dskcpy</a>
+      <h1 id="directory-title">Paired computers</h1>
+      <div class="paired-actions">
+        <button id="check-computers" type="button" hidden>Check reachability</button>
+        <button id="cancel-directory-request" type="button" hidden>Cancel request</button>
+      </div>
+      <p id="directory-status" role="status"></p>
+      <p id="empty-computers">Add a computer using its receiver link.</p>
+      <ul id="paired-computers" aria-label="Saved computers"></ul>
+      <form id="add-computer">
+        <label for="computer-url">Computer address or invitation link</label>
+        <input id="computer-url" name="address" type="url" inputmode="url" autocomplete="off" spellcheck="false" required aria-describedby="add-help add-error" maxlength="512">
+        <p id="add-help" class="subtle">Open the receiver, pair this browser and save the computer to this list.</p>
+        <p id="add-error" role="status"></p>
+        <button type="submit">Add computer</button>
+      </form>
+      <dialog id="edit-computer" aria-labelledby="edit-title">
+        <form id="edit-computer-form">
+          <h2 id="edit-title"></h2>
+          <label id="edit-label" for="edit-value"></label>
+          <input id="edit-value" name="value" autocomplete="off" required aria-describedby="edit-error">
+          <p id="edit-error" role="status"></p>
+          <div class="paired-actions"><button type="submit">Save</button><button id="cancel-edit" type="button">Cancel</button></div>
+        </form>
+      </dialog>
+    </section>
+  </main>
+</body>
+</html>

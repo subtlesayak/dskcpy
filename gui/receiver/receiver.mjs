@@ -33,7 +33,21 @@ const rtcDisplay = $('rtc-display');
 let presentationUI = null, presentationRole = false, presentationCapable = false;
 const away = () => receiverIsAway({ hidden: document.hidden, pictureInPictureElement: document.pictureInPictureElement, video: rtcDisplay, presentationMode: rtcDisplay.webkitPresentationMode,
   presentationPlayback: presentationRole && presentationUI?.backgroundPlayback === true });
-const remembered = rememberedBrowser({ reconnect: () => { resumeAllowed = true; void resumeSession(); } });
+const remembered = rememberedBrowser({ canRequest: () => !ws && supported, canClaim: () => !away(), connectApproved(key) {
+  if (away() || ws || !supported) return false;
+  // The host has approved this request. Retire the new-tab guard before the
+  // handshake so a lost authentication reply cannot strand the already
+  // approved capture on reload. The cookie still grants only session resume.
+  if (window.opener && location.hash === '#directory-access')
+    window.history.replaceState(null, '', `${location.pathname}${location.search}`);
+  resumeAllowed = true; sessionExpected = false; resumeDeadline = 0;
+  $('error').textContent = ''; connect(key); return true;
+} });
+if (location.protocol === 'https:') {
+  const computers = $('computers-link');
+  if (computers) computers.hidden = false;
+  if (window.opener) void import('./computer-link.mjs').then(({ linkComputerDirectory }) => linkComputerDirectory(remembered)).catch(() => {});
+}
 let rtcReceiver, mediaMode = 'webcodecs';
 let pointerButtonsSupported = false;
 let keyboardSupported = false, keyboardOpen = false, viewOnly = false, windowAudioAllowed = false, windowAudioUnavailable = false;
@@ -119,7 +133,7 @@ const pointers = new Map();
 const pendingAudioAcks = [];
 let generation = 0;
 let sessionExpected = false, retryTimer, connectionTimer, resumeDeadline = 0, probing = false;
-let resumeAllowed = true;
+let resumeAllowed = !(window.opener && location.hash === '#directory-access');
 let audioGeneration = 0, fullscreenAttempt = 0, playbackAttempt = 0;
 const mediaAcks = createMediaAcknowledger(send);
 const controlTrays = [
@@ -548,10 +562,7 @@ async function resumeSession() {
         fail('Sharing ended while restoring video. Reconnect with saved access or ask for a new invitation.');
         return;
       }
-      const ticket = await remembered.ticket();
-      if (mine !== generation || ws || away()) return;
-      if (ticket) { sessionExpected = false; resumeDeadline = 0; connect(ticket); }
-      else if (sessionExpected) { sessionExpected = false; fail('This session ended. Reconnect with a remembered browser or pair using a new invitation.'); }
+      if (sessionExpected) { sessionExpected = false; fail('This session ended. Request a new stream or connect with a new invitation.'); }
     }
   } catch (error) {
     if (mine === generation) $('error').textContent = error.message || 'Could not reconnect. Check the private connection.';
@@ -741,6 +752,8 @@ function connect(key = null, requestedMode = preferredMode) {
         if (mediaMode === 'webcodecs' && !('VideoDecoder' in window)) throw new Error('This connection needs WebCodecs. Use the private VPN link for browser-native video.');
         const restoring = sessionExpected;
         authenticated = true; sessionExpected = true;
+        if (window.opener && location.hash === '#directory-access')
+          window.history.replaceState(null, '', `${location.pathname}${location.search}`);
         qualitySupported = message.adaptiveVideo === true && message.viewOnly !== true;
         qualityAvailable = false;
         if (qualitySetting) qualitySetting.hidden = !qualitySupported;
@@ -1013,6 +1026,7 @@ window.addEventListener('pagehide', () => {
 });
 window.addEventListener('pageshow', () => { updatePause(); void resumeSession(); });
 void resumeSession();
+void remembered.status();
 $('touch').addEventListener('click', () => {
   if (viewOnly) return;
   releaseTouches(); touchEnabled = !touchEnabled; updateArrowAvailability();

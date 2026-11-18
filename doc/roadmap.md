@@ -56,8 +56,11 @@ separate gates. These are not signed desktop releases.
   with independent media/input authority and bounded status-only recovery.
 - [x] Bound remembered active capture by the original approval deadline; verify
   real HTTPS cookies and expiry in disposable Chromium/WebKit contexts.
-- [ ] Add paired-computer navigation, identity/address management and owner
-  approval of every new stream; these remain separate unmerged work.
+- [x] Add paired-computer navigation, verified identity/address checks and owner
+  approval of every new stream. Reload/cancellation remains bound to the same
+  pending request; stale cancellation cannot stop an established stream.
+- [ ] Qualify paired-computer, cancellation and address-change flows on physical
+  browsers and each supported private transport.
 - [ ] Qualify real presentation/casting, secondary click and phone background/audio
   behavior independently of generated browser fixtures.
 - [ ] Verify physical USB Android-browser and Wi-Fi/direct-IP/VPN end-to-end paths.

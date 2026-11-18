@@ -31,7 +31,9 @@ try {
         trustedList: async () => devices,
         trustedAction: async (action, id) => {
           window.deviceActions.push({ action, id });
-          if (action === 'approve') devices = { ...devices, pending: [], devices: [{ ...pending, expiresAt: Date.now() + 7776000000 }] };
+          if (action === 'approve') devices = { ...devices, pending: [], devices: [{ ...pending, expiresAt: Date.now() + 7776000000 }],
+            streamRequest: { id: 'b'.repeat(32), name: pending.name, expiresAt: Date.now() + 60000, permissions: ['view', 'audio', 'control'] } };
+          if (action === 'allow-stream' || action === 'deny-stream') devices = { ...devices, streamRequest: null };
           if (action === 'pause') devices = { ...devices, paused: true };
           if (action === 'resume') devices = { ...devices, paused: false };
           if (action === 'revoke') devices = { ...devices, devices: [] };
@@ -40,16 +42,20 @@ try {
     });
     await page.goto(`http://127.0.0.1:${server.address().port}/desktop/index.html`);
     await page.getByRole('button', { name: 'Allow remembered access', exact: true }).waitFor();
-    assert.match(await page.locator('.remembered-device-request').innerText(), /control the entire desktop for 90 days/);
+    assert.match(await page.locator('.remembered-device-request').innerText(), /request new streams/);
     assert.deepEqual(await page.evaluate(() => window.deviceActions), []);
     await page.screenshot({ path: path.join(output, `approval-${width}.png`), fullPage: true });
     await page.getByRole('button', { name: 'Allow remembered access', exact: true }).click();
+    assert.match(await page.locator('.remembered-device-request').innerText(), /Test phone wants to view and control the desktop and hear its audio/);
+    const decision = width === 320 ? 'Deny' : 'Allow';
+    await page.getByRole('button', { name: decision, exact: true }).click();
+    await page.getByRole('heading', { name: 'Connection request' }).waitFor({ state: 'hidden' });
     await page.getByRole('button', { name: 'Pause remembered access', exact: true }).click();
     await page.getByRole('button', { name: 'Enable remembered access', exact: true }).click();
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false);
     await page.getByRole('button', { name: 'Revoke Test phone', exact: true }).click();
     assert.match(await page.locator('.remembered-devices').innerText(), /No remembered devices/);
-    assert.deepEqual((await page.evaluate(() => window.deviceActions)).map(e => e.action), ['approve', 'pause', 'resume', 'revoke']);
+    assert.deepEqual((await page.evaluate(() => window.deviceActions)).map(e => e.action), ['approve', `${decision.toLowerCase()}-stream`, 'pause', 'resume', 'revoke']);
     assert.deepEqual(errors, []); results.push({ width, explicitApproval: true, pauseResumeRevoke: true, horizontalOverflow: false }); await page.close();
   }
   await writeFile(path.join(output, 'results.json'), JSON.stringify({ synthetic: true, liveHostAccessed: false, results }, null, 2));

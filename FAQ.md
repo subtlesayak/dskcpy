@@ -76,7 +76,9 @@ background/return. Browser sessions can resume across a bounded absence or
 reload, currently up to five minutes, within the original session lifetime.
 Explicit Stop/Disconnect ends sharing; cancelling the receiver's confirmation
 keeps it running. For a new browser session, reconnect with a remembered browser
-only while the host still allows its approval, or request a new invitation.
+only while the host still allows its pairing, then wait for Allow on the
+computer. Every new paired stream needs a fresh host decision; transport resume
+of the same approved session does not. A new invitation remains an alternative.
 Native Android Internet mode uses its separate phone-generated secret.
 Process death and network loss are not guaranteed seamless recovery.
 

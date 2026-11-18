@@ -232,8 +232,8 @@ background period, within five minutes and the original session lifetime, while
 the host remains running. Keep Tailscale connected, reopen the same receiver tab and let it retry; refresh
 once if needed. Confirming Disconnect explicitly ends that session; cancelling
 the confirmation keeps it running. An expired session or restarted host needs
-either an explicitly approved remembered browser in this
-source candidate or a new one-use invitation from the Mac. An old QR is not a
+either a new request from a paired browser and an explicit Allow on the host,
+or a new one-use invitation from the Mac. An old QR is not a
 remembered-device credential. The running Terminal baseline has not been
 updated by building this candidate.
 

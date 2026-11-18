@@ -806,23 +806,28 @@ test('PiP keeps browser-native video and audio running while the original page i
   h.$('disconnect').emit('click');
 });
 
-test('transport loss with an expired session uses a saved credential; explicit Disconnect suppresses retry', async t => {
+test('an expired session waits for a new deliberate request and host approval', async t => {
   const h = receiver(t, { webRtc: true, webCodecs: false });
   await new Promise(setImmediate);
-  let requests = [];
+  const requests = [];
   h.context.fetch = async url => {
     requests.push(url);
     return { ok: true, json: async () => url.endsWith('/session') ? { resumable: false }
-      : url.endsWith('/remember/status') ? { status: 'approved', paused: false } : { key: 'r'.repeat(32) } };
+      : url.endsWith('/trusted/connect') ? { id: 'a'.repeat(32), expiresAt: Date.now() + 60000 }
+      : url.endsWith('/trusted/status') ? { key: 'r'.repeat(32) }
+      : { status: 'approved', paused: false, streamApproval: true } };
   };
   h.socket.readyState = 3; h.socket.emit('close', { code: 1006 });
-  await new Promise(resolve => setTimeout(resolve, 280));
+  await new Promise(resolve => setTimeout(resolve, 300));
+  assert.equal(requests.includes('/stream/trusted/connect'), false);
+  assert.equal(h.sockets.length, 1);
+  await h.$('remember-form').emit('submit');
+  await h.$('remembered-reconnect').emit('click');
   assert.ok(requests.includes('/stream/trusted/connect'));
+  assert.ok(requests.includes('/stream/trusted/status'));
   assert.equal(h.sockets.length, 2);
   h.sockets[1].emit('open'); assert.equal(h.sockets[1].sent[0], 'r'.repeat(32));
-  h.$('disconnect').emit('click'); const before = h.sockets.length;
-  h.document.emit('visibilitychange'); h.window.emit('pageshow'); await new Promise(setImmediate);
-  assert.equal(h.sockets.length, before);
+  h.$('disconnect').emit('click');
 });
 
 

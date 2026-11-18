@@ -108,12 +108,14 @@ test('capture recovery budget and cancellation never create an unbounded or unau
 
 test('WebRTC keyframe feedback cannot undo an explicit video pause',async t=>{
  let feedback;
- const f=await fixture(t,{rtcMediaFactory:options=>{
+ const f=await fixture(t,{nativeHeaderDelayMs:25,rtcMediaFactory:options=>{
   feedback=options.onKeyframe;
   return {offer:async()=>({type:'offer',sdp:'synthetic'}),answer:async()=>{},close:async()=>{},frame:async()=>{},sound:async()=>{}};
  }});
  const ws=await f.open(undefined,undefined,'stream/webrtc');ws.send(f.invitation.key);
- await until(()=>f.calls()===1);
+ // Observe the parsed SRD header before sending codec bytes. The callback
+ // counter advances before its socket connects and writes that header.
+ await until(()=>ws.received.some(message=>message.binary&&message.data.equals(header)));
  f.native().write(packet(0,1,Buffer.from('000000016742c01e0102030000000168ce3c80','hex')));
  await until(()=>feedback);
  const chunks=[];f.native().on('data',chunk=>chunks.push(chunk));
@@ -127,13 +129,15 @@ test('WebRTC keyframe feedback cannot undo an explicit video pause',async t=>{
 
 test('legacy in-band PPS completes the cached configuration for a replacement RTC peer', async t => {
  const configurations=[],frames=[];
- const f=await fixture(t,{rtcMediaFactory:options=>{
+ const f=await fixture(t,{nativeHeaderDelayMs:25,rtcMediaFactory:options=>{
   configurations.push(Buffer.from(options.configuration));
   return {offer:async()=>({type:'offer',sdp:'synthetic'}),answer:async()=>{},close:async()=>{},
    configure:()=>{},frame:async(...args)=>frames.push(args),sound:async()=>{}};
  }});
  const first=await f.open(undefined,undefined,'stream/webrtc');first.send(f.invitation.key);
- await until(()=>f.calls()===1);
+ // Observe the parsed SRD header before sending codec bytes. The callback
+ // counter advances before its socket connects and writes that header.
+ await until(()=>first.received.some(message=>message.binary&&message.data.equals(header)));
  const sps=Buffer.from('000000016742c01e010203','hex'),pps=Buffer.from('0000000168ce3c80','hex');
  f.native().write(packet(0,1,sps));await until(()=>configurations.length===1);
  f.native().write(packet(10,2,Buffer.concat([pps,Buffer.from('0000000165888401020304','hex')])));
@@ -751,13 +755,12 @@ for (const policy of [{keyboard:true},{keyboard:true,clipboard:true,viewOnly:tru
   ws.send('clipboard-enable');const [code]=await once(ws,'close');assert.equal(code,1008);
 });
 
-test('a remembered grant cannot carry clipboard permission even if an internal caller supplies it',async t=>{
-  let native;const receiver=createBrowserReceiver({configuredPort:0,trustedDevices:{allowed:()=>true,snapshot:()=>({available:false,paused:false,devices:[]})},onConnect:async bridge=>{
-    assert.equal(bridge.clipboard,false);native=net.connect(bridge.port,'127.0.0.1');native.on('error',()=>{});await once(native,'connect');native.write(header);
-  }});t.after(async()=>{native?.destroy();await receiver.shutdown();});
-  const grant={id:'fixture',digest:'fixture',origin:'',expiresAt:Date.now()+43200000},invitation=await receiver.invite('local',{keyboard:true,clipboard:true},grant);grant.origin=invitation.url.slice(0,-1);
-  const ws=new WebSocket(invitation.url.replace('http:','ws:')+'stream',{origin:grant.origin});ws.on('error',()=>{});t.after(()=>ws.terminate());await once(ws,'open');
-  const first=once(ws,'message');ws.send(invitation.key);const [bytes,binary]=await first;assert.equal(binary,false);assert.equal(JSON.parse(bytes).clipboard,false);
+test('an internal invite caller cannot substitute a synthetic remembered grant for host approval', async t => {
+  const receiver = createBrowserReceiver({ configuredPort: 0, trustedDevices: { allowed: () => true } });
+  t.after(() => receiver.shutdown());
+  const grant = { id: 'fixture', digest: 'fixture', expiresAt: Date.now() + 60000, isCurrent: () => true };
+  await assert.rejects(receiver.invite('local', { keyboard: true, clipboard: true }, grant), /Connection approval/);
+  assert.equal(receiver.status().waiting, false);
 });
 
 test('native keyboard denial cancels clipboard and suppresses its queued private result',async t=>{
