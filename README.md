@@ -14,6 +14,11 @@ reverse direction. The original Android-to-computer mode remains available.
 [Current project status and verification](doc/project-status.md) separates the
 merged implementation, unmerged follow-ups and candidate-specific physical results.
 
+[PR #55](https://github.com/subtlesayak/dskcpy/pull/55) adds paired-computer
+navigation and host approval for each new stream. Its final
+[CI run](https://github.com/subtlesayak/dskcpy/actions/runs/44322632765) passed
+all eight jobs; physical-device qualification remains open.
+
 For source/artifact identity, Android upgrade checks and the separate unsigned
 Mac hosting candidate, see [Build identity and compatible upgrades](doc/artifact-upgrades.md).
 
@@ -154,6 +159,12 @@ The dashboard and receiver are different pages. The dashboard's localhost
 address is for the computer; use the generated receiver address on the phone.
 A browser invitation is generated on the computer; a native Android Internet
 secret is generated in the phone app. They are separate connection flows.
+
+For later connections over private HTTPS, you can
+[pair this browser and save computers](doc/remembered-browsers.md). Choose
+**Request to connect** on a saved computer, then wait for **Allow** on the host.
+Each new stream needs approval. A brief interruption can resume the same
+approved stream within its existing deadline.
 
 ## Connection options
 

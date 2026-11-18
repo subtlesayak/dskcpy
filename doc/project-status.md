@@ -8,11 +8,14 @@ the behavior it actually exercised.
 
 ## Merged implementation baseline
 
-The paired-computer implementation review checkpoint is `dd361a2e`, integrating
-the three paired-only handoff commits through `f588240d` above documentation
-baseline `e2fa022a`. It adds host approval for every new paired stream, verified
-host identity and a multi-computer browser directory, plus the reviewed pending
-request reload/cancellation fix. Documentation-only commits may postdate it.
+[PR #55](https://github.com/subtlesayak/dskcpy/pull/55) merged as
+[`4b4e3e32`](https://github.com/subtlesayak/dskcpy/commit/4b4e3e329ec29fd2941ad934bbec7547003c16ea),
+with reviewed head `982fd3b5`. It integrates the three paired-only handoff
+commits through `f588240d` above documentation baseline `e2fa022a`. It adds host
+approval for every new paired stream, verified host identity and a multi-computer
+browser directory. Review fixes cover pending-request reload/cancellation and
+same-capture recovery after a lost first authentication reply. Documentation-only
+commits may postdate this implementation baseline.
 
 The earlier core baseline
 [`d3822b42`](https://github.com/subtlesayak/dskcpy/commit/d3822b4202429a10757710a7ac4e34e0f4e90e90)
@@ -68,8 +71,35 @@ CI also exposed a codec-fixture ordering race: two tests could send media before
 the fake native header. A controlled 25 ms header delay reproduces the failures;
 waiting for the parsed header fixes them without altering codec assertions,
 timeouts or production media code.
-Hosted checks must be matched to the exact paired review head. Core native,
-Android and package results below are separately identified baseline evidence.
+
+[Final paired CI 44322632765](https://github.com/subtlesayak/dskcpy/actions/runs/44322632765)
+completed with **all eight jobs passing** on reviewed head `982fd3b5`:
+
+- Both Linux and Windows GUI checks/builds, Windows native/desktop checks, and
+  hosted Mac Chromium/WebKit generated-media and paired-computer flows.
+- Both Android package variants and **114 full-SDK tests across 18 suites**,
+  with zero failures, errors or skips. Build-test signing does not establish
+  compatibility with an existing phone installation's signing key.
+- Fresh Apple-silicon and Intel Mac builds, each passing **34 normal, 34
+  ASan/UBSan and 34 pinned-dependency native tests**, plus unsigned portable and
+  desktop payload verification and hidden fake-IPC checks.
+
+The tested synthetic merge `00167973` and actual merge `4b4e3e32` share tree
+`48c9dc780e11384eaa0cce4ef2d07515c2bb9015`. Both downloaded Mac archives independently
+verify **5,981 payload files**, the exact **79 shipped server/receiver sources**,
+executable bits and the primary Werift notice against that tree:
+
+| CI candidate | ZIP SHA-256 |
+| --- | --- |
+| Apple silicon | `a1b5a2ad4a4bc90c17ec32e808ac2061cb5d052e7d05d69253ba241831222fc2` |
+| Intel | `bd1465c0bb37031ebb99a7400c4e118f2f3bc8ab2372c9d2e5a569faf091d702` |
+
+Downloaded code was not executed or installed. Local unsigned Terminal/desktop
+stages verified 5,981/5,991 files, including 98 first-party, five native and 40
+required desktop source files. Their recorded source is `68955667`, whose runtime
+matches the final review; only the codec test fixture and documentation changed
+after it. These local stages are distinct from the fresh final CI archives.
+The earlier core results below retain their own source and run identities.
 
 ### Earlier core platform qualification
 
@@ -154,6 +184,7 @@ not qualify a release:
 | [#51](https://github.com/subtlesayak/dskcpy/pull/51) | Real-browser HTTPS remembered-access matrix. | `3d5cf005` |
 | [#52](https://github.com/subtlesayak/dskcpy/pull/52) | Original approval deadline also bounds active capture. | `7eda814f` |
 | [#53](https://github.com/subtlesayak/dskcpy/pull/53) | Reconciled prepared Android partial-write/epoch audio patch; combined review adds cumulative ACK ordering fix. | `83dbfad4` |
+| [#55](https://github.com/subtlesayak/dskcpy/pull/55) | Per-stream host approval, verified host identity and paired-computer navigation; review fixes pending cancellation and interrupted first-authentication recovery. | Paired handoff `f588240d`; reviewed integration `982fd3b5` |
 
 Local checks, hosted-runner capacity cancellations and separate integrations are
 different evidence. The combined typing layout, actual AX providers and
@@ -196,8 +227,8 @@ join with Android Edge over Wi-Fi through a private Tailscale connection. A
 repeat Home/return resumed the same paired stream. An earlier Home/return
 showed the connection-code page; its exact cause remains unconfirmed. This is
 candidate-specific picture/session evidence, not an audio or measured latency
-result. The new pending-request reload/cancellation fix was not installed or
-physically tested by this review.
+result. The review's pending-request reload/cancellation and lost-authentication
+recovery fixes were not installed or physically tested by this review.
 
 ### Earlier USB browser audio and input candidate
 
