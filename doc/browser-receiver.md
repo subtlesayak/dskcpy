@@ -32,8 +32,9 @@ qualification. USB browser tunneling is Android-only.
    with its camera and open the link. For local preview, open **Receiver link**,
    paste **Connection code**, and select **Connect**.
 4. Confirm readable video. Enable playback when the browser asks, and use a
-   harmless input target. Select **Disconnect** in the receiver or
-   **Stop browser stream** in the dashboard to end sharing.
+   harmless input target. Select **Disconnect** in the receiver and confirm the
+   stop request, or use **Stop browser stream** in the dashboard to end
+   sharing. Cancel keeps the receiver session running.
 
 For USB, connect a data-capable cable, enable debugging, unlock Android and
 approve the host first. The generated localhost address works **on that connected
@@ -45,9 +46,12 @@ authentication; the ordinary receiver link is code-free. QR invitations use a
 `/join` page so a reused tab loads the current handler. Capture starts only
 after authentication. Treat the QR/code as access to the shared desktop.
 
-An authenticated browser can resume after refresh or a brief absence, up to two
-minutes. Explicit Disconnect, desktop Stop, host shutdown or expiry requires a
-fresh invitation. Correct a failed host start before creating another code.
+An authenticated browser can resume after refresh or a brief absence, up to five
+minutes, within the original session lifetime. Confirmed Disconnect, desktop
+Stop, host shutdown or expiry ends that capture. To start a new browser session,
+use an approved remembered browser only while the host still allows its approval,
+or request a fresh invitation. Correct a failed host start before creating
+another code.
 
 ## Choose a connection
 
@@ -186,15 +190,18 @@ available, use USB, private Tailscale HTTPS, or the native Android receiver.
   fresh keyframe. Switching away suspends capture and releases held contacts.
   Returning within five minutes, including after a page reload, reconnects the
   same browser to the existing native stream. No old video frames are replayed.
-  After five minutes away, the session ends and a new code is required. A network
-  failure may take up to ten seconds to detect before this grace period starts.
+  After five minutes away, the session ends. A new session needs an eligible
+  remembered-browser reconnect or a new invitation. A network failure may take up
+  to ten seconds to detect before this grace period starts.
 - Resume uses a separate, host-only, HttpOnly, SameSite=Strict cookie scoped to
   the receiver connection path (Secure over HTTPS). The connection code is never
   saved. The cookie cannot start a new capture: it only reattaches the browser to
   its approved, still-live session. It is invalidated on Disconnect, desktop
   Stop, native exit, protocol violation or expiry. Sessions have a twelve-hour
-  maximum lifetime. Blocking cookies prevents reload recovery. Background
-  continuity on Safari/iOS still requires physical-device verification.
+  maximum lifetime, further capped by the original remembered approval deadline
+  when applicable. Neither resume nor a new controller extends it. Blocking
+  cookies prevents reload recovery. Background continuity on Safari/iOS still
+  requires physical-device verification.
 - The video fits the available viewport without cropping or stretching. Full
   screen requests landscape orientation after entering fullscreen, from either
   portrait or landscape, and releases the lock on exit. If the browser refuses
@@ -218,8 +225,10 @@ available, use USB, private Tailscale HTTPS, or the native Android receiver.
 - Close and Lock are deliberately not exposed in this experimental browser
   receiver. Matching full-desktop Mac and Windows hosts can advertise the
   optional keyboard capability described below.
-- Disconnect and Stop end capture. USB cleanup removes only the tunnel created
-  by this session; it refuses to overwrite existing ADB mappings.
+- Confirmed receiver Disconnect and explicit host Stop end capture. The receiver
+  and guided Host app ask for confirmation; cancelling keeps sharing active.
+  Programmatic cleanup and invitation cancellation do not wait for a prompt.
+  USB cleanup removes only the tunnel created by this session; it refuses to overwrite existing ADB mappings.
 
 ## Mac window sharing and desktop keyboard
 

@@ -22,9 +22,11 @@ access. No installed application or running service has been changed.
 
 This needs matching server, receiver and native modules. Do not copy its browser
 assets into an older running application. Negotiated secondary click is now
-implemented in source; exact-head Windows CI, actual clicking, casting
-and physical background/audio qualification remain open. The current human
-decision is to preserve the working session and prepare candidates only.
+implemented in source. The combined review passes Windows native/probe and
+Intel Mac CI checks; see [current verification](project-status.md#automated-verification).
+Physical secondary-click, casting and background/audio qualification remain
+open. The current human decision is to preserve the working session and prepare
+candidates only.
 
 ## Intended flow
 
@@ -273,7 +275,10 @@ Focus hints cannot interrupt Options or clear the preview during Gboard edits.
 
 ## Source and generated-browser checks
 
-The original prototype source check included 544 Node cases: 537 passed and seven optional skips. See [project status](project-status.md) for combined-review results.
+The original prototype source check included 544 Node cases: 537 passed and
+seven optional skips. The later combined review passes 549 Node cases with seven
+optional skips. See [project status](project-status.md#automated-verification)
+for exact source, full SDK results and hosted Mac ARM capacity cancellations.
 Mac native tests pass 34 normally and 34 with address/undefined sanitizers.
 The Windows production admission/coordinate/SendInput callback bodies also
 compile against fake effects, exercising denied states and partial-release

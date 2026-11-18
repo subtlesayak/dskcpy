@@ -11,10 +11,11 @@ separate gates. These are not signed desktop releases.
 - [x] Fix worker-name startup assertion and piped-log telemetry buffering.
 - [x] Implement experimental system audio using ScreenCaptureKit and Opus.
 - [x] Implement selected Mac window capture with a fixed canvas, owner
-  revalidation and native-enforced view-only/audio-off policy.
+  revalidation and native-enforced view-only input. Audio starts off; an explicit
+  owner opt-in can share the selected application's audio.
 - [x] Implement bounded mono/stereo PCM conversion and default-output-route
   audio epoch recovery, preserving mute and video state.
-- [x] Add an opt-in native Mac CI compile and pipe-telemetry regression.
+- [x] Add native Mac CI compilation, sanitizer gates and pipe-telemetry regressions.
 - [ ] Verify the latest telemetry, audible audio, mute and Home/return on a Mac.
 - [ ] Validate USB, direct-IP and Internet independently on physical Mac hardware.
 - [ ] Validate display hot-plug/resolution changes and permission recovery.
@@ -26,25 +27,39 @@ separate gates. These are not signed desktop releases.
 - [x] Separate Android packet reading from decoder output draining.
 - [x] Bound video/audio queues, detect transport stalls, and release input on exit.
 - [x] Add explicit wireless discovery and bounded opt-in USB/LAN reconnection.
+- [x] Retain bounded partial Android PCM writes and unaccepted codec input;
+  clear stale audio epochs and preserve cumulative acknowledgement ordering.
 - [ ] Controlled USB/Wi-Fi/VPN before/after measurements with a repeatable workload.
 - [ ] Physical motion-to-photon measurement; the dashboard ACK metric is not this.
 - [ ] Long-running stream, network-loss, suspend and output-device-change tests.
+- [ ] Gaming mode with a repeatable workload and physical input-to-display
+  latency measurements; report transport, method, sample count, median and p95.
 
 ## 3. Browser and iPhone/iPad receiving
 
 - [x] Implement a separate authenticated WebSocket receiver and native SRD1 bridge.
 - [x] Implement WebCodecs video/audio, input return, bounded queues and pause/resume.
 - [x] Add private H.264/Opus WebRTC and locally generated one-use QR invitations.
-- [x] Add capability-gated Mac desktop keyboard/Unicode/IME input with paired
+- [x] Add capability-gated Mac and Windows desktop keyboard/Unicode/IME input with paired
   key release, focus/lifecycle cleanup and authenticated input validation.
-- [ ] Verify physical keyboard layouts, mobile soft keyboards and IMEs; add
-  Windows browser keyboard injection separately.
+- [ ] Verify physical keyboard layouts, mobile soft keyboards and IMEs on
+  matching Mac and Windows hosts.
 - [x] Add USB reverse-tunnel, Wi-Fi/direct-IP HTTPS and private VPN connection setup.
 - [x] Verify real Windows NVENC video and browser audio lifecycle on localhost.
 - [x] Retain authenticated browser sessions across bounded background/reload gaps;
   force an immediate native keyframe when decoding resumes.
 - [x] Add compact Volume/Window trays, non-overlapping show-controls placement,
   fullscreen landscape requests and explicit swipe scrolling.
+- [x] Add fractional touch scrolling, adjustable speed and explicit receiver/Host
+  Stop confirmation; cancellation preserves the active session.
+- [x] Add default-off presentation/controller roles and negotiated secondary click,
+  with independent media/input authority and bounded status-only recovery.
+- [x] Bound remembered active capture by the original approval deadline; verify
+  real HTTPS cookies and expiry in disposable Chromium/WebKit contexts.
+- [ ] Add paired-computer navigation, identity/address management and owner
+  approval of every new stream; these remain separate unmerged work.
+- [ ] Qualify real presentation/casting, secondary click and phone background/audio
+  behavior independently of generated browser fixtures.
 - [ ] Verify physical USB Android-browser and Wi-Fi/direct-IP/VPN end-to-end paths.
 - [ ] Test Safari/iOS codec, gesture, audio and background restrictions.
 - [ ] Define any native iOS receiver only after browser receiver constraints are tested.
@@ -59,8 +74,12 @@ no public listener, relay deployment or new account permission is implied.
 - [x] Windows source-checkout launcher with component checks, ADB SDK discovery,
   safe existing-dashboard reuse and a diagnostic-only mode.
 - [ ] Reproducible desktop release builds, stable Android signing and upgrade tests.
-- [ ] macOS app packaging, signing/notarization and permission identity.
-- [ ] Optional desktop wrapper and control profiles.
+- [x] Add an optional guided Electron host prototype and unsigned Mac/Windows
+  directory packaging with payload and isolated fake-IPC checks.
+- [ ] Finish development-installer packaging and native-OS acceptance checks.
+- [ ] Stable macOS signing/notarization, distributed version policy, clean install,
+  upgrades and permission identity/retention.
+- [ ] Additional control profiles.
 - [ ] Extended virtual monitor and stylus pressure/Windows Ink: separate substantial
   driver/input projects, not capabilities supplied by a scrcpy fork alone.
 

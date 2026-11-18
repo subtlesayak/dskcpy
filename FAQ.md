@@ -56,11 +56,15 @@ transport ACK or successful retry does not close it. Source fixes and automated
 results are recorded in [Mac testing](doc/testing/mac/README.md); audible
 candidate testing remains separate. Receiver mute does not mute the computer.
 
-## Why is the Mac keyboard button missing?
+<a id="why-is-the-mac-keyboard-button-missing"></a>
+
+## Why is the browser keyboard button missing?
 
 It requires a native host advertising browser keyboard support, a full-desktop
-Mac session, and a separate receiver. **This computer** preview and selected
-window mode omit forwarding. Windows browser typing is not implemented.
+Mac or Windows session, and a separate receiver. **This computer** preview and
+selected window mode omit forwarding. Windows also requires a host advertising
+the `browser-keyboard-v1` capability; see the
+[Windows typing guide](doc/windows-browser-keyboard.md).
 Rebuild the host and dashboard from the same revision. The
 [typing guide](doc/browser-receiver.md#mac-window-sharing-and-desktop-keyboard)
 explains focus, permissions, IME and reserved-shortcut limits.
@@ -69,8 +73,11 @@ explains focus, permissions, IME and reserved-shortcut limits.
 
 Leaving and stopping are different. Android 6+ can retain a session across
 background/return. Browser sessions can resume across a bounded absence or
-reload, currently up to two minutes. Explicit Stop/Disconnect ends sharing;
-Internet or browser reconnection then needs a fresh secret/invitation.
+reload, currently up to five minutes, within the original session lifetime.
+Explicit Stop/Disconnect ends sharing; cancelling the receiver's confirmation
+keeps it running. For a new browser session, reconnect with a remembered browser
+only while the host still allows its approval, or request a new invitation.
+Native Android Internet mode uses its separate phone-generated secret.
 Process death and network loss are not guaranteed seamless recovery.
 
 ## Is the displayed latency physical touch-to-display latency?
