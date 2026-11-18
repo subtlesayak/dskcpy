@@ -17,17 +17,18 @@ A remembered device never displaces another active receiver or temporary invitat
 - **Pause remembered access** prevents remembered reconnection and ends the current browser session.
 - **Revoke** removes one saved browser and terminates its associated session or pending ticket. Other devices and unrelated temporary invitations are preserved.
 - Receiver **Disconnect** ends that session and preserves the pairing. Select **Request to connect** for another stream, which needs a fresh host decision.
-- Clearing site cookies, changing browser/profile/address, expiry, or revocation requires pairing again.
+- On the receiver's **Paired computers** card, **Check status** checks whether the saved host is reachable, busy, paused or needs pairing. **Manage pairing** lets you give it a name in this browser. **Forget computer** revokes this browser's pairing and clears its cookie when the host is reachable.
+- Clearing site cookies, changing browser/profile/address, expiry, or revocation requires pairing again. A local display name is separate from the browser name shown to the host.
 
 The Mac must be awake, online and running the host. Stored approval survives restarting this host service; its private receiver listens without creating an invitation or capturing until an approved browser connects. This does not start a stopped application, wake a powered-off computer, unlock FileVault, or configure unattended pre-login VPN access. The desktop app's separately opt-in login startup applies after user sign-in.
 
 ## Credential and consent boundaries
 
-The browser receives a random 256-bit credential in a host-only `Secure; HttpOnly; SameSite=Strict` cookie scoped to `/stream`. It never enters JavaScript storage, a URL, QR code or diagnostics. A provisional credential grants nothing until local owner approval. The host persists only SHA-256 hashes, readable names, exact HTTPS origins, grant times and bounded streaming preferences. No reusable plaintext credential is written by the host.
+The browser receives a random 256-bit credential in a host-only `Secure; HttpOnly; SameSite=Strict` cookie scoped to `/stream`. It never enters JavaScript storage, a URL, QR code or diagnostics. A provisional credential grants nothing until local owner approval. The host persists SHA-256 hashes, readable names, exact HTTPS origins, grant times and bounded streaming preferences. The registry also holds an installation signing key. It identifies the installation and carries no stream permission.
 
 Remote mutations require the exact configured HTTPS origin and reject cross-site requests. Pairing and stream approval stay on the existing guarded loopback control surface or validated desktop IPC. After the host allows a request, the requesting browser can claim a short-lived, one-use ticket. Capture starts only when that browser authenticates the stream with its ticket and paired cookie. Cancellation, expiry, pause and revocation are checked again before consuming a ticket. Registry writes are serialized, atomic and fail closed. The host accepts one live stream request at a time and reports busy to another requester. Pending stream requests are held in memory and expire on host restart. The media and input wire remains unchanged.
 
-This first approval flow uses one verified HTTPS receiver origin at a time. Cross-origin computer lists, renaming and forgetting from a shared client screen, and host identity across address changes require a separate client identity design.
+The receiver saves the public host identity only after approved pairing. An existing pairing gains an identity on its first approved status check after updating. A separate endpoint on the configured HTTPS route can sign a fresh challenge bound to that address. It exposes public identity and proof without cookies or connection status. The same installation keeps its key through service restart and address changes. Pairing cookies stay scoped to their original HTTPS origin. The receiver card still displays only the current origin. A shared client screen across origins and a guided address update remain open.
 
 A remembered connection is bounded by the earlier of the configured session
 lifetime and its approval's absolute expiry. Starting shortly before approval

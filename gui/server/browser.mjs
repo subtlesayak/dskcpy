@@ -191,7 +191,16 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
         const token = cookieValue(req), digest = token && deviceDigest(token);
         const pending = enrollmentActive() && enrollment.digest === digest;
         const device = trustedDevices.find(token, remoteOrigin, true);
-        json(200, { status: pending ? 'pending' : device ? 'approved' : 'unavailable', paused: trustedDevices.snapshot().paused, streamApproval: true }); return;
+        const hostIdentity = device && await trustedDevices.ensureIdentity();
+        const busy = device && Boolean(trustedConnecting || invitation || session || (requestOpen() && connectionRequest.device.id !== device.id));
+        json(200, { status: pending ? 'pending' : device ? 'approved' : 'unavailable', paused: trustedDevices.snapshot().paused,
+          streamApproval: true, ...(device && { hostIdentity, busy }) }); return;
+      }
+      if (req.url === '/stream/trusted/forget') {
+        const device = trustedDevices.find(cookieValue(req), remoteOrigin, true);
+        if (device) await trustAction('revoke', device.id);
+        res.setHeader('Set-Cookie', `${deviceCookie}=; HttpOnly; Secure; SameSite=Strict; Path=/stream; Max-Age=0`);
+        json(200, { status: 'forgotten' }); return;
       }
       const device = trustedDevices.find(cookieValue(req), remoteOrigin);
       if (!device || revoking.has(device.id)) { json(403, { error: trustedDevices.snapshot().paused ? 'Remembered access is paused on the host.' : 'Pair this browser again using a new invitation.' }); return; }
@@ -348,7 +357,17 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
       res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ service: 'dskcpy-browser-receiver', instance: healthInstance }));
       return;
     }
-    if (['/stream/remember', '/stream/remember/status', '/stream/trusted/connect', '/stream/trusted/status', '/stream/trusted/cancel'].includes(req.url)) { await trustedRequest(req, res); return; }
+    const challenge = /^\/pairing-identity\?challenge=([a-f0-9]{64})$/.exec(req.url)?.[1];
+    if (challenge && req.method === 'GET' && remoteOrigin && req.headers.host === new URL(remoteOrigin).host) {
+      // Public proof of installation identity only. This route reads no
+      // cookies, exposes no browser enrollment or session state, and grants no access.
+      await trustedDevices?.ready;
+      const proof = trustedDevices?.proveIdentity?.(remoteOrigin, challenge);
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.writeHead(proof ? 200 : 404, { 'Content-Type': 'application/json' }).end(JSON.stringify(proof || {}));
+      return;
+    }
+    if (['/stream/remember', '/stream/remember/status', '/stream/trusted/connect', '/stream/trusted/status', '/stream/trusted/cancel', '/stream/trusted/forget'].includes(req.url)) { await trustedRequest(req, res); return; }
     if (['/stream/controller/invite', '/stream/controller/session', '/stream/controller/leave', '/stream/controller/stop', '/stream/controller/end-presentation'].includes(req.url)) {
       await controllerRequest(req, res); return;
     }
