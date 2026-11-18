@@ -330,6 +330,9 @@ test('End presentation revokes only the picture role and cannot silently restart
     assert.ok(response.ok); await ended;
     await until(() => texts(c.ws).some(m => m.type === 'controller-state' && m.presentationEnded));
     assert.equal(c.ws.readyState, WebSocket.OPEN); assert.equal((await f.controllerStatus(c.cookie)).resumable, true);
+    assert.equal(f.receiver.status().presentationEnded,true,'host status must distinguish End from active presentation');
+    assert.equal(f.receiver.status().presentationAvailable,false);
+    assert.equal(f.receiver.status().controllerActive,false);
     for (const token of [f.cookie, f.cookie.split('=')[0] + '=' + 'A'.repeat(43)]) {
       const status = await fetch(f.invitation.url + 'stream/session', { headers: { Cookie: token } });
       assert.equal((await status.json()).resumable, false, 'neither old nor zeroed cookie may restore presentation');

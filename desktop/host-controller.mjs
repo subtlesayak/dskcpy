@@ -1,5 +1,6 @@
 import { probePrivateReceiver, receiverProbeMessage } from './receiver-probe.mjs';
 import { browserJoinUrl } from '../gui/receiver/protocol.mjs';
+import { presentationSummary } from './presentation-state.mjs';
 
 export function hostPhase({ status, permissions, route, runtimeReady, busy, error, checked, connection = 'internet', usb, linkChecking }) {
   // A newly failed check never hides the stop action for an owned session.
@@ -55,6 +56,7 @@ export class HostController {
   snapshot() {
     const phase = hostPhase(this);
     return { phase, permissions: { ...this.permissions },
+      presentation: this.status?.running || this.status?.browser?.connected ? presentationSummary(this.status?.browser?.presentation) : null,
       nativeInputPermission: this.status?.running && ['ready', 'blocked', 'unreported'].includes(this.status.nativeInputPermission)
         ? this.status.nativeInputPermission : null,
       connection: this.connection, usb: { ...this.usb, devices: this.usb.devices.map(device => ({ ...device })) },

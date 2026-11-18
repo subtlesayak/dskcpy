@@ -7,6 +7,7 @@ import './style.css';
 
 type Phase = 'checking-link' | 'usb-tool' | 'usb-device' | 'usb-authorize' | 'usb-select' | 'checking' | 'installation' | 'screen-permission' | 'control-permission' | 'network' | 'route-conflict' | 'private-link' | 'ready' | 'preparing' | 'inviting' | 'sharing' | 'error';
 type Snapshot = { phase: Phase; connection?: 'internet' | 'usb';
+  presentation?: { ended: boolean; available: boolean; controllerConnected: boolean; controllerActive: boolean; controllerAuthorized: boolean } | null;
   nativeInputPermission?: 'ready' | 'blocked' | 'unreported' | null;
   usb?: { available: boolean; error: boolean; selected: string | null; devices: { id: string; name: string; state: 'ready' | 'unauthorized' | 'offline' }[] }; permissions: { screen: boolean; control: boolean }; route: { connected: boolean; ready: boolean; conflict: boolean; verified?: boolean | null };
   startup?: { available: boolean; requested: boolean; enabled: boolean; requiresApproval: boolean; error: string | null };
@@ -75,12 +76,22 @@ function App() {
     };
     await run(actions[phase]);
   }
-  const content = phase === 'inviting' && !state?.invitation ? { title: 'Waiting for the receiver', description: 'A connection is already being prepared. Wait for your receiving browser, or cancel the invitation to try again.' }
+  const presentation = phase === 'sharing' ? state?.presentation : null;
+  const content = presentation?.ended ? { title: 'Presentation ended', description: 'The desktop picture and its audio have ended. Phone input is disabled. Stop sharing, then start again for a new presentation.' }
+    : presentation ? presentation.available
+      ? { title: 'Presentation connected', description: 'Keep the presentation browser open. Stop sharing ends video, audio and remote control.' }
+      : { title: 'Waiting for the presentation', description: 'The presentation browser is unavailable. Phone controls stay paused until it returns. Stop sharing ends this session.' }
+    : phase === 'inviting' && !state?.invitation ? { title: 'Waiting for the receiver', description: 'A connection is already being prepared. Wait for your receiving browser, or cancel the invitation to try again.' }
     : usb && phase === 'ready' ? { title: 'Share with your USB phone', description: 'Start sharing opens the phone browser with access to view your whole screen, hear desktop audio and control this computer. Keep the phone unlocked and connected. No QR or account is needed.', action: 'Start sharing' }
     : usb && phase === 'inviting' ? { title: 'Continue on your phone', description: state?.invitation?.openedOnPhone ? 'The receiver opened on your phone. Choose a browser if Android asks. Keep the cable connected.' : 'The USB connection is ready, but the phone browser did not open. Copy the USB link and paste it into the browser on that connected phone.' }
     : copy[phase]; const setup = !['ready', 'preparing', 'checking-link', 'inviting', 'sharing'].includes(phase);
-  const nativeControlWarning = phase === 'sharing' && ['blocked', 'unreported'].includes(state?.nativeInputPermission || '');
-  const description = phase === 'sharing' && state?.nativeInputPermission === 'blocked'
+  const nativeControlWarning = phase === 'sharing' && (!presentation || presentation.available) && ['blocked', 'unreported'].includes(state?.nativeInputPermission || '');
+  const description = presentation && !nativeControlWarning ? content.description
+    : presentation && state?.nativeInputPermission === 'blocked'
+      ? 'The presentation is connected, but macOS is blocking phone mouse and keyboard input. Allow control access for this copy of dskcpy Host in System Settings.'
+    : presentation && state?.nativeInputPermission === 'unreported'
+      ? 'The presentation is connected. This host has not reported whether phone control is allowed.'
+    : phase === 'sharing' && state?.nativeInputPermission === 'blocked'
     ? 'Your screen is being shared, but macOS is blocking mouse and keyboard input. Allow control access for this copy of dskcpy Host in System Settings.'
     : phase === 'sharing' && state?.nativeInputPermission === 'unreported'
       ? 'Your screen is being shared. This host has not reported whether remote control is allowed.'
@@ -97,8 +108,8 @@ function App() {
         <label><input type="radio" name="connection" value="usb" checked={usb} onChange={() => run(() => api.setConnection!('usb'))} /><Usb size={18} aria-hidden="true" /><span>USB cable <small>Android phone · no account</small></span></label>
         <label><input type="radio" name="connection" value="internet" checked={!usb} onChange={() => run(() => api.setConnection!('internet'))} /><Wifi size={18} aria-hidden="true" /><span>Private network <small>Tailscale · different networks</small></span></label>
       </fieldset>}
-      {phase !== 'inviting' && <div className={`hero-icon ${phase === 'sharing' ? 'is-sharing' : ''}`}><Monitor aria-hidden="true" size={34} /></div>}
-      <p className="eyebrow">{setup ? 'SET UP YOUR COMPUTER' : phase === 'sharing' ? 'CONNECTED' : 'BROWSER RECEIVER · NO APP NEEDED'}</p>
+      {phase !== 'inviting' && <div className={`hero-icon ${phase === 'sharing' && !presentation?.ended ? 'is-sharing' : ''}`}><Monitor aria-hidden="true" size={34} /></div>}
+      <p className="eyebrow">{setup ? 'SET UP YOUR COMPUTER' : presentation?.ended ? 'SESSION OPEN' : phase === 'sharing' ? 'CONNECTED' : 'BROWSER RECEIVER · NO APP NEEDED'}</p>
       <h1 ref={heading} tabIndex={-1}>{content.title}</h1>
       <p className="description" role={nativeControlWarning ? 'status' : undefined}><span role="alert">{state?.error || ''}</span>{!state?.error && description}</p>
       {nativeControlWarning && <button className="secondary" disabled={!api || pending || stopping}
@@ -120,7 +131,15 @@ function App() {
         <p className="hint">One use. Expires after five minutes. Anyone using this invitation can view and control this computer.</p>
         {!state?.features.keyboard && <p className="hint">Keyboard entry is not available on this host yet.</p>}
       </section>}
-      {phase === 'sharing' && <div className="sharing-card"><Check size={22} aria-hidden="true" /><span>Sharing stays on when you close this window. Use dskcpy in the menu bar or system tray to stop.</span></div>}
+      {presentation && <p className="hint" role="status" aria-label="Phone controls">{presentation.ended ? 'Phone controls are disabled because the presentation ended.'
+        : !presentation.available ? 'Phone controls are paused while the presentation is unavailable.'
+        : presentation.controllerActive ? 'Phone controls connected.'
+        : presentation.controllerConnected ? 'Phone controls paused. Return to the controller page on your phone to continue.'
+        : presentation.controllerAuthorized ? 'Phone controller disconnected. Reopen the same controller page to reconnect.'
+        : 'In the presentation browser, open Options → Use phone as touchpad and keyboard to connect a phone.'}</p>}
+      {phase === 'sharing' && <div className={`sharing-card ${presentation?.ended ? 'is-ended' : ''}`}>{presentation?.ended ? <Monitor size={22} aria-hidden="true" /> : <Check size={22} aria-hidden="true" />}<span>{presentation?.ended
+        ? 'The remaining session stays open when you close this window. Use Stop sharing to end access.'
+        : 'Sharing stays on when you close this window. Use dskcpy in the menu bar or system tray to stop.'}</span></div>}
       {phase === 'ready' && state?.features.clipboard && api?.setClipboardAllowed && <div className="clipboard-permission">
         <label><input type="checkbox" checked={state.clipboardAllowed === true} onChange={event => { const allowed = event.currentTarget.checked; void run(() => api.setClipboardAllowed!(allowed)); }} disabled={pending || stopping} aria-describedby="host-clipboard-help" /> Allow text clipboard for this invitation</label>
         <p id="host-clipboard-help" className="hint">The receiver can explicitly read or replace your text clipboard and paste into the active app. This turns off when sharing ends.</p>
