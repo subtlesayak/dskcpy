@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import net from 'node:net';
 import http from 'node:http';
+import { createPublicKey, randomBytes, verify } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -36,6 +37,13 @@ async function fixture(t, { viewOnly = false, beforeTrusted = async () => {}, no
         body: JSON.parse(bytes || '{}'), cookie: res.headers['set-cookie']?.[0] }));
     }); req.on('error', reject); req.end(JSON.stringify(body));
   });
+  const proof = (challenge, host = 'host.example') => new Promise((resolve, reject) => {
+    const req = http.get({ hostname: '127.0.0.1', port: receiver.port, path: `/pairing-identity?challenge=${challenge}`,
+      headers: { Host: host } }, res => {
+      let bytes = ''; res.on('data', c => bytes += c); res.on('end', () => resolve({ status: res.statusCode,
+        headers: res.headers, body: JSON.parse(bytes || '{}') }));
+    }); req.on('error', reject);
+  });
   const connect = async (key, requestOrigin = origin, requestHost = 'host.example', cookie) => {
     const ws = new WebSocket(`ws://127.0.0.1:${receiver.port}/stream`, { origin: requestOrigin, headers: { Host: requestHost, ...(cookie ? {Cookie:cookie} : {}) } });
     ws.on('error', () => {}); ws.received = [];
@@ -43,12 +51,12 @@ async function fixture(t, { viewOnly = false, beforeTrusted = async () => {}, no
     ws.on('message', (data, binary) => ws.received.push({ data, binary }));
     await once(ws, 'open'); if(key)ws.send(key); return ws;
   };
-  return { get receiver() { return receiver; }, get store() { return store; }, post, connect, invitation, captures: () => captures,
+  return { get receiver() { return receiver; }, get store() { return store; }, post, proof, connect, invitation, captures: () => captures,
     controls:()=>Buffer.concat(controls), clearControls:()=>{controls.length=0;},
-    async restart() {
+    async restart(configuredOrigin = origin) {
       for (const native of natives) native.destroy(); await receiver.shutdown();
       store = createTrustedDevices({ filename, now }); await store.ready;
-      receiver = createBrowserReceiver({ ...options, trustedDevices: store }); await receiver.standby();
+      receiver = createBrowserReceiver({ ...options, origin: configuredOrigin, trustedDevices: store }); await receiver.standby();
     } };
 }
 async function enroll(f) {
@@ -77,6 +85,60 @@ async function approvedTicket(f, cookie) {
   const id = await requestApproval(f, cookie);
   return f.post('trusted/status', cookie, { id });
 }
+
+test('paired host identity survives restart and an HTTPS address change without moving the cookie', async t => {
+  const f = await fixture(t);
+  const challenge = randomBytes(32).toString('hex');
+  assert.equal((await f.proof(challenge)).status, 404);
+  const { ws, cookie } = await enroll(f);
+  const { body: status } = await f.post('remember/status', cookie);
+  assert.equal(status.busy, true);
+  assert.equal((await f.post('remember/status')).body.hostIdentity, undefined);
+  const { fingerprint, publicKey } = status.hostIdentity;
+  assert.match(fingerprint, /^[a-f0-9]{64}$/);
+  const key = createPublicKey({ key: Buffer.from(publicKey, 'base64url'), format: 'der', type: 'spki' });
+  const check = (proof, address, nonce) => verify('sha256', Buffer.from(JSON.stringify(['dskcpy-host-v1', address, nonce])),
+    { key, dsaEncoding: 'ieee-p1363' }, Buffer.from(proof.signature, 'base64url'));
+  const response = await f.proof(challenge);
+  assert.equal(response.status, 200);
+  assert.equal(response.headers['access-control-allow-origin'], '*');
+  assert.equal(response.headers['access-control-allow-credentials'], undefined);
+  assert.equal(response.headers['set-cookie'], undefined);
+  assert.equal(response.body.fingerprint, fingerprint);
+  assert.deepEqual(Object.keys(response.body).sort(), ['fingerprint', 'publicKey', 'signature']);
+  assert.equal(check(response.body, origin, challenge), true);
+  assert.equal(check(response.body, origin, '0'.repeat(64)), false);
+  assert.equal((await f.proof('invalid')).status, 404);
+  ws.close(4000); await until(() => !f.receiver.status().connected);
+  assert.equal((await f.post('remember/status', cookie)).body.busy, false);
+
+  const newOrigin = 'https://new-host.example';
+  await f.restart(newOrigin);
+  const next = await f.proof(challenge, 'new-host.example');
+  assert.equal(next.body.fingerprint, fingerprint);
+  assert.equal(check(next.body, newOrigin, challenge), true);
+  assert.equal(check(next.body, origin, challenge), false);
+  assert.equal((await f.post('remember/status', cookie, {}, { Host: 'new-host.example', Origin: newOrigin })).body.status, 'unavailable');
+  assert.equal((await f.post('trusted/connect', cookie, { action: 'request' }, { Host: 'new-host.example', Origin: newOrigin })).status, 403);
+  assert.equal(f.captures(), 1);
+});
+
+test('forget clears only this paired browser and cancels its pending stream', async t => {
+  const f = await fixture(t);
+  const { ws, cookie } = await enroll(f);
+  const otherToken = randomBytes(32).toString('base64url');
+  await f.store.approve({ id: 'a'.repeat(32), name: 'Other browser', origin, digest: deviceDigest(otherToken), profile: policy.rememberProfile });
+  ws.close(4000); await until(() => !f.receiver.status().connected);
+  await requestApproval(f, cookie);
+  assert.equal((await f.post('trusted/forget', cookie, {}, { Origin: 'https://unrelated.example' })).status, 403);
+  const forgotten = await f.post('trusted/forget', cookie);
+  assert.equal(forgotten.status, 200);
+  assert.match(forgotten.cookie, /dskcpy_device_v1=; HttpOnly; Secure; SameSite=Strict; Path=\/stream; Max-Age=0/);
+  assert.deepEqual(f.receiver.trustedStatus().devices.map(d => d.name), ['Other browser']);
+  assert.equal((await f.post('trusted/connect', cookie, { action: 'request' })).status, 403);
+  assert.equal((await f.post('trusted/connect', `dskcpy_device_v1=${otherToken}`, { action: 'request' })).status, 202);
+  assert.equal(f.captures(), 1);
+});
 
 test('paired browser obtains a ticket only after host approval and revocation ends access', async t => {
   const f = await fixture(t);

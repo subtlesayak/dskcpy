@@ -36,6 +36,16 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, summary:focus
 .presentation-role #touch-help { display: none !important; }
 #key-help, .subtle, #capability { color: #a1b5c0; font-size: .875rem; }
 #key-help { margin: 0; }
+#remembered-join { margin-block: 24px; }
+#remembered-join h2 { font-size: 1.25rem; }
+#paired-computers { list-style: none; margin: 0; padding: 0; }
+#paired-computers li { border: 1px solid #405461; border-radius: 12px; padding: 16px; }
+#paired-name { margin: 0; overflow-wrap: anywhere; }
+#paired-availability { margin-block: 6px 12px; }
+.paired-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+#paired-manage summary { cursor: pointer; padding-block: 10px; }
+#paired-rename { margin-block: 12px; }
+#paired-management-status:empty, #remembered-connection-status:empty { margin: 0; }
 #error { color: #ffb4ab; max-width: 65ch; margin-inline: auto; overflow-wrap: anywhere; }
 #error:empty { display: none; }
 .is-streaming { overflow: hidden; }

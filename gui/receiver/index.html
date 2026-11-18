@@ -14,12 +14,31 @@
       <p class="eyebrow">Your desktop, here</p>
       <h1 id="join-title">Connect to a desktop</h1>
       <p>On the computer, open Connect → Browser receiver and select Create link and code. Scan its QR with your phone’s camera, or paste the code below to connect.</p>
-      <div id="remembered-join" hidden>
-        <h2>Paired computer</h2>
-        <button id="remembered-reconnect" type="button">Request to connect</button>
-        <button id="remembered-cancel" type="button" hidden>Cancel request</button>
-        <p id="remembered-connection-status" role="status"></p>
-      </div>
+      <section id="remembered-join" aria-labelledby="paired-title" hidden>
+        <h2 id="paired-title">Paired computers</h2>
+        <ul id="paired-computers">
+          <li>
+            <h3 id="paired-name">This computer</h3>
+            <p id="paired-availability" class="subtle" role="status"></p>
+            <div class="paired-actions">
+              <button id="remembered-reconnect" type="button">Request to connect</button>
+              <button id="remembered-cancel" type="button" hidden>Cancel request</button>
+              <button id="paired-refresh" type="button">Check status</button>
+            </div>
+            <p id="remembered-connection-status" role="status"></p>
+            <details id="paired-manage" hidden>
+              <summary>Manage pairing</summary>
+              <form id="paired-rename">
+                <label for="paired-name-input">Computer name</label>
+                <input id="paired-name-input" name="computer-name" maxlength="60" autocomplete="off" required aria-describedby="paired-management-status">
+                <button type="submit">Save name</button>
+              </form>
+              <button id="paired-forget" type="button">Forget computer</button>
+              <p id="paired-management-status" role="status"></p>
+            </details>
+          </li>
+        </ul>
+      </section>
       <form id="join-form">
         <label for="session-key">Connection code</label>
         <input id="session-key" name="session-key" type="password" autocomplete="off" autocapitalize="none" spellcheck="false" maxlength="32" required aria-describedby="key-help error">
