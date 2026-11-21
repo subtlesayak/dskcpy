@@ -275,8 +275,8 @@ jobs:
       - name: Archive the verified Mac app without signing or installation
         run: |
           dskcpy_mac_app="desktop/out/$(node -p 'process.arch === "arm64" ? "mac-arm64" : "mac"')/dskcpy Host.app"
-          ditto -c -k --keepParent "$dskcpy_mac_app" ".tmp/dskcpy-macos-${{ matrix.arch }}.zip"
           mkdir -p .tmp/archive-verification
+          ditto -c -k --keepParent "$dskcpy_mac_app" ".tmp/dskcpy-macos-${{ matrix.arch }}.zip"
           ditto -x -k ".tmp/dskcpy-macos-${{ matrix.arch }}.zip" .tmp/archive-verification
           node desktop/verify-bundle.mjs '.tmp/archive-verification/dskcpy Host.app/Contents/Resources'
       - uses: actions/upload-artifact@v7

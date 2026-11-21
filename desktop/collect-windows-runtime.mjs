@@ -7,7 +7,7 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 const execute = promisify(execFile);
 const validDll = name => /^[a-z0-9_.+-]+\.dll$/i.test(name);
-const systemNames = new Set(('advapi32 authz avrt bcrypt bcryptprimitives cfgmgr32 comctl32 comdlg32 crypt32 cryptbase d3d11 dcomp dhcpcsvc dinput8 dnsapi dwmapi dwrite dxgi gdi32 gdiplus imm32 iphlpapi kernel32 kernelbase mf mfplat mfreadwrite mfuuid mpr msacm32 msimg32 msvcrt msvcp_win ncrypt normaliz ntdll ole32 oleaut32 opengl32 powrprof propsys psapi rpcrt4 secur32 setupapi shell32 shlwapi user32 userenv ucrtbase usp10 version winhttp wininet winmm winspool wintrust windows.storage ws2_32 wsock32 wtsapi32').split(' ').map(name => name + '.dll'));
+const systemNames = new Set(('advapi32 authz avrt bcrypt bcryptprimitives cfgmgr32 comctl32 comdlg32 crypt32 cryptbase d3d11 dcomp dhcpcsvc dinput8 dnsapi dwmapi dwrite dxgi gdi32 gdiplus imm32 iphlpapi kernel32 kernelbase mf mfplat mfreadwrite mfuuid mpr msacm32 msimg32 msvcrt msvcp_win ncrypt normaliz ntdll ole32 oleaut32 opengl32 powrprof propsys psapi rpcrt4 secur32 setupapi shell32 shlwapi user32 userenv ucrtbase usp10 version winhttp wininet winmm winspool wintrust windows.storage wldap32 ws2_32 wsock32 wtsapi32').split(' ').map(name => name + '.dll'));
 
 // Inspect only bounded PE import tables. Do not execute images or produce huge
 // diagnostic dumps of unrelated export/unwind tables during dependency discovery.

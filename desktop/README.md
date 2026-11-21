@@ -135,6 +135,7 @@ from a developer's machine into the package:
 | `ncrypt.dll` | [NCryptOpenStorageProvider](https://learn.microsoft.com/en-us/windows/win32/api/ncrypt/nf-ncrypt-ncryptopenstorageprovider) |
 | `usp10.dll` | [ScriptFreeCache](https://learn.microsoft.com/en-us/windows/win32/api/usp10/nf-usp10-scriptfreecache) |
 | `wsock32.dll` | [Windows Sockets compatibility](https://learn.microsoft.com/en-us/windows/win32/winsock/windows-sockets-compatibility-issues-2) |
+| `wldap32.dll` | [Windows LDAP client](https://learn.microsoft.com/en-us/windows/win32/api/winldap/nf-winldap-ldap_initw) |
 
 Unknown dependencies still fail collection. The copied native executable must
 also load with only its packaged directory and Windows system directories in

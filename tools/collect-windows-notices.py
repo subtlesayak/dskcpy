@@ -7,7 +7,7 @@ import sys
 
 
 def command(*args):
-    return subprocess.check_output(args, text=True).strip()
+    return subprocess.check_output(args, text=True, encoding='utf-8', errors='replace').strip()
 
 
 runtime, destination = map(pathlib.Path, sys.argv[1:])
