@@ -66,6 +66,12 @@ Android app, use the matching companion from this release.
 See [Mac permissions and transports](macos-host.md) and
 [browser connection choices](browser-receiver.md#choose-a-connection).
 
+A separate local test environment also reported Electron timing out during
+macOS initialization before app JavaScript while waiting on the clipboard
+service. Hosted package checks pass, but a normal-desktop host-window launch
+remains a qualification step. See the [dated startup record](project-status.md#unmerged-follow-ups);
+do not restart shared system services during an active stream to work around it.
+
 ## Windows
 
 1. Extract the entire ZIP into a new folder. Keep all files in `win-unpacked`
