@@ -264,6 +264,23 @@ qualify a signed/notarized Mac release, physical presentation/casting, audible
 route recovery, sustained sessions or the broader hardware matrix. Their review,
 integration and physical gates stay on the [roadmap](roadmap.md).
 
+Further 21 November local records identify candidate `43a9a35b`, combining
+separate Gaming fixtures with route-readiness changes `588bd33d`, `33c4572a`
+and `673c0920`. Those changes keep network-only browser setup independent of
+Android tooling while retaining ADB checks for USB. The records report 591 Node
+passes/eight skips, both UI builds, extracted-payload and utility-IPC checks.
+They are not part of the published preview. Separate generated-pixel VideoToolbox
+tests exercised encoder-property acceptance and bounded worker pacing; they do
+not qualify screen capture, network delivery or physical input-to-display latency.
+
+The same local record reports a disposable, unmodified Electron 45.3.1 timing
+out before app JavaScript, in macOS application initialization waiting for a
+synchronous clipboard-service reply. A hidden Launch Services probe also timed
+out. This is a local environment/startup limitation, separate from the passing
+hosted release CI and payload checks. A normal-desktop host-window launch still
+needs qualification; no system-service restart or live-session disruption is
+implied by this diagnosis.
+
 ## Candidate-specific physical evidence
 
 ### Locally repaired source92 Mac app
