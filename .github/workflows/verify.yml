@@ -187,11 +187,25 @@ jobs:
           npm ci --prefix desktop --ignore-scripts
           npm run build --prefix gui
           (cd gui && node node_modules/vite/bin/vite.js build --config vite.desktop.config.ts)
-          node desktop/stage.mjs .tmp/ci-desktop-runtime/scrcpy.exe - app/deps/work/install/adb-windows
+          python tools/collect-windows-notices.py .tmp/ci-desktop-runtime .tmp/ci-native-licenses
+          node desktop/stage.mjs .tmp/ci-desktop-runtime/scrcpy.exe .tmp/ci-native-licenses app/deps/work/install/adb-windows
           npm run package:windows --prefix desktop
           node desktop/verify-bundle.mjs desktop/out/win-unpacked/resources
           gcc -O2 desktop/test/fake-host.c -o .tmp/desktop-smoke-fixture.exe
           node desktop/test/run-electron-smoke.mjs desktop/out/win-unpacked/resources .tmp/desktop-smoke-fixture.exe
+      - name: Archive the verified Windows portable app
+        shell: pwsh
+        run: |
+          Compress-Archive -Path desktop/out/win-unpacked -DestinationPath .tmp/dskcpy-windows-x64.zip
+          Expand-Archive .tmp/dskcpy-windows-x64.zip -DestinationPath .tmp/archive-verification
+          node desktop/verify-bundle.mjs .tmp/archive-verification/win-unpacked/resources
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dskcpy-windows-x64-preview
+          path: .tmp/dskcpy-windows-x64.zip
+          if-no-files-found: error
+          retention-days: 14
 
   native-macos:
     name: ${{ matrix.arch == 'arm64' && 'native-macos' || 'native-macos-intel' }}
@@ -258,6 +272,19 @@ jobs:
           dskcpy_mac_resources="$(node --input-type=module -e 'console.log(`desktop/out/${process.arch === "arm64" ? "mac-arm64" : "mac"}/dskcpy Host.app/Contents/Resources`)')"
           node desktop/verify-bundle.mjs "$dskcpy_mac_resources"
           node desktop/test/run-electron-smoke.mjs "$dskcpy_mac_resources"
+      - name: Archive the verified Mac app without signing or installation
+        run: |
+          dskcpy_mac_app="desktop/out/$(node -p 'process.arch === "arm64" ? "mac-arm64" : "mac"')/dskcpy Host.app"
+          mkdir -p .tmp/archive-verification
+          ditto -c -k --keepParent "$dskcpy_mac_app" ".tmp/dskcpy-macos-${{ matrix.arch }}.zip"
+          ditto -x -k ".tmp/dskcpy-macos-${{ matrix.arch }}.zip" .tmp/archive-verification
+          node desktop/verify-bundle.mjs '.tmp/archive-verification/dskcpy Host.app/Contents/Resources'
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dskcpy-macos-${{ matrix.arch }}-preview
+          path: .tmp/dskcpy-macos-${{ matrix.arch }}.zip
+          if-no-files-found: error
+          retention-days: 14
       - name: Preserve executable permissions in CI artifact
         run: tar -C release/work -czf "$DSKCPY_MAC_HOST_OUTPUT.tar.gz" "host-${{ matrix.arch }}"
       - uses: actions/upload-artifact@v7
@@ -330,3 +357,19 @@ jobs:
       - name: Build standalone server without Gradle
         if: matrix.buildtype == 'debug'
         run: BUILD_DIR=.tmp/ci-manual bash server/build_without_gradle.sh
+      - name: Build the unsigned Android release candidate
+        if: matrix.buildtype == 'debug'
+        run: |
+          ./gradlew :server:assembleRelease
+          test -s server/build/outputs/apk/release/server-release-unsigned.apk
+          "$ANDROID_HOME/build-tools/36.0.0/zipalign" -c -p 4 server/build/outputs/apk/release/server-release-unsigned.apk
+      - name: Preserve release inputs for local signing with the existing key
+        if: matrix.buildtype == 'debug'
+        uses: actions/upload-artifact@v7
+        with:
+          name: dskcpy-android-release-inputs
+          path: |
+            server/build/outputs/apk/release/server-release-unsigned.apk
+            .tmp/ci-manual/scrcpy-server
+          if-no-files-found: error
+          retention-days: 14
