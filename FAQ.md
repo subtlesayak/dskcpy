@@ -13,6 +13,16 @@ The native binary is still named `scrcpy`, so confirm the dashboard selects
 your build of this fork. Build the native host, dashboard and companion from
 matching source. The browser receiver does not install a companion APK.
 
+## Can someone install a Mac build just by accessing GitHub?
+
+Not as a ready-to-install download yet. This repository has no Mac app or
+installer in [GitHub Releases](https://github.com/subtlesayak/dskcpy/releases).
+Someone with the required development tools can build the published source by
+following [Mac setup](doc/macos-host.md). Temporary CI artifacts are unsigned
+development candidates, and the separately staged private test bundle is not a
+public release. A browser receiver runs on the receiving device; it does not
+install or replace the host on the Mac. See [Mac downloads](README.md#mac-downloads).
+
 ## Why does the dashboard address fail on my phone?
 
 The dashboard at `http://127.0.0.1:27183` controls the host **on that computer**.

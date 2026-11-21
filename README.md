@@ -8,7 +8,7 @@ open-source fork of [scrcpy](https://github.com/Genymobile/scrcpy) that adds thi
 reverse direction. The original Android-to-computer mode remains available.
 
 [Get started](#quick-start) · [Windows setup](doc/windows-host.md) ·
-[Mac setup](doc/macos-host.md) · [Browser receiving](doc/browser-receiver.md) ·
+[Mac downloads](#mac-downloads) · [Mac setup](doc/macos-host.md) · [Browser receiving](doc/browser-receiver.md) ·
 [Troubleshooting](FAQ.md) · [Documentation](#documentation)
 
 [Current project status and verification](doc/project-status.md) separates the
@@ -101,6 +101,22 @@ A source implementation or automated pass is not a physical-device pass. See
   media reachability. Chrome and Edge are the initial targets; Safari/iOS needs testing.
 
 ## Get the source
+
+### Mac downloads
+
+There is currently **no ready-to-install Mac download** in
+[GitHub Releases](https://github.com/subtlesayak/dskcpy/releases). Access to this
+repository gives you source code; it does not install a Mac app. To run the
+published version, follow [Mac source-build setup](doc/macos-host.md), including
+the build tools, matching native architecture and macOS permissions.
+
+Temporary CI artifacts are unsigned development candidates. Separately staged
+test bundles and unmerged branches are not published releases. The newer local
+development work listed in [project status](doc/project-status.md#unmerged-follow-ups)
+is not included in the default branch. An installable browser receiver is also
+separate from installing the Mac host.
+
+### Clone the repository
 
 ```sh
 git clone https://github.com/subtlesayak/dskcpy.git

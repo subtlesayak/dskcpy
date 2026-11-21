@@ -1,6 +1,6 @@
 # Project status and verification
 
-Updated **18 November 2026 (IST)**. This is a dated development snapshot;
+Updated **21 November 2026 (IST)**. This is a dated development snapshot;
 draft branches and their CI results may advance after this update.
 dskcpy requires a source build; no signed, ready-to-install desktop release is
 available. A build, simulated regression or short device test qualifies only
@@ -193,10 +193,32 @@ does not control the system keyboard's position or replace its IME.
 
 ## Unmerged follow-ups
 
-Development installer images, additional browser recovery changes and Gaming
-mode are separate ongoing work. They are not capabilities or qualified releases
-of the paired-computer baseline above. Their remaining
-implementation and physical checks stay on the [roadmap](roadmap.md).
+The default branch still has the paired-computer implementation from PR #55,
+with the documentation refresh from PR #56. The following **local, unmerged
+development checkpoints**, recorded on 19 November, are separate from that published runtime. Their source
+identifiers distinguish test evidence; they are not download links or claims that
+these features are available in a GitHub release.
+
+| Development area | Recorded implementation and automated evidence |
+| --- | --- |
+| Background recovery and Gaming | `30fb845b` combines same-capture recovery, relative mouse/keyboard input and a latency workload. Generated browser tests release held input and require a fresh user gesture for Pointer Lock after recovery. Physical game input and input-to-photon measurements remain open. |
+| Private access and video preferences | `d05a2c8d` combines private password access with recovery/Gaming; `08dce4e5` adds named credentials and `e5946870` adds bounded per-pair video preferences. Chromium/WebKit HTTPS sign-in, resume and revocation checks pass. This is local development; the published paired flow still requires host approval for each new stream. |
+| Address changes and browser installation | `48deef9f` preserves verified identity while re-pairing at a new origin. `65b46ce4`, `ed7e32a6` and `f2ef681d` add an installable browser receiver and same-window request/first-pairing flows. Chromium/WebKit HTTPS fixtures pass with simulated standalone mode; physical Android/iOS home-screen installation is unqualified. This installs a receiver web app, not a Mac host. |
+| Android launch lifecycle | `acf098e7` retains an undelivered ADB launch across ordinary intents and Activity recreation, then delivers it once. All 117 Android unit tests across 19 suites pass, including three launch cases. This does not establish the cause of the historical phone startup stall. |
+| Presentation and packaged host | `6bb4ecba` adds presentation audio/controller recovery tests: 20 generated scenarios pass across Chromium/WebKit and WebRTC/WebCodecs. `a6e0a67d` adds a default-off, per-invitation phone-controller choice in the desktop host; 587 Node tests pass with eight skips, seven service cases and four renderer layouts. Both GUI builds, unsigned Apple-silicon payload and hidden fake-IPC checks pass. Generated silent-output audio does not qualify audible playback or casting. |
+
+A private test bundle for host `a6e0a67d` and the matching development-signed
+Android version 50002 was extracted and verified against its checksums, payload
+manifest and APK signature. It was not published to GitHub Releases. A disposable
+Android 16 ARM64 emulator accepted the APK as an in-place update over version
+50001, retained the app UID and a seeded audio preference after launch, and
+completed three cold ADB display-socket handshakes. This is **emulator evidence**,
+not a physical phone pass or a reproduced startup-stall diagnosis.
+
+Development installer images also remain separate. These checkpoints do not
+qualify a signed/notarized Mac release, physical presentation/casting, audible
+route recovery, sustained sessions or the broader hardware matrix. Their review,
+integration and physical gates stay on the [roadmap](roadmap.md).
 
 ## Candidate-specific physical evidence
 
