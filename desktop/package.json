@@ -1,7 +1,7 @@
 {
   "name": "dskcpy-host",
   "productName": "dskcpy Host",
-  "version": "0.1.0",
+  "version": "0.1.0-preview.20261121",
   "private": true,
   "description": "A guided desktop host for private browser screen sharing",
   "main": "main.cjs",

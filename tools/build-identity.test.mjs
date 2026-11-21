@@ -16,7 +16,7 @@ test('canonical artifact identity exceeds received 50001 while wire version stay
   assert.equal(identity.scrcpyProtocol, '4.1');
   assert(identity.androidVersionCode > 50001);
   const properties = await readFile(new URL('../dskcpy.properties', import.meta.url), 'utf8');
-  for (const invalid of [properties.replace('50002', '40100'), properties + '\nDSKCPY_VERSION=1', properties.replace('4.1', '$(echo secret)')]) {
+  for (const invalid of [properties.replace(/DSKCPY_ANDROID_VERSION_CODE=\d+/, 'DSKCPY_ANDROID_VERSION_CODE=40100'), properties + '\nDSKCPY_VERSION=1', properties.replace('4.1', '$(echo secret)')]) {
     assert.throws(() => parseIdentity(invalid));
   }
   const meson = await readFile(new URL('../meson.build', import.meta.url), 'utf8');

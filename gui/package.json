@@ -1,7 +1,7 @@
 {
   "name": "display-bridge-gui",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.0-preview.20261121",
   "type": "module",
   "scripts": {
     "dev": "node scripts/dev.mjs",
