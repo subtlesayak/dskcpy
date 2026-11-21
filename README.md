@@ -8,27 +8,42 @@ open-source fork of [scrcpy](https://github.com/Genymobile/scrcpy) that adds thi
 reverse direction. The original Android-to-computer mode remains available.
 
 [Get started](#quick-start) · [Windows setup](doc/windows-host.md) ·
-[Mac setup](doc/macos-host.md) · [Browser receiving](doc/browser-receiver.md) ·
+[Downloads](#get-the-app) · [Mac setup](doc/macos-host.md) · [Browser receiving](doc/browser-receiver.md) ·
 [Troubleshooting](FAQ.md) · [Documentation](#documentation)
 
 [Current project status and verification](doc/project-status.md) separates the
 merged implementation, unmerged follow-ups and candidate-specific physical results.
-
-[PR #55](https://github.com/subtlesayak/dskcpy/pull/55) adds paired-computer
-navigation and host approval for each new stream. Its final
-[CI run](https://github.com/subtlesayak/dskcpy/actions/runs/44322632765) passed
-all eight jobs; physical-device qualification remains open.
 
 For source/artifact identity, Android upgrade checks and the separate unsigned
 Mac hosting candidate, see [Build identity and compatible upgrades](doc/artifact-upgrades.md).
 
 > [!IMPORTANT]
 > Get dskcpy source from [this repository](https://github.com/subtlesayak/dskcpy).
-> It currently requires a source build; there is no signed, ready-to-install
-> dskcpy desktop release. Upstream scrcpy downloads and package-manager installs
-> do not include dskcpy's desktop-hosting features. Mac hosting and browser
-> receiving are experimental; longer-session audio, transport and device
-> qualification remain open.
+> Download only from this repository's [releases](https://github.com/subtlesayak/dskcpy/releases).
+> Preview builds are experimental: Mac/Windows desktop apps are unsigned, and
+> Mac is not notarized. There is no qualified stable release yet. Upstream scrcpy
+> downloads and package-manager installs do not include dskcpy's desktop-hosting
+> features. Longer-session audio, transport and device qualification remain open.
+
+## Get the app
+
+[**0.1.0 preview — 21 November 2026**](https://github.com/subtlesayak/dskcpy/releases/tag/v0.1.0-preview.20261121)
+provides prebuilt desktop hosts and a matching Android companion. These are
+preview downloads, not a qualified stable release. No compiler or Node.js setup
+is needed to run the desktop app.
+
+| Platform | Download | Install and run |
+| --- | --- | --- |
+| Android | [Companion APK, version 50003](https://github.com/subtlesayak/dskcpy/releases/download/v0.1.0-preview.20261121/dskcpy-android-50003.apk) | [Android instructions](doc/downloads.md#android) |
+| Mac, Apple silicon | [Mac app ZIP, arm64](https://github.com/subtlesayak/dskcpy/releases/download/v0.1.0-preview.20261121/dskcpy-macos-arm64.zip) | [Mac instructions](doc/downloads.md#mac) |
+| Mac, Intel | [Mac app ZIP, x64](https://github.com/subtlesayak/dskcpy/releases/download/v0.1.0-preview.20261121/dskcpy-macos-x64.zip) | [Mac instructions](doc/downloads.md#mac) |
+| Windows x64 | [Portable app ZIP](https://github.com/subtlesayak/dskcpy/releases/download/v0.1.0-preview.20261121/dskcpy-windows-x64.zip) | [Windows instructions](doc/downloads.md#windows) |
+| Browser receiver | Open the invitation served by the running desktop host | [Browser setup](doc/browser-receiver.md) |
+
+Read the [package contents, checksums and upgrade limits](doc/downloads.md)
+before replacing a working installation. The newer local development listed in
+[project status](doc/project-status.md#unmerged-follow-ups) is separate from this
+published implementation. [Source builds](#get-the-source) remain available.
 
 ## What it does
 
@@ -76,7 +91,7 @@ operation uses an external VPN such as Tailscale and its access controls.
 | Host → receiver | Status and limits |
 | --- | --- |
 | Windows → Android | Video, native touch and system audio implemented; physical USB/VPN results are recorded in the validation notes. |
-| Mac → Android | Experimental Apple-silicon and Intel source builds. Earlier snapshots have physical video/input/recovery results; sustained audio and final-candidate qualification remain open. |
+| Mac → Android | Experimental Apple-silicon and Intel builds. Earlier snapshots have physical video/input/recovery results; sustained audio and final-candidate qualification remain open. |
 | Windows/Mac → browser | Experimental private WebRTC and WebCodecs paths, desktop typing, bounded adaptive video and media recovery. Mac window sharing stays view-only; app audio requires a separate opt-in. Physical device/driver qualification remains open. |
 | Desktop → iPhone/iPad browser | Safari/iOS compatibility needs physical qualification; no native iOS receiver or iPhone USB tunnel is provided. |
 | Linux desktop hosting | Not implemented. Linux can still use the inherited Android-to-computer mode. |
@@ -87,13 +102,16 @@ A source implementation or automated pass is not a physical-device pass. See
 
 ## Prerequisites
 
+The preview desktop app includes its runtime. Compiler and Node.js requirements
+below apply when building or running the dashboard from source.
+
 - **Windows host:** Windows 10+, an interactive desktop, and an H.264 encoder.
-- **Mac host:** Apple silicon or Intel, macOS 13+, Apple's Command Line Tools, and
-  Screen Recording permission. Input additionally needs Accessibility.
+- **Mac host:** Apple silicon or Intel, macOS 13+ and
+  Screen Recording permission. Source builds also need Apple's Command Line Tools. Input additionally needs Accessibility.
   Local dependency builds can require a newer OS; the source minimum is not
   a guarantee that a Homebrew-linked binary runs on every macOS 13+ machine.
   Use the [matching native architecture](doc/mac-host-architectures.md).
-- **Dashboard:** Node.js 22.12+ and npm, with this fork's compiled native host.
+- **Dashboard from source:** Node.js 22.12+ and npm, with this fork's compiled native host.
 - **Android app receiver:** Android 5.0+ with H.264 decoding; Android 6+ for
   retained background sessions. A matching companion APK is required.
 - **Browser receiver:** no companion APK. Android USB mode needs authorized
@@ -101,6 +119,17 @@ A source implementation or automated pass is not a physical-device pass. See
   media reachability. Chrome and Edge are the initial targets; Safari/iOS needs testing.
 
 ## Get the source
+
+### Mac downloads
+
+Prebuilt Apple-silicon and Intel app ZIPs are available in
+[Get the app](#get-the-app). They contain an experimental unsigned desktop app;
+read the [Mac installation and qualification limits](doc/downloads.md#mac).
+An installable browser receiver is a different application from the Mac host.
+For development or another build configuration, follow
+[Mac source-build setup](doc/macos-host.md).
+
+### Clone the repository
 
 ```sh
 git clone https://github.com/subtlesayak/dskcpy.git
@@ -180,6 +209,22 @@ address on Android's main Wireless debugging screen after pairing. Android 11+
 can pair without USB; older ADB wireless workflows need initial USB setup.
 A carrier IP alone is not an Internet connection method.
 
+## Must-know tips
+
+- Build the native host and dashboard together for Mac window/keyboard controls;
+  older binaries do not advertise those capabilities.
+- Start with **1920 / 60 FPS / 12 Mbps**, then tune for your device and connection.
+  Performance changes apply to the next stream.
+- Mac window mode is view-only. Audio starts off; a capable host can explicitly
+  allow the selected window's entire application audio. See
+  [application-audio scope and qualification](doc/browser-window-audio.md).
+  Select the entire desktop for input.
+- Computer volume and receiver playback mute are separate controls.
+- Decode-acknowledgement round trip is not physical touch-to-display latency.
+  WebRTC send acknowledgements are not browser decode measurements either.
+- Before rebuilding, changing native artifacts, or restarting a service, end the
+  active session deliberately. A browser refresh cannot replace a native binary.
+
 ## Usage examples
 
 The native binary is still named `scrcpy`. These commands require **this fork's
@@ -197,22 +242,6 @@ Use the dashboard for Internet authentication and browser invitations. Native
 options and encoder/monitor selection are in the
 [reverse-display reference](doc/reverse-display.md).
 
-## Must-know tips
-
-- Build the native host and dashboard together for Mac window/keyboard controls;
-  older binaries do not advertise those capabilities.
-- Start with **1920 / 60 FPS / 12 Mbps**, then tune for your device and connection.
-  Performance changes apply to the next stream.
-- Mac window mode is view-only. Audio starts off; a capable host can explicitly
-  allow the selected window's entire application audio. See
-  [application-audio scope and qualification](doc/browser-window-audio.md).
-  Select the entire desktop for input.
-- Computer volume and receiver playback mute are separate controls.
-- Decode-acknowledgement round trip is not physical touch-to-display latency.
-  WebRTC send acknowledgements are not browser decode measurements either.
-- Before rebuilding, changing native artifacts, or restarting a service, end the
-  active session deliberately. A browser refresh cannot replace a native binary.
-
 ## Limits and security
 
 The host mirrors an existing desktop; it does not add a virtual monitor or
@@ -229,10 +258,13 @@ Diagnostics are not uploaded automatically. Before sharing logs or screenshots,
 remove credentials, invitation codes, device/network identifiers, personal paths
 and private desktop content. Read the [Internet security boundary](doc/internet-mode.md#security-boundary-and-protocol).
 
-## Documentation
+<a id="documentation"></a>
+
+## User documentation
 
 | Task | Guide |
 | --- | --- |
+| Download and run a prebuilt package | [Downloads, verification and upgrades](doc/downloads.md) |
 | Build and run a Windows host | [Windows setup](doc/windows-host.md) |
 | Build and run a Mac host | [Mac setup and permissions](doc/macos-host.md) |
 | Receive desktop video in a browser | [Browser setup and controls](doc/browser-receiver.md) |
@@ -249,6 +281,14 @@ Development checks are `npm test --prefix gui`, `npm run build --prefix gui`,
 [upstream user documentation](https://github.com/Genymobile/scrcpy#user-documentation)
 for the original Android-to-computer features; upstream binaries do not host dskcpy.
 
+## Resources
+
+- [FAQ and troubleshooting](FAQ.md)
+- [Current project status and evidence](doc/project-status.md)
+- [Remaining implementation and hardware work](doc/roadmap.md)
+- [Build identity and compatible upgrades](doc/artifact-upgrades.md)
+- [Developer guide](doc/develop.md)
+
 Report dskcpy bugs to [this fork](https://github.com/subtlesayak/dskcpy/issues),
 with the host OS, receiver, source revision, connection mode, reproduction steps
 and sanitized diagnostics.
@@ -257,7 +297,9 @@ and sanitized diagnostics.
 
 Built on [scrcpy](https://github.com/Genymobile/scrcpy) by Genymobile, Romain
 Vimont and its contributors. Existing notices are retained.
-Licensed under [Apache License 2.0](LICENSE). The passphrase vocabulary has a
+Project source is under [Apache License 2.0](LICENSE); packaged dependencies
+retain their own licenses and [notices](doc/downloads.md#verify-the-download).
+The passphrase vocabulary has a
 separate [MIT notice](server/src/main/assets/internet-words-LICENSE.txt).
 
 Copyright (C) 2018 Genymobile. Copyright (C) 2018–2026 Romain Vimont.
