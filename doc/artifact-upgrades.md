@@ -1,12 +1,13 @@
 # Build identity and compatible upgrades
 
 `dskcpy.properties` is the fork's artifact identity. Android builds now use
-version code **50002**, above the received companion's recorded **50001**.
+version code **50003** for the 21 November preview, above the earlier **50001**
+and **50002** development candidates.
 Future distributed Android versions must increase this code. Keep the package
 `com.genymobile.scrcpy` and the existing signing lineage to preserve installed
 settings and app data.
 
-Artifact version `0.1.0-dev` is separate from the inherited scrcpy wire version
+Artifact version `0.1.0-preview.20261121` is separate from the inherited scrcpy wire version
 `4.1` and reverse protocol `1`. Both Gradle and standalone-server builds accept
 the existing native client's `4.1` argument. This change does not renegotiate
 reverse framing or message IDs.

@@ -7,21 +7,25 @@ or [browser receiving](doc/browser-receiver.md) for the receiver you intend to u
 
 ## Which program should I install?
 
-dskcpy currently requires a source build. Upstream scrcpy downloads and
-`brew install scrcpy` do not include this fork's desktop-hosting features.
-The native binary is still named `scrcpy`, so confirm the dashboard selects
-your build of this fork. Build the native host, dashboard and companion from
-matching source. The browser receiver does not install a companion APK.
+For the prebuilt preview, choose your Mac architecture or Windows x64 app from
+[downloads](doc/downloads.md). Native Android receiving uses the matching signed
+companion APK; browser receiving needs no companion APK. The desktop downloads
+include their native runtime, ADB and matching Android assets. Keep related
+components from the same release.
+
+Upstream scrcpy downloads and `brew install scrcpy` do not include this fork's
+desktop-hosting features. The native binary is still named `scrcpy`, so confirm
+the dashboard selects this fork's build. Source-build instructions remain in
+the platform guides.
 
 ## Can someone install a Mac build just by accessing GitHub?
 
-Not as a ready-to-install download yet. This repository has no Mac app or
-installer in [GitHub Releases](https://github.com/subtlesayak/dskcpy/releases).
-Someone with the required development tools can build the published source by
-following [Mac setup](doc/macos-host.md). Temporary CI artifacts are unsigned
-development candidates, and the separately staged private test bundle is not a
-public release. A browser receiver runs on the receiving device; it does not
-install or replace the host on the Mac. See [Mac downloads](README.md#mac-downloads).
+Yes: [download the preview ZIP](README.md#get-the-app) for Apple silicon or Intel,
+extract `dskcpy Host.app`, and follow [Mac setup for the download](doc/downloads.md#mac).
+No compiler or Node.js installation is needed for that package. It is unsigned
+and not notarized, so macOS or a managed-computer policy may block it. There is
+no qualified stable Mac release yet. The source remains available for developers.
+A browser receiver runs on the receiving device; it does not install the Mac host.
 
 ## Why does the dashboard address fail on my phone?
 
