@@ -47,19 +47,21 @@ test('the validation child has exactly one PATH and cannot load an external MSYS
 });
 
 
-test('known Windows text, graphics, crypto and legacy sockets imports require System32 files', async () => {
+test('known Windows text, graphics, crypto, LDAP and legacy sockets imports require System32 files', async () => {
   const paths = [], systemRoot = 'C:\\Windows';
   const stat = async filename => { paths.push(filename); return { isFile: () => true }; };
-  for (const name of ['DWRITE.dll', 'gdiplus.dll', 'NCRYPT.dll', 'usp10.dll', 'wsock32.dll']) {
+  for (const name of ['DWRITE.dll', 'gdiplus.dll', 'NCRYPT.dll', 'usp10.dll', 'WLDAP32.dll', 'wsock32.dll']) {
     assert.equal(await isWindowsSystemImport(name, { systemRoot, stat }), true);
   }
-  assert.deepEqual(paths, ['dwrite.dll','gdiplus.dll','ncrypt.dll','usp10.dll','wsock32.dll'].map(name => `${systemRoot}\\System32\\${name}`));
+  assert.deepEqual(paths, ['dwrite.dll','gdiplus.dll','ncrypt.dll','usp10.dll','wldap32.dll','wsock32.dll'].map(name => `${systemRoot}\\System32\\${name}`));
   const count = paths.length;
-  for (const name of ['libgraphics.dll', 'dwrite-compat.dll', '../dwrite.dll', 'C:\\dwrite.dll', 'gdiplus.dll:stream']) {
+  for (const name of ['libgraphics.dll', 'dwrite-compat.dll', 'wldap32-compat.dll', '../wldap32.dll', '../dwrite.dll', 'C:\\dwrite.dll', 'gdiplus.dll:stream']) {
     assert.equal(await isWindowsSystemImport(name, { systemRoot, stat }), false);
   }
   assert.equal(paths.length, count);
   assert.equal(await isWindowsSystemImport('dwrite.dll', { systemRoot, stat: async () => { throw Object.assign(new Error(), { code: 'ENOENT' }); } }), false);
+  assert.equal(await isWindowsSystemImport('wldap32.dll', { systemRoot, stat: async () => { throw Object.assign(new Error(), { code: 'ENOENT' }); } }), false);
+  assert.equal(await isWindowsSystemImport('wldap32.dll', { systemRoot, stat: async () => ({ isFile: () => false }) }), false);
   assert.equal(await isWindowsSystemImport('dwrite.dll', { systemRoot, stat: async () => ({ isFile: () => false }) }), false);
   assert.equal(await isWindowsSystemImport('dwrite.dll', { systemRoot: '', stat }), false);
   assert.equal(await isWindowsSystemImport('dwrite.dll', { systemRoot: 'relative', stat }), false);
