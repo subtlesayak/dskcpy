@@ -53,6 +53,25 @@ use a paired browser to request access and wait for Allow on the host, or reques
 a fresh invitation. Pairing alone never starts a new capture. Correct a failed host start before creating
 another code.
 
+### Install dskcpy on the receiving device
+
+Open your private HTTPS receiver link and choose **Open paired computers**.
+Select **Install dskcpy** or use your browser’s install menu. On iPhone or
+iPad, use **Share → Add to Home Screen** in Safari. The installed app opens
+the paired list. Use **Open this computer’s receiver** to enter a fresh
+invitation code. If your installed app has separate browser storage, open
+the receiver in the app and connect with a fresh invitation. In
+**Options → Remember this browser**, request pairing and wait for the
+host to approve. Then select **Save to paired computers**.
+
+When you select the saved computer at the same address as the installed
+app, its approval request opens in that window. Other saved addresses still
+open through a new browser tab.
+
+After the first online visit, the paired list can open offline on browsers
+with service worker support. The host still needs to be online to connect,
+and each new paired stream still requires host approval.
+
 ## Choose a connection
 
 | Dashboard choice | Requirements |
@@ -170,10 +189,11 @@ or input access without a new invitation. Exiting the service closes listeners.
 The local dashboard remains bound to loopback. IPv6 direct binding is not yet
 implemented. Any firewall rule must be explicitly managed by the user.
 
-The browser must trust the issuer and the certificate must match the exact host
-or IP in the URL. dskcpy does not install certificate authorities, create signing
-keys, disable validation, or bypass browser warnings. If certificates are not
-available, use USB, private Tailscale HTTPS, or the native Android receiver.
+The host checks the certificate's dates and address before generating a QR.
+The receiving browser must trust the issuer. dskcpy does not install certificate
+authorities, create signing keys, disable validation, or bypass browser warnings.
+If certificates are unavailable, use USB, private Tailscale HTTPS, or the native
+Android receiver.
 
 ## Controls and lifecycle
 

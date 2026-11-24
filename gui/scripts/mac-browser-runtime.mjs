@@ -17,7 +17,7 @@ export async function verifyMacBrowserRuntime(repoDir, environment = process.env
   if (!runtime.executable) throw new Error('Build or configure an executable Mac reverse-display host.');
   const readiness = await inspectReadiness(runtime, (exe, args, options) => runCommand(exe, args, {
     ...options, windowsHide: true, timeout: 5000, killSignal: 'SIGKILL', maxBuffer: 1024 * 1024,
-  }));
+  }), { checkAdb: false });
   if (!readiness.transports.browser.ready) throw new Error(readiness.transports.browser.message);
   return runtime;
 }

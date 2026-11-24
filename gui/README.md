@@ -91,12 +91,12 @@ error; nothing is killed. Stop that older service manually when idle, or set
 `DISPLAY_BRIDGE_PORT` to another free port. The default is `27183`.
 
 Missing Node.js, npm dependencies or built dashboard files require setup before
-launch. Missing native/ADB components are listed separately and the dashboard
-can still open for diagnostics. `--check` exits unsuccessfully when the basic
-desktop-to-browser streaming components are unavailable; missing ADB/APK is
-reported separately because browser and Internet modes do not require them
-(except USB browser tunneling, which needs ADB). Readiness does not start capture
-or verify desktop permissions, phone authorization or network connectivity.
+launch. The dashboard can open to help diagnose missing host components.
+`--check` checks the requirements for desktop-to-browser streaming over the
+network without starting an ADB probe. Use `--check --browser-usb` to include
+ADB as a requirement for the Android USB browser tunnel. The companion APK is only used by the
+Android app receiver. Readiness does not start capture or verify desktop
+permissions, phone authorization or network connectivity.
 
 Inherited `ADB`, `SCRCPY_*`, `ANDROID_HOME`, `ANDROID_SDK_ROOT`,
 `DISPLAY_BRIDGE_PORT` and `DSKCPY_VIEWER_*` configuration is preserved. An

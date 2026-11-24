@@ -11,6 +11,7 @@ import net from 'node:net';
 import { once } from 'node:events';
 import test from 'node:test';
 import { createControlService } from './service.mjs';
+import { inspectReadiness } from './runtime.mjs';
 
 const ready = {
   checks: [{ id: 'binary', label: 'Program', ready: true }],
@@ -54,8 +55,8 @@ async function fixture(t, options = {}) {
     },
     ...options,
   });
-  const port = await service.listen();
   t.after(() => service.shutdown());
+  const port = await service.listen();
   const request = (target, body) => new Promise((resolve, reject) => {
     const req = http.request({ host: '127.0.0.1', port, path: target,
       method: body === undefined ? 'GET' : 'POST',
@@ -364,6 +365,43 @@ test('Stop during browser readiness cancels invitation creation without capture'
   await f.request('/api/stream/stop', {}); release(ready);
   assert.equal((await invite).code, 400);
   assert.equal(f.publicState().browser.waiting, false); assert.equal(f.children.length, 0);
+});
+
+test('browser capture can start while a full dashboard status check waits for ADB', async t => {
+  let enteredAdb = false, releaseAdb;
+  const adbGate = new Promise(resolve => { releaseAdb = resolve; });
+  const f = await fixture(t, {
+    platform: 'darwin',
+    environment: { ...process.env, SCRCPY_GUI_BINARY: process.execPath, ADB: process.execPath },
+    readinessProbe: inspectReadiness,
+    commandRunner: async (_exe, args) => {
+      if (args[0] === 'version') {
+        enteredAdb = true;
+        await adbGate;
+      }
+      return { stdout: '--reverse-display --reverse-socket ScreenCaptureKit/VideoToolbox' };
+    },
+  });
+  const dashboardStatus = f.request('/api/status');
+  try {
+    await waitFor(() => enteredAdb);
+    let invitation;
+    const request = f.request('/api/browser/invite', {}).then(result => { invitation = result; });
+    await waitFor(() => Boolean(invitation));
+    await request;
+    assert.equal(invitation.code, 201);
+    const { url, key } = invitation.body;
+    const socket = new WebSocket(url.replace('http:', 'ws:') + 'stream', { origin: url.slice(0, -1) });
+    socket.on('error', () => {});
+    t.after(() => socket.terminate());
+    await once(socket, 'open');
+    socket.send(key);
+    await waitFor(() => f.children.length === 1);
+  } finally {
+    releaseAdb();
+    const status = await dashboardStatus;
+    assert.equal(status.body.readiness.checks.find(check => check.id === 'adb').ready, true);
+  }
 });
 
 test('browser reload keeps the native process and owned USB tunnel until explicit Stop', async (t) => {
@@ -872,6 +910,29 @@ test('private remote Mac desktop session opts into keyboard support only after a
   await f.request('/api/stream/stop', {});
 });
 
+
+test('invalid direct HTTPS files leave the dashboard and local browser route available', async t => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'dskcpy-broken-cert-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const filename = path.join(dir, 'devices.json');
+  const origin = 'https://host.example:27181';
+  const store = createTrustedDevices({ filename });
+  await store.approve({ id: 'a'.repeat(32), digest: deviceDigest('x'.repeat(43)), name: 'Test browser',
+    origin, profile: { maxSize: 1600, maxFps: 30, bitRateMbps: 8 } });
+  const f = await fixture(t, { trustedDevicesPath: filename, environment: {
+    SCRCPY_GUI_BINARY: process.execPath, DSKCPY_VIEWER_ORIGIN: origin,
+    DSKCPY_VIEWER_TLS_BIND: '127.0.0.1', DSKCPY_VIEWER_TLS_PORT: '27181',
+    DSKCPY_VIEWER_TLS_CERT: path.join(dir, 'PRIVATE_PATH.pem'), DSKCPY_VIEWER_TLS_KEY: path.join(dir, 'missing.key'),
+  } });
+  assert.equal((await f.request('/api/health')).code, 200);
+  const failed = await f.request('/api/browser/invite', { browserTransport: 'wifi' });
+  assert.equal(failed.code, 400);
+  assert.match(failed.body.error, /could not read the configured certificate or key/);
+  assert.equal(f.publicState().browser.waiting, false);
+  assert.doesNotMatch(JSON.stringify([failed.body, f.publicState().logs]), /PRIVATE_PATH/);
+  assert.equal((await f.request('/api/browser/invite', { browserTransport: 'local' })).code, 201);
+  assert.equal(f.children.length, 0);
+});
 
 test('owner Stop durably pauses remembered access; remote origin cannot re-enable it', async t => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'dskcpy-owner-trust-'));

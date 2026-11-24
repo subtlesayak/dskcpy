@@ -17,7 +17,7 @@ async function until(predicate) {
   for (let i = 0; i < 200; i++) { if (predicate()) return; await new Promise(r => setTimeout(r, 5)); }
   assert.fail('Expected state transition');
 }
-async function fixture(t, { viewOnly = false, beforeTrusted = async () => {}, now = Date.now, connectionRequestMs } = {}) {
+async function fixture(t, { viewOnly = false, beforeTrusted = async () => {}, now = Date.now, connectionRequestMs, mode = 'internet' } = {}) {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'dskcpy-browser-trust-'));
   const filename = path.join(dir, 'devices.json');
   let store = createTrustedDevices({ filename, now }); await store.ready;
@@ -29,7 +29,7 @@ async function fixture(t, { viewOnly = false, beforeTrusted = async () => {}, no
   }, onTrustedConnect: async device => { await beforeTrusted(); return receiver.invite('internet', { ...policy, clipboard: true, rememberProfile: device.profile }, device); } };
   receiver = createBrowserReceiver(options);
   t.after(async () => { for (const n of natives) n.destroy(); await receiver.shutdown(); await rm(dir, { recursive: true, force: true }); });
-  const invitation = await receiver.invite('internet', { ...policy, viewOnly });
+  const invitation = await receiver.invite(mode, { ...policy, viewOnly });
   const post = (route, cookie, body = {}, headers = {}) => new Promise((resolve, reject) => {
     const req = http.request({ hostname: '127.0.0.1', port: receiver.port, path: `/stream/${route}`, method: 'POST',
       headers: { Host: 'host.example', Origin: origin, 'Content-Type': 'application/json', ...(cookie ? { Cookie: cookie } : {}), ...headers } }, res => {
@@ -121,6 +121,30 @@ test('paired host identity survives restart and an HTTPS address change without 
   assert.equal((await f.post('remember/status', cookie, {}, { Host: 'new-host.example', Origin: newOrigin })).body.status, 'unavailable');
   assert.equal((await f.post('trusted/connect', cookie, { action: 'request' }, { Host: 'new-host.example', Origin: newOrigin })).status, 403);
   assert.equal(f.captures(), 1);
+});
+
+for (const mode of ['wifi', 'ip']) test(`a paired ${mode} browser can request approval again after restart`, async t => {
+  const f = await fixture(t, { mode });
+  const { ws, cookie } = await enroll(f);
+  ws.close(4000);
+  await until(() => !f.receiver.status().connected);
+  await f.restart();
+
+  const denied = await f.post('trusted/connect', cookie, { action: 'request' });
+  assert.equal(denied.status, 202);
+  assert.equal((await f.post('trusted/status', cookie, { id: denied.body.id })).body.status, 'pending');
+  await f.receiver.trustAction('deny-stream', denied.body.id);
+  assert.equal((await f.post('trusted/status', cookie, { id: denied.body.id })).body.status, 'denied');
+  assert.equal(f.captures(), 1);
+  assert.equal(f.receiver.status().waiting, false);
+
+  const ticket = await approvedTicket(f, cookie);
+  assert.equal(ticket.status, 201);
+  assert.equal(f.captures(), 1);
+  const returning = await f.connect(ticket.body.key, origin, 'host.example', cookie);
+  await until(() => returning.received.some(message => message.binary));
+  assert.equal(f.captures(), 2);
+  returning.close(4000);
 });
 
 test('forget clears only this paired browser and cancels its pending stream', async t => {

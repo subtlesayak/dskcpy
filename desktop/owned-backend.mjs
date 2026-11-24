@@ -64,7 +64,7 @@ export class OwnedBackend {
     });
   }
   status() { return this.request('status'); }
-  readiness() { return this.request('readiness'); }
+  readiness({ checkAdb = true } = {}) { return this.request('readiness', { checkAdb }); }
   usbDevices() { return this.request('usb-devices'); }
   prepareReceiver() { return this.request('prepare-receiver'); }
   invite(args) { return this.request('invite', args); }

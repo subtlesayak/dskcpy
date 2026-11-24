@@ -24,6 +24,7 @@ function takeJoinFragment() {
   return key;
 }
 let scannedKey = takeJoinFragment();
+const pairedAppLaunch = location.protocol === 'https:' && location.hash === '#paired-app';
 function setRailLabel(id, label) {
   $(id).setAttribute('aria-label', label); $(id).setAttribute('title', label);
   $(`${id}-label`).textContent = label;
@@ -33,13 +34,16 @@ const rtcDisplay = $('rtc-display');
 let presentationUI = null, presentationRole = false, presentationCapable = false;
 const away = () => receiverIsAway({ hidden: document.hidden, pictureInPictureElement: document.pictureInPictureElement, video: rtcDisplay, presentationMode: rtcDisplay.webkitPresentationMode,
   presentationPlayback: presentationRole && presentationUI?.backgroundPlayback === true });
+function releaseDirectoryJoinGuard() {
+  if (location.hash === '#paired-app' || (window.opener && location.hash === '#directory-access'))
+    window.history.replaceState(null, '', `${location.pathname}${location.search}`);
+}
 const remembered = rememberedBrowser({ canRequest: () => !ws && supported, canClaim: () => !away(), connectApproved(key) {
   if (away() || ws || !supported) return false;
   // The host has approved this request. Retire the new-tab guard before the
   // handshake so a lost authentication reply cannot strand the already
   // approved capture on reload. The cookie still grants only session resume.
-  if (window.opener && location.hash === '#directory-access')
-    window.history.replaceState(null, '', `${location.pathname}${location.search}`);
+  releaseDirectoryJoinGuard();
   resumeAllowed = true; sessionExpected = false; resumeDeadline = 0;
   $('error').textContent = ''; connect(key); return true;
 } });
@@ -47,6 +51,8 @@ if (location.protocol === 'https:') {
   const computers = $('computers-link');
   if (computers) computers.hidden = false;
   if (window.opener) void import('./computer-link.mjs').then(({ linkComputerDirectory }) => linkComputerDirectory(remembered)).catch(() => {});
+  else if (window.matchMedia?.('(display-mode: standalone)').matches || navigator.standalone === true)
+    void import('./computer-link.mjs').then(({ saveComputerInPairedApp }) => saveComputerInPairedApp(remembered)).catch(() => {});
 }
 let rtcReceiver, mediaMode = 'webcodecs';
 let pointerButtonsSupported = false;
@@ -133,7 +139,7 @@ const pointers = new Map();
 const pendingAudioAcks = [];
 let generation = 0;
 let sessionExpected = false, retryTimer, connectionTimer, resumeDeadline = 0, probing = false;
-let resumeAllowed = !(window.opener && location.hash === '#directory-access');
+let resumeAllowed = !pairedAppLaunch && !(window.opener && location.hash === '#directory-access');
 let audioGeneration = 0, fullscreenAttempt = 0, playbackAttempt = 0;
 const mediaAcks = createMediaAcknowledger(send);
 const controlTrays = [
@@ -590,6 +596,7 @@ $('join-form').addEventListener('submit', (event) => {
   }
   $('session-key').removeAttribute('aria-invalid'); $('error').textContent = '';
   $('session-key').value = '';
+  releaseDirectoryJoinGuard();
   resumeAllowed = true;
   connect(key);
 });
@@ -1026,7 +1033,10 @@ window.addEventListener('pagehide', () => {
 });
 window.addEventListener('pageshow', () => { updatePause(); void resumeSession(); });
 void resumeSession();
-void remembered.status();
+if (pairedAppLaunch) {
+  void import('./computer-link.mjs').then(({ requestFromPairedApp }) => requestFromPairedApp(remembered))
+    .catch(() => remembered.status());
+} else void remembered.status();
 $('touch').addEventListener('click', () => {
   if (viewOnly) return;
   releaseTouches(); touchEnabled = !touchEnabled; updateArrowAvailability();

@@ -9,7 +9,7 @@ candidate-specific physical results are recorded in
 
 ## First connection
 
-1. Start the host with its existing private HTTPS/VPN setup. Connect using a normal temporary invitation.
+1. Start the host with its existing private HTTPS setup. Connect using a temporary invitation over **Same Wi-Fi**, **Direct IP** or **Internet / VPN**.
 2. In the receiving browser, open **Options → Remember this browser**. Enter a readable name and select **Request pairing**. Use only your own browser profile.
 3. On the host dashboard or desktop app, review **Remembered devices** and select **Allow remembered access**. Pairing lets this browser request streams for 90 days.
 4. Return to the same private HTTPS address in the same browser profile. A brief transport interruption can resume the same stream. For a new stream, select **Request to connect** and wait for someone at the computer to choose **Allow** or **Deny**. Select **Cancel request** to withdraw it. Requests expire after one minute.
@@ -56,7 +56,7 @@ Choose **Open paired computers** on a private HTTPS receiver. Keep this list as 
 
 **Check reachability** checks the pinned HTTPS identity without sending a credential. **Check status** opens a computer’s receiver briefly to read its current pairing, busy or paused status. Browser cookies stay on each computer’s address. A browser-generated token lets the saved list send a request through its receiver tab after you save the computer. It carries no ability to start capture without host approval.
 
-Use **Change address** to verify a new HTTPS address with the original computer’s signing key, then pair again at that address. **Forget** revokes pairing if the saved computer is reachable and provides local removal when the computer is unreachable. A browser that supports service workers can reopen the previously visited list while the computer that served it is offline. The list is tied to that starting address and this browser profile. Keep the existing QR or manual receiver flow for first connections and for browsers that block the tab handoff.
+Use **Change address** to verify the new HTTPS address with the original computer’s signing key. Select **Pair again**, connect with a fresh code from that host, and save the approved pairing. The list checks the saved identity again and keeps the computer’s name. **Forget** revokes pairing if the saved computer is reachable and provides local removal when the computer is unreachable. A browser that supports service workers can reopen the previously visited list while the computer that served it is offline. The list is tied to that starting address and this browser profile. Keep the existing QR or manual receiver flow for first connections and for browsers that block the tab handoff.
 
 The one-minute request deadline limits admission, not the duration of an
 approved stream. Once accepted, a session is bounded by the earlier of its

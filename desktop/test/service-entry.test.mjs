@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Worker } from 'node:worker_threads';
-import { mkdtemp, writeFile, rm, mkdir, copyFile } from 'node:fs/promises';
+import { mkdtemp, writeFile, readFile, rm, mkdir, copyFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -52,8 +52,9 @@ test('service IPC runs the existing backend on its own ephemeral controller with
   const native = path.join(directory, 'fake-host');
   await writeFile(native, '#!/bin/sh\nprintf "%s\\n" "--reverse-display --reverse-socket --reverse-keyboard ScreenCaptureKit/VideoToolbox"\n', { mode: 0o755 });
   const adb = path.join(directory, 'fake-adb'), devices = path.join(directory, 'devices.txt');
+  const adbProbe = path.join(directory, 'adb-version-probed');
   await writeFile(devices, 'List of devices attached\nPRIVATE-USB-SERIAL device model:Test_Phone\nprivate-host:5555 device model:Wireless_Peer\n');
-  await writeFile(adb, '#!/bin/sh\ncase "$1" in\nversion) printf "%s\\n" "Android Debug Bridge version 1.0.41";;\ndevices) cat "$DSKCPY_USB_FIXTURE";;\n*) exit 7;;\nesac\n', { mode: 0o755 });
+  await writeFile(adb, '#!/bin/sh\ncase "$1" in\nversion) echo checked > "$DSKCPY_ADB_PROBE"; printf "%s\\n" "Android Debug Bridge version 1.0.41";;\ndevices) cat "$DSKCPY_USB_FIXTURE";;\n*) exit 7;;\nesac\n', { mode: 0o755 });
   const worker = new Worker(`const { parentPort, workerData } = require('node:worker_threads');
     process.parentPort = { on: (_event, fn) => parentPort.on('message', data => fn({ data })), postMessage: data => parentPort.postMessage(data) };
     const originalFetch=globalThis.fetch;let preparation=0;
@@ -62,7 +63,7 @@ test('service IPC runs the existing backend on its own ephemeral controller with
       : originalFetch(url,options);
     require(workerData);`, { eval: true,
     workerData: path.resolve('desktop/service-entry.cjs'), env: { ...process.env,
-      SCRCPY_GUI_BINARY: native, ADB: adb, DSKCPY_USB_FIXTURE: devices, DSKCPY_VIEWER_ORIGIN: '',
+      SCRCPY_GUI_BINARY: native, ADB: adb, DSKCPY_USB_FIXTURE: devices, DSKCPY_ADB_PROBE: adbProbe, DSKCPY_VIEWER_ORIGIN: '',
       DSKCPY_VIEWER_TLS_CERT: '', DSKCPY_VIEWER_TLS_KEY: '' } });
   let sequence = 0;
   function request(action, args) {
@@ -75,11 +76,17 @@ test('service IPC runs the existing backend on its own ephemeral controller with
   }
   try {
     assert.equal((await request('ready')).ok, true);
-    const ready = await request('readiness'); assert.equal(ready.value.ready, process.platform === 'darwin');
+    const network = await request('readiness', { checkAdb: false });
+    assert.deepEqual(network.value, { ready: process.platform === 'darwin', keyboard: process.platform === 'darwin',
+      clipboard: false, adb: false });
+    await assert.rejects(readFile(adbProbe), { code: 'ENOENT' });
+    const ready = await request('readiness', { checkAdb: true });
+    assert.equal(ready.value.ready, process.platform === 'darwin');
+    assert.equal((await readFile(adbProbe, 'utf8')).trim(), 'checked');
     const status = await request('status');
     assert.deepEqual(status.value, { running: false, browser: { waiting: false, connected: false }, nativeInputPermission: null });
     assert.ok(!JSON.stringify(status).includes(directory));
-    assert.deepEqual(await request('unknown-command'), { id: 4, ok: false });
+    assert.deepEqual(await request('unknown-command'), { id: 5, ok: false });
     assert.equal(ready.value.adb, true);
     const usb = await request('usb-devices'); assert.equal(usb.ok, true);
     assert.equal(usb.value.devices.length, 1); assert.equal(usb.value.devices[0].name, 'Test Phone');
