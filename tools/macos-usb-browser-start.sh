@@ -20,4 +20,4 @@ echo "Open the Mac dashboard and choose Browser receiver → USB cable."
 echo "Connect and unlock Android, allow USB debugging, then select Open on phone. No QR is needed."
 echo "The receiver uses a private ADB USB tunnel; no VPN or phone app is required."
 echo "Keep this Terminal open."
-exec node gui/scripts/launch.mjs --no-open --no-reuse
+exec node gui/scripts/launch.mjs --browser-usb --no-open --no-reuse

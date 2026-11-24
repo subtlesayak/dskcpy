@@ -52,7 +52,7 @@ export function resolveRuntime(repoDir, inputEnv = process.env, platform = proce
   return { executable, adb, env, repoDir, platform };
 }
 
-export async function inspectReadiness(runtime, runCommand) {
+export async function inspectReadiness(runtime, runCommand, { checkAdb = true } = {}) {
   const { executable, adb, env, platform, repoDir } = runtime;
   const checks = [];
   const add = (id, label, ready, message) => checks.push({ id, label, ready, message });
@@ -84,13 +84,14 @@ export async function inspectReadiness(runtime, runCommand) {
   add('server', 'Server artifact', isFile(env.SCRCPY_SERVER_PATH), 'Build or configure the matching scrcpy-server artifact.');
   add('companion', 'Android companion', isFile(env.SCRCPY_REVERSE_DISPLAY_APK), 'Build or configure the signed reverse-display.apk companion.');
   let adbReady = false;
-  if (adb) {
+  if (checkAdb && adb) {
     try {
       await runCommand(adb, ['version'], { env, cwd: repoDir });
       adbReady = true;
     } catch { /* ADB readiness is separate from Internet transport. */ }
   }
-  add('adb', 'Android connection tool', adbReady, adbReady ? 'ADB loads successfully.'
+  add('adb', 'Android connection tool', adbReady, !checkAdb ? 'ADB was not checked for this connection.'
+    : adbReady ? 'ADB loads successfully.'
     : adb ? 'ADB was found but could not start. Check its permissions, user directory and runtime dependencies.'
     : 'Install or configure Android platform-tools (ADB).');
   const base = ['binary', 'runtime', 'capture'];

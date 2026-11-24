@@ -1,10 +1,10 @@
-import { channelToken, computerName, directoryMessage, nonce, proveComputer, publicIdentity, receiverAddress } from './computers-common.mjs';
+import { channelToken, computerName, directoryMessage, nonce, pairedAppIntent, pairedComputersKey, proveComputer, publicIdentity, readPairedComputers, receiverAddress } from './computers-common.mjs';
 
 const $ = id => document.getElementById(id);
-const storageKey = 'dskcpy.paired-computers.v1';
 const list = $('paired-computers'), feedback = $('directory-status'), dialog = $('edit-computer');
 const addressInput = $('computer-url'), addError = $('add-error'), editInput = $('edit-value'), editError = $('edit-error');
 const checkButton = $('check-computers'), cancelButton = $('cancel-directory-request');
+const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
 const labels = {
   reachable: 'Reachable', offline: 'Unreachable', unavailable: 'Identity unavailable', changed: 'Computer identity changed',
   'pairing-required': 'Pairing required', busy: 'Computer is busy', paused: 'Requests are paused on the computer',
@@ -16,16 +16,10 @@ const labels = {
 };
 const availability = new Set(['reachable', 'offline', 'unavailable', 'changed', 'pairing-required', 'busy', 'paused', 'update-required']);
 const statusById = new Map();
-let computers = [], active, edit, checking = false;
-
-try {
-  const saved = JSON.parse(localStorage.getItem(storageKey));
-  if (Array.isArray(saved)) computers = saved.slice(0, 16).filter(item => publicIdentity(item) && computerName(item.name)
-    && receiverAddress(item.origin)?.origin === item.origin && (item.binding === null || channelToken(item.binding)));
-} catch { /* This visit can still add computers if browser storage is unavailable. */ }
+let computers = readPairedComputers(), active, edit, checking = false;
 
 function persist() {
-  try { localStorage.setItem(storageKey, JSON.stringify(computers)); return true; } catch { return false; }
+  try { localStorage.setItem(pairedComputersKey, JSON.stringify(computers)); return true; } catch { return false; }
 }
 const say = text => { if (feedback.textContent !== text) feedback.textContent = text; };
 const get = id => computers.find(item => item.fingerprint === id);
@@ -60,7 +54,7 @@ function render() {
     const pair = !computer.binding || phase === 'pairing-required';
     controls.append(
       action(pair ? 'Pair again' : 'Request to connect', computer, 'request', () => {
-        if (pair) void openReceiver(new URL(computer.origin), 'add');
+        if (pair) void openReceiver(new URL(computer.origin), 'add', computer);
         else void openReceiver(new URL(computer.origin), 'request', computer);
       }),
       action('Rename', computer, 'rename', event => showEdit(computer, 'name', event.currentTarget)),
@@ -120,6 +114,7 @@ $('edit-computer-form').addEventListener('submit', async event => {
     if (edit !== change || !current(computer)) return;
     if (phase !== 'reachable') { invalid(phase === 'changed' ? 'This address belongs to a different computer.' : 'Could not verify the new address.'); return; }
     computer.origin = address.origin; computer.binding = null;
+    delete computer.pairingId;
     statusById.set(computer.fingerprint, 'pairing-required');
   }
   const persisted = persist();
@@ -154,23 +149,37 @@ function message(job, action) {
 }
 async function openReceiver(url, action, computer) {
   if (active) return;
-  const popup = window.open(action === 'add' ? url.href : 'about:blank', '_blank');
-  if (!popup) { say('Allow pop-ups for this page to open the receiver.'); return; }
+  const sameHostRequest = action === 'request' && url.origin === location.origin;
+  const sameAppAdd = action === 'add' && standalone && url.origin === location.origin;
+  if (sameAppAdd && !computer) { location.assign(url.href); return; }
+  const popup = sameAppAdd || (sameHostRequest && standalone) ? null : window.open(computer ? 'about:blank' : url.href, '_blank');
+  if (!popup && !sameHostRequest && !sameAppAdd) { say('Allow pop-ups for this page to open the receiver.'); return; }
   const job = active = { id: nonce(), action, origin: url.origin, popup, computer };
   render();
   cancelButton.hidden = action !== 'request';
   if (action === 'request') cancelButton.focus();
-  say(action === 'add' ? 'Open the receiver tab and choose Save to paired computers after pairing.' : 'Verifying the computer…');
+  const addGuidance = 'Open the receiver tab and choose Save to paired computers after pairing.';
+  say(computer ? 'Verifying the computer…' : addGuidance);
   if (computer) {
     const phase = await reachability(computer);
     if (active !== job) return;
-    if (phase !== 'reachable' || popup.closed || job.cancelled) {
-      popup.close();
+    if (phase !== 'reachable' || popup?.closed || job.cancelled) {
+      popup?.close();
       if (phase !== 'reachable') statusById.set(computer.fingerprint, phase);
       stop(job, job.cancelled ? labels.cancelled : phase !== 'reachable' ? labels[phase] : 'The receiver tab closed.'); return;
     }
+    if (!popup) {
+      if (sameAppAdd) { stop(job, 'Opening the receiver…'); location.assign(url.href); return; }
+      const { fingerprint, binding } = computer;
+      try { sessionStorage.setItem(pairedAppIntent, JSON.stringify({ fingerprint, binding, expiresAt: Date.now() + 15000 })); }
+      catch { stop(job, 'Open this computer’s receiver and request a stream there.'); return; }
+      stop(job, 'Opening the receiver…');
+      location.assign('/#paired-app');
+      return;
+    }
     job.navigated = true;
-    popup.location.replace(`${url.origin}/#directory-access`);
+    popup.location.replace(action === 'add' ? url.href : `${url.origin}/#directory-access`);
+    if (action === 'add') say(addGuidance);
   }
   const start = Date.now();
   job.lastResponseAt = start;
@@ -199,6 +208,10 @@ window.addEventListener('message', async event => {
   if (value.action === 'saved' && job.action === 'add' && !job.saving) {
     const saved = value.computer;
     if (!publicIdentity(saved) || !computerName(saved.name) || !channelToken(value.binding)) return;
+    if (job.computer && saved.fingerprint !== job.computer.fingerprint) {
+      statusById.set(job.computer.fingerprint, 'changed');
+      stop(job, labels.changed); return;
+    }
     job.saving = true;
     const entry = { fingerprint: saved.fingerprint, publicKey: saved.publicKey, origin: job.origin,
       binding: value.binding, name: get(saved.fingerprint)?.name || saved.name };
@@ -231,11 +244,49 @@ cancelButton.addEventListener('click', () => {
   const job = active;
   if (job?.action !== 'request') return;
   job.cancelled = true;
-  if (!job.navigated) { job.popup.close(); stop(job, labels.cancelled); return; }
+  if (!job.navigated) { job.popup?.close(); stop(job, labels.cancelled); return; }
   if (job.ready) message(job, 'cancel');
   say('Cancelling connection request…');
 });
 
 render();
 void checkReachability();
-if ('serviceWorker' in navigator) void navigator.serviceWorker.register('/computers/computers-sw.mjs', { scope: '/computers/' }).catch(() => {});
+window.addEventListener('pageshow', event => {
+  if (!event.persisted || active || edit) return;
+  // Back can restore the pre-pairing directory from the browser's page cache.
+  computers = readPairedComputers();
+  statusById.clear();
+  render(); void checkReachability();
+});
+
+if (location.protocol === 'https:' && 'serviceWorker' in navigator) {
+  void navigator.serviceWorker.register('/computers/computers-sw.mjs', { scope: '/computers/' }).catch(() => {});
+  if (!standalone) {
+    const install = $('install-app'), help = $('install-help');
+    let pendingPrompt = null, installed = false;
+    help.hidden = false;
+    window.addEventListener('beforeinstallprompt', event => {
+      event.preventDefault(); pendingPrompt = event;
+      if (!installed) { install.hidden = false; help.hidden = true; }
+    });
+    window.addEventListener('appinstalled', () => {
+      installed = true; pendingPrompt = null; install.hidden = true; help.hidden = true;
+    });
+    install.addEventListener('click', async () => {
+      if (!pendingPrompt) return;
+      const event = pendingPrompt;
+      pendingPrompt = null; install.hidden = true;
+      try {
+        await event.prompt();
+        if ((await event.userChoice).outcome === 'accepted') installed = true;
+      } catch {
+        // The browser menu remains available if its prompt cannot open.
+      } finally {
+        if (!installed && !pendingPrompt) {
+          help.hidden = false;
+          help.querySelector('summary').focus();
+        }
+      }
+    });
+  }
+}

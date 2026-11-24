@@ -32,14 +32,14 @@ parent.on('message', async ({ data }) => {
     await startup;
     let value;
     switch (data.action) {
-      case 'ready': await api('/api/status'); value = true; break;
+      case 'ready': value = true; break;
       case 'status': {
         const status = service.publicState();
         value = { running: status.running, browser: browserSummary(status.browser),
           nativeInputPermission: ['ready', 'blocked', 'unreported'].includes(status.nativeInputPermission) ? status.nativeInputPermission : null }; break;
       }
       case 'readiness': {
-        const readiness = (await api('/api/status')).readiness;
+        const readiness = await service.browserReadiness(data.args?.checkAdb !== false);
         value = { ready: Boolean(readiness?.transports?.browser?.ready), keyboard: readiness?.features?.browserKeyboard === true,
           clipboard: readiness?.features?.browserClipboard === true,
           adb: readiness?.checks?.some(check => check.id === 'adb' && check.ready) === true }; break;

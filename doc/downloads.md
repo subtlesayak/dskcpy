@@ -4,8 +4,10 @@ The [21 November 2026 preview](https://github.com/subtlesayak/dskcpy/releases/ta
 contains Android, Mac and Windows packages built from the reviewed published
 implementation. It is a prerelease. Mac and Windows desktop apps are unsigned;
 Mac is not notarized. Hardware and clean-machine qualification remain open.
-The later local Gaming, password-access, receiver web-app and Android launch
-prototypes are not included. See [project status](project-status.md).
+The installable web receiver and newer LAN pairing and setup fixes are available
+in the source tree. The preview downloads contain the earlier receiver.
+See [browser receiver setup](browser-receiver.md#install-dskcpy-on-the-receiving-device)
+and [project status](project-status.md).
 
 ## Choose a package
 

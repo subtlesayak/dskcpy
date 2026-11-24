@@ -1,4 +1,6 @@
 export const directoryMessage = 'dskcpy-computers-v1';
+export const pairedAppIntent = 'dskcpy.paired-app-intent.v1';
+export const pairedComputersKey = 'dskcpy.paired-computers.v1';
 export const channelToken = value => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
 export const publicIdentity = value => channelToken(value?.fingerprint)
   && typeof value?.publicKey === 'string' && /^[A-Za-z0-9_-]{122}$/.test(value.publicKey);
@@ -16,6 +18,14 @@ export function receiverAddress(value, invitation = false) {
     if (url.hash && !/^#connect=[A-Za-z0-9_-]{32}$/.test(url.hash)) return null;
     return url;
   } catch { return null; }
+}
+
+export function readPairedComputers() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(pairedComputersKey));
+    return Array.isArray(saved) ? saved.slice(0, 16).filter(item => publicIdentity(item) && computerName(item.name)
+      && receiverAddress(item.origin)?.origin === item.origin && (item.binding === null || channelToken(item.binding))) : [];
+  } catch { return []; }
 }
 
 const unbase64url = value => Uint8Array.from(atob(value.replaceAll('-', '+').replaceAll('_', '/')), c => c.charCodeAt(0));

@@ -12,16 +12,17 @@ const execFileAsync = promisify(execFile);
 const defaultRepo = fileURLToPath(new URL('../../', import.meta.url));
 
 export function parseOptions(args, environment = process.env) {
-  const allowed = ['--check', '--no-open', '--no-reuse', '--help'];
+  const allowed = ['--check', '--browser-usb', '--no-open', '--no-reuse', '--help'];
   if (args.some((arg) => !allowed.includes(arg))) {
-    throw new Error('Unknown option. Use --check, --no-open, --no-reuse or --help.');
+    throw new Error('Unknown option. Use --check, --browser-usb, --no-open, --no-reuse or --help.');
   }
   const rawPort = environment.DISPLAY_BRIDGE_PORT ?? '27183';
   if (!/^\d+$/.test(rawPort) || Number(rawPort) < 1 || Number(rawPort) > 65535) {
     throw new Error('DISPLAY_BRIDGE_PORT must be a port number from 1 to 65535.');
   }
   return { check: args.includes('--check'), open: !args.includes('--no-open'),
-    help: args.includes('--help'), reuse: !args.includes('--no-reuse'), port: Number(rawPort) };
+    browserUsb: args.includes('--browser-usb'), help: args.includes('--help'),
+    reuse: !args.includes('--no-reuse'), port: Number(rawPort) };
 }
 
 // Only a small, explicit identity response is accepted. Do not follow redirects,
@@ -70,9 +71,9 @@ export async function checkInstallation(repoDir, nodeVersion = process.versions.
   } catch { throw new Error('Dashboard files are not built. In the gui folder, run: npm.cmd run build'); }
 }
 
-async function checkRuntime(repoDir, environment) {
+async function checkRuntime(repoDir, environment, checkAdb) {
   return inspectReadiness(resolveRuntime(repoDir, environment), (exe, args, options) =>
-    execFileAsync(exe, args, { ...options, windowsHide: true, timeout: 5000, maxBuffer: 1024 * 1024 }));
+    execFileAsync(exe, args, { ...options, windowsHide: true, timeout: 5000, maxBuffer: 1024 * 1024 }), { checkAdb });
 }
 
 async function openDashboard(url) {
@@ -96,7 +97,7 @@ export async function launch({ args = [], environment = process.env, repoDir = d
 } = {}) {
   const options = parseOptions(args, environment);
   if (options.help) {
-    log('dskcpy launcher: --check (no server/browser/capture), --no-open (keep server in this terminal), --no-reuse (require this configuration).');
+    log('dskcpy launcher: --check (no service/browser/capture), --browser-usb (include ADB in required checks), --no-open, --no-reuse.');
     return { exitCode: 0 };
   }
   const url = `http://127.0.0.1:${options.port}`;
@@ -116,17 +117,28 @@ export async function launch({ args = [], environment = process.env, repoDir = d
     return { exitCode: 0, reused: true };
   }
   await inspect(repoDir);
-  const status = await readiness(repoDir, { ...environment });
+  const status = await readiness(repoDir, { ...environment }, options.browserUsb);
+  const browser = status.transports.browser;
+  const required = new Set(browser.required);
+  if (options.browserUsb) required.add('adb');
+  const optional = {
+    companion: 'Used only by the Android app receiver.',
+    adb: 'Used by Android USB browser connections and Android app setup.',
+  };
   for (const check of status.checks) {
-    log(`${check.ready ? 'OK' : 'CHECK'} - ${check.label}: ${check.ready ? 'Ready.' : check.message}`);
+    if (required.has(check.id)) {
+      log(`${check.ready ? 'OK' : 'CHECK'} - ${check.label}: ${check.ready ? 'Ready.' : check.message}`);
+    } else if (!options.browserUsb && optional[check.id]) {
+      log(`OPTIONAL - ${check.label}: ${check.ready ? 'Ready. ' : ''}${optional[check.id]}`);
+    }
   }
-  const canStream = status.transports.browser.ready;
+  const canStream = browser.ready && (!options.browserUsb || status.checks.some(check => check.id === 'adb' && check.ready));
   if (options.check) {
     log('Check only: no service, browser, device connection or capture was started.');
     if (existing === 'dskcpy') log('An existing dashboard was left unchanged; checks above describe this checkout.');
     return { exitCode: canStream ? 0 : 1, readiness: status };
   }
-  if (!canStream) log('Streaming needs the components marked CHECK. The dashboard can still open for diagnostics.');
+  if (!canStream) log(`${options.browserUsb ? 'USB browser sharing' : 'Browser sharing'} needs the components marked CHECK. The dashboard can still open for diagnostics.`);
   log('Keep this terminal open. Use Ctrl+C to stop this service and its streams.');
   log('Run from your normal Windows desktop or Mac Terminal, not a restricted automation session.');
   const service = await createService({ environment: { ...environment }, configuredPort: options.port });

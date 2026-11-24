@@ -65,7 +65,7 @@ test('a real unresponsive help-only child is killed at the preflight deadline', 
 
 test('Mac browser preflight preserves working explicit and PATH selection and default source build', async t => {
   const f = await fixture(t);
-  for (const environment of [f.environment, { SCRCPY_GUI_BINARY: 'owned-host', PATH: f.dir }]) {
+  for (const environment of [{ ...f.environment, ADB: f.binary }, { SCRCPY_GUI_BINARY: 'owned-host', PATH: f.dir }]) {
     const calls = [];
     const result = await verifyMacBrowserRuntime(f.dir, environment, async (_exe, args) => { calls.push(args); return { stdout: capabilities }; });
     assert.equal(result.executable, f.binary); assert.deepEqual(calls, [['--help']]);

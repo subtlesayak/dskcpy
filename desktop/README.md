@@ -62,6 +62,9 @@ OS registration and clean login behavior still require physical qualification. T
 dependency and its first enrollment/access grant is still required. A ready
 host route does not prove the receiving device has VPN access.
 
+The Host app checks ADB when you choose USB. Private-network setup checks the
+desktop host and private route without starting ADB.
+
 ## Developer build
 
 Run on the target platform, from the repository root, with Node 22.12+ and npm:

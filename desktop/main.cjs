@@ -83,7 +83,7 @@ else {
       // Cable setup does not inspect or modify Tailscale, routes or accounts.
       const route = connection === 'usb' ? { connected: false, ready: false } : await privateRoute.check();
       await backend.ensure(route);
-      const readiness = await backend.readiness();
+      const readiness = await backend.readiness({ checkAdb: connection === 'usb' });
       const usb = connection === 'usb' ? { available: readiness.adb, ...(readiness.adb ? await backend.usbDevices() : { devices: [], error: false }) } : undefined;
       return { route, usb, permissions: permissions(), runtimeReady: readiness.ready, features: { keyboard: readiness.keyboard, clipboard: readiness.clipboard } };
     } });

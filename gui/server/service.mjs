@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { openInternetBridge, summarizeTailnet } from './internet.mjs';
 import { resolveRuntime, inspectReadiness } from './runtime.mjs';
 import { parseMdnsServices } from './discovery.mjs';
-import { createBrowserReceiver } from './browser.mjs';
+import { createBrowserReceiver, isNetworkReceiverMode } from './browser.mjs';
 import { createTrustedDevices } from './trusted-devices.mjs';
 import { browserJoinUrl, focusGeometry } from '../receiver/protocol.mjs';
 import { createNativeStartupHistory } from './native-startup.mjs';
@@ -115,6 +115,12 @@ export function createControlService({
 
   function currentRuntime() {
     return resolveRuntime(repoDir, environment, platform);
+  }
+
+  function checkNetworkReadiness() {
+    // A dashboard status refresh may be waiting for an optional ADB probe.
+    // Keep the network-only check separate from the full readiness snapshot.
+    return readinessProbe(currentRuntime(), runCommand, { checkAdb: false });
   }
 
   async function refreshReadiness() {
@@ -394,7 +400,8 @@ export function createControlService({
       await browserUsbCleanupPending;
       const config = sanitizeStreamConfig({ ...rawConfig, connection: 'browser', serial: '', address: '' });
       validateHostEncoder(config.encoder, platform);
-      const readiness = await refreshReadiness();
+      const mode = rawConfig.browserTransport || 'local';
+      const readiness = await (mode === 'usb' ? refreshReadiness() : checkNetworkReadiness());
       if (attempt.signal.aborted) throw new Error('Connection cancelled.');
       const transport = readiness.transports.browser;
       if (!transport?.ready) throw new Error(transport?.message || 'Browser capture is not ready.');
@@ -407,7 +414,6 @@ export function createControlService({
       if (config.browserWindowAudio && (grant || !readiness.features?.browserWindowAudio))
         throw new Error('This host does not support approved application audio. Leave it off or update the host.');
       browserConfig = config;
-      const mode = rawConfig.browserTransport || 'local';
       let usbDevice;
       if (mode === 'usb') {
         if (!readiness.checks.some((check) => check.id === 'adb' && check.ready)) throw new Error('USB browser mode requires ADB and an authorized USB device.');
@@ -430,7 +436,8 @@ export function createControlService({
         keyboard: mode !== 'local' && !config.windowId && readiness.features?.browserKeyboard === true,
         pointerButtons: mode !== 'local' && !config.windowId && readiness.features?.browserPointerButtons === true,
         clipboard: mode !== 'local' && !config.windowId && config.browserClipboard === true && readiness.features?.browserClipboard === true,
-        rememberProfile: mode === 'internet' && !config.windowId ? { maxSize: config.maxSize, maxFps: config.maxFps, bitRateMbps: config.bitRateMbps } : null }, grant);
+        rememberProfile: isNetworkReceiverMode(mode) && !config.windowId
+          ? { maxSize: config.maxSize, maxFps: config.maxFps, bitRateMbps: config.bitRateMbps } : null }, grant);
       if (usbDevice) {
         const runtime = currentRuntime();
         const args = ['-s', usbDevice.serial, 'reverse'];
@@ -525,7 +532,8 @@ export function createControlService({
     streamStopRequested = false;
     broadcast();
     try {
-      const readiness = await refreshReadiness();
+      const readiness = await (['browser', 'internet'].includes(config.connection)
+        ? checkNetworkReadiness() : refreshReadiness());
       if (attempt.signal.aborted) throw new Error('Connection cancelled.');
       if (browserBridge?.closed) throw new Error('The browser disconnected before capture started.');
       const transport = readiness.transports[config.connection];
@@ -549,9 +557,9 @@ export function createControlService({
       if (attempt.signal.aborted) throw new Error('Connection cancelled.');
       if (!retrySession && config.autoReconnect) reconnectSession = { config: { ...config }, attempts: 0 };
       const session = reconnectSession;
-      if (config.windowId && (platform !== 'darwin' || !state.readiness?.features?.macWindowCapture))
+      if (config.windowId && (platform !== 'darwin' || !readiness.features?.macWindowCapture))
         throw new Error('This native host cannot capture a selected Mac window.');
-      if (config.browserWindowAudio && !state.readiness?.features?.browserWindowAudio)
+      if (config.browserWindowAudio && !readiness.features?.browserWindowAudio)
         throw new Error('Application audio is unavailable on this host. Create a new invitation with it off.');
       const args = buildScrcpyArgs({ ...config, browserKeyboard: browserBridge?.keyboard === true, browserTextFocus: browserBridge?.textFocus === true,
         browserPointerButtons: browserBridge?.pointerButtons === true,
@@ -896,7 +904,7 @@ export function createControlService({
         await readJson(request);
         if (platform !== 'darwin') throw new Error('Window capture is currently available on the Mac host.');
         if (!windowCatalogAttempt) windowCatalogAttempt = (async () => {
-          const readiness = await refreshReadiness();
+          const readiness = await checkNetworkReadiness();
           if (!readiness.features?.macWindowCapture) throw new Error('Rebuild the experimental Mac host to select windows.');
           const runtime = currentRuntime();
           try {
@@ -963,7 +971,12 @@ export function createControlService({
   heartbeat.unref();
 
   async function listen() {
-    await browserReceiver.standby();
+    try {
+      await browserReceiver.standby();
+    } catch (error) {
+      if (error.code !== 'receiver-tls-configuration') throw error;
+      appendLog('gui', error.message);
+    }
     await new Promise((resolve, reject) => {
       server.once('error', reject);
       server.listen(port, host, () => { server.off('error', reject); resolve(); });
@@ -999,5 +1012,6 @@ export function createControlService({
     return shutdown().then(() => true);
   }
 
-  return { server, listen, shutdown, shutdownIfIdle, publicState };
+  return { server, listen, shutdown, shutdownIfIdle, publicState,
+    browserReadiness: (checkAdb) => checkAdb ? refreshReadiness() : checkNetworkReadiness() };
 }

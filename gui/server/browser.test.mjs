@@ -488,10 +488,28 @@ test('direct TLS validates its certificate and carries authenticated WSS without
     '-config', config, '-subj', '/CN=localhost', '-keyout', key, '-out', cert], { stdio: ['ignore', 'ignore', 'pipe'] });
   const reservation = net.createServer(); reservation.listen(0, '127.0.0.1'); await once(reservation, 'listening');
   const port = reservation.address().port; await new Promise((resolve) => reservation.close(resolve));
+  const mismatched = createBrowserReceiver({ configuredPort: 0, origin: `https://wrong.example:${port}`,
+    tls: { cert, key, bind: '127.0.0.1', port } });
+  t.after(() => mismatched.shutdown());
+  await assert.rejects(mismatched.invite('wifi'), /certificate does not match the configured HTTPS address/);
+  assert.equal(mismatched.status().waiting, false);
+  const expired = createBrowserReceiver({ configuredPort: 0, origin: `https://127.0.0.1:${port}`,
+    tls: { cert, key, bind: '127.0.0.1', port } });
+  t.after(() => expired.shutdown());
+  const future = Date.now() + 48 * 60 * 60 * 1000;
+  const clock = t.mock.method(Date, 'now', () => future);
+  try {
+    await assert.rejects(expired.invite('wifi'), /certificate is outside its validity dates/);
+    assert.equal(expired.status().waiting, false);
+  } finally { clock.mock.restore(); }
   let bridge;
   const receiver = createBrowserReceiver({ configuredPort: 0, origin: `https://127.0.0.1:${port}`,
     tls: { cert, key, bind: '127.0.0.1', port }, onConnect: (value) => { bridge = value; } });
   t.after(() => receiver.shutdown());
+  const [first, second] = await Promise.all([receiver.prepare(), receiver.prepare()]);
+  assert.deepEqual(second, first);
+  assert.equal(receiver.status().waiting, false);
+  assert.equal(receiver.status().connected, false);
   const invitation = await receiver.invite('ip');
   const ca = await readFile(cert);
   const result = await new Promise((resolve, reject) => {
@@ -505,6 +523,25 @@ test('direct TLS validates its certificate and carries authenticated WSS without
   const ended = once(ws, 'close'); ws.close(); await ended;
   for (let i = 0; i < 100 && receiver.status().connected; i++) await new Promise((resolve) => setTimeout(resolve, 5));
   assert.equal(receiver.status().connected, false);
+  await receiver.shutdown();
+
+  const retiring = createBrowserReceiver({ configuredPort: 0, origin: first.url,
+    tls: { cert, key, bind: '127.0.0.1', port } });
+  t.after(() => retiring.shutdown());
+  const abandoned = assert.rejects(retiring.prepare(), /host has closed/);
+  await Promise.all([abandoned, retiring.shutdown()]);
+  const rebound = net.createServer();
+  rebound.listen(port, '127.0.0.1'); await once(rebound, 'listening');
+  const retrying = createBrowserReceiver({ configuredPort: 0, origin: first.url,
+    tls: { cert, key, bind: '127.0.0.1', port } });
+  t.after(() => retrying.shutdown());
+  try {
+    await assert.rejects(retrying.prepare(), { code: 'EADDRINUSE' });
+  } finally {
+    await new Promise(resolve => rebound.close(resolve));
+  }
+  assert.equal((await retrying.prepare()).url, first.url);
+  assert.equal(retrying.status().waiting, false);
 });
 
 test('WebRTC signaling requires the one-use code and retains authenticated input isolation', async (t) => {

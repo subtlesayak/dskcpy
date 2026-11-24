@@ -25,6 +25,7 @@ export async function verifyBundle(resources) {
   const required = ['desktop/main.cjs', 'desktop/preload.cjs', 'desktop/service-entry.cjs',
     'desktop/host-controller.mjs', 'desktop/owned-backend.mjs', 'desktop/receiver-probe.mjs', 'desktop/private-route.mjs', 'desktop/startup-preference.mjs', 'desktop/usb-devices.mjs', 'desktop/presentation-state.mjs', 'desktop/stop-action.mjs',
     'gui/receiver/computers.html', 'gui/receiver/computers.mjs', 'gui/receiver/computers-common.mjs', 'gui/receiver/computers-sw.mjs', 'gui/receiver/computer-link.mjs',
+    'gui/receiver/manifest.webmanifest', 'gui/receiver/pwa-icon-192.png', 'gui/receiver/pwa-icon-512.png',
     'gui/server/window-targets.mjs', 'gui/receiver/window-chooser.mjs', 'gui/server/service.mjs', 'gui/server/native-startup.mjs', 'gui/server/trusted-devices.mjs', 'gui/server/browser-clipboard.mjs', 'gui/server/adaptive-video.mjs', 'gui/receiver/video-feedback.mjs', 'gui/receiver/video-preference.mjs', 'gui/receiver/shortcuts.mjs', 'gui/receiver/view.mjs', 'gui/receiver/typing-view.mjs', 'gui/receiver/trackpad.mjs', 'gui/receiver/clipboard.mjs', 'gui/receiver/remembered.mjs', 'gui/receiver/lifecycle.mjs', 'gui/receiver/receiver.mjs', 'gui/receiver/controller.html', 'gui/receiver/controller.css', 'gui/receiver/controller.mjs', 'gui/receiver/presentation.mjs', 'gui/server/browser-session.mjs', 'gui/dist-desktop/desktop/index.html', 'gui/dist/index.html'];
   for (const relative of required) {
     const file = path.join(app, relative);

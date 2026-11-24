@@ -8,7 +8,8 @@ import path from 'node:path';
 import test from 'node:test';
 import { checkInstallation, launch, parseOptions, probeDashboard } from '../scripts/launch.mjs';
 
-const ready = { checks: [{ label: 'Streaming program', ready: true }], transports: { browser: { ready: true } } };
+const ready = { checks: [{ id: 'binary', label: 'Streaming program', ready: true }],
+  transports: { browser: { ready: true, required: ['binary'] } } };
 
 function fixture(overrides = {}) {
   const calls = [], messages = [];
@@ -71,6 +72,34 @@ test('check reports local components even if an existing dashboard is running', 
   assert.ok(f.messages.some((message) => /left unchanged/.test(message)));
 });
 
+test('browser launch checks report only the requirements of the selected route', async () => {
+  const checks = [...ready.checks,
+    { id: 'server', label: 'Server artifact', ready: false },
+    { id: 'companion', label: 'Android companion', ready: false },
+    { id: 'adb', label: 'Android connection tool', ready: false, message: 'Install ADB.' }];
+  const probeAdb = [];
+  const f = fixture({ readiness: async (_repoDir, _env, checkAdb) => {
+    probeAdb.push(checkAdb);
+    return { ...ready, checks };
+  } });
+  assert.equal((await launch({ ...f.options, args: ['--check'] })).exitCode, 0);
+  assert.match(f.messages.join('\n'), /OPTIONAL - Android companion/);
+  assert.match(f.messages.join('\n'), /OPTIONAL - Android connection tool/);
+  assert.doesNotMatch(f.messages.join('\n'), /Server artifact|CHECK -/);
+
+  f.messages.length = 0;
+  assert.equal((await launch({ ...f.options, args: ['--check', '--browser-usb'] })).exitCode, 1);
+  assert.match(f.messages.join('\n'), /CHECK - Android connection tool: Install ADB/);
+  assert.doesNotMatch(f.messages.join('\n'), /Server artifact|Android companion/);
+
+  checks.at(-1).ready = true;
+  f.messages.length = 0;
+  assert.equal((await launch({ ...f.options, args: ['--check', '--browser-usb'] })).exitCode, 0);
+  assert.match(f.messages.join('\n'), /OK - Android connection tool/);
+  assert.deepEqual(probeAdb, [false, true, true]);
+  assert.deepEqual(f.calls, ['inspect', 'inspect', 'inspect']);
+});
+
 test('launcher preserves explicit configuration and opens only the configured loopback controller', async () => {
   const environment = Object.freeze({ DISPLAY_BRIDGE_PORT: '29183', ADB: 'SDK with spaces/adb.exe',
     SCRCPY_GUI_BINARY: 'build with spaces/scrcpy.exe', DSKCPY_VIEWER_ORIGIN: 'https://host.example',
@@ -100,8 +129,8 @@ test('browser launch failure leaves the service running and prints a manual link
 });
 
 test('missing native components still allow dashboard diagnostics but not a passing check', async () => {
-  const f = fixture({ readiness: async () => ({ checks: [{ label: 'Program', ready: false, message: 'Build this fork.' }],
-    transports: { browser: { ready: false } } }) });
+  const f = fixture({ readiness: async () => ({ checks: [{ id: 'binary', label: 'Program', ready: false, message: 'Build this fork.' }],
+    transports: { browser: { ready: false, required: ['binary'] } } }) });
   assert.equal((await launch(f.options)).service, f.service);
   assert.match(f.messages.join('\n'), /CHECK - Program: Build this fork/);
 });

@@ -1,7 +1,7 @@
 import http from 'node:http';
 import https from 'node:https';
 import net from 'node:net';
-import { randomBytes, timingSafeEqual, createHash } from 'node:crypto';
+import { randomBytes, timingSafeEqual, createHash, X509Certificate } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
@@ -33,6 +33,9 @@ const assets = new Map([
   ['/computers/computers.mjs', ['computers.mjs', 'text/javascript; charset=utf-8']],
   ['/computers/computers-common.mjs', ['computers-common.mjs', 'text/javascript; charset=utf-8']],
   ['/computers/computers-sw.mjs', ['computers-sw.mjs', 'text/javascript; charset=utf-8']],
+  ['/computers/manifest.webmanifest', ['manifest.webmanifest', 'application/manifest+json; charset=utf-8']],
+  ['/computers/icon-192.png', ['pwa-icon-192.png', 'image/png']],
+  ['/computers/icon-512.png', ['pwa-icon-512.png', 'image/png']],
   ['/lifecycle.mjs', ['lifecycle.mjs', 'text/javascript; charset=utf-8']],
   ['/receiver.css', ['receiver.css', 'text/css; charset=utf-8']],
   ['/controller', ['controller.html', 'text/html; charset=utf-8']],
@@ -51,6 +54,10 @@ export function receiverOrigin(value) {
   return url.origin;
 }
 
+export const isNetworkReceiverMode = mode => ['wifi', 'ip', 'internet'].includes(mode);
+
+const tlsConfigurationError = message => Object.assign(new Error(message), { code: 'receiver-tls-configuration' });
+
 // A separate, loopback-only surface: never serves controller APIs or logs.
 // Remote access is opt-in via a user-managed Tailscale Serve HTTPS proxy.
 export function createBrowserReceiver({ configuredPort = 27180, origin,
@@ -65,7 +72,7 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
   const healthInstance = randomBytes(16).toString('hex'); // launch marker, never an access credential
   let port, closed = false;
   let listening;
-  let secureServer;
+  let secureServer, secureListening;
   let mode = 'local';
   let invitation = null;
   let session = null;
@@ -356,8 +363,8 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
     res.setHeader('Referrer-Policy', 'no-referrer');
     res.setHeader('X-Frame-Options', 'DENY');
     res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
-    const directory = req.url === '/computers/' || req.url === '/computers/computers-sw.mjs';
-    res.setHeader('Content-Security-Policy', `default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'${directory ? " https:; worker-src 'self'" : ''}; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`);
+    const directory = req.url === '/computers/';
+    res.setHeader('Content-Security-Policy', `default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'${directory ? " https:; worker-src 'self'; manifest-src 'self'; img-src 'self'" : ''}; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`);
     // Public per-launch document paths prevent fragment-only reuse of stale
     // receiver scripts. They grant no access; authentication stays in /stream.
     const asset = assets.get(req.url)
@@ -478,7 +485,7 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
           onChange();
         } });
         session = Object.assign(active, { token, origin: req.headers.origin, deviceId,
-          rememberProfile: mode === 'internet' && !inputPolicy.viewOnly ? rememberProfile : null });
+          rememberProfile: isNetworkReceiverMode(mode) && !inputPolicy.viewOnly && req.headers.origin === remoteOrigin ? rememberProfile : null });
         onChange();
         await active.start();
       });
@@ -486,10 +493,40 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
   };
   server.on('upgrade', upgrade);
 
+  async function startSecureListener() {
+    if (!isPrivateBind(tls.bind) || !Number.isInteger(tls.port) || tls.port < 1 || tls.port > 65535) {
+      throw tlsConfigurationError('TLS receiver must bind an explicit private IPv4 address and valid port, never all interfaces.');
+    }
+    const [cert, key] = await Promise.all([readFile(tls.cert), readFile(tls.key)]).catch(() => {
+      throw tlsConfigurationError('The host could not read the configured certificate or key. Check the HTTPS files and their permissions.');
+    });
+    if (closed) throw new Error('The host has closed.');
+    let certificate, secure;
+    try {
+      certificate = new X509Certificate(cert);
+      secure = https.createServer({ cert, key, minVersion: 'TLSv1.2' }, serve);
+    } catch {
+      throw tlsConfigurationError('The HTTPS certificate or key is invalid. Use a matching certificate and private key in PEM format.');
+    }
+    const now = Date.now();
+    if (now < certificate.validFromDate.getTime() || now >= certificate.validToDate.getTime()) {
+      throw tlsConfigurationError('The HTTPS certificate is outside its validity dates. Check the host clock or renew the certificate.');
+    }
+    const hostname = new URL(remoteOrigin).hostname.replace(/^\[|\]$/g, '');
+    const match = net.isIP(hostname) ? certificate.checkIP(hostname) : certificate.checkHost(hostname, { subject: 'never' });
+    if (!match) throw tlsConfigurationError('The HTTPS certificate does not match the configured HTTPS address. Use the address named in the certificate or replace the certificate.');
+    secure.on('upgrade', upgrade);
+    secure.requestTimeout = 10000; secure.headersTimeout = 10000; secure.maxConnections = 32;
+    await new Promise((resolve, reject) => {
+      secure.once('error', reject); secure.listen(tls.port, tls.bind, resolve);
+    });
+    secureServer = secure;
+  }
+
   async function ensureListening(connection) {
     if (closed) throw new Error('The host has closed.');
     if (!['local', 'usb', 'wifi', 'ip', 'internet'].includes(connection)) throw new Error('Choose a browser connection method.');
-    if (!['local', 'usb'].includes(connection) && !remoteOrigin) {
+    if (isNetworkReceiverMode(connection) && !remoteOrigin) {
       throw new Error('Configure a trusted HTTPS receiver address before using Wi-Fi, IP or Internet. USB and local tests work without certificates.');
     }
     if (!listening) {
@@ -499,18 +536,11 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
       }).catch((error) => { listening = null; throw error; });
     }
     await listening;
-    if (!['local', 'usb'].includes(connection) && tls && !secureServer) {
-      if (!isPrivateBind(tls.bind) || !Number.isInteger(tls.port) || tls.port < 1 || tls.port > 65535) {
-        throw new Error('TLS receiver must bind an explicit private IPv4 address and valid port, never all interfaces.');
-      }
-      const [cert, key] = await Promise.all([readFile(tls.cert), readFile(tls.key)]);
-      const secure = https.createServer({ cert, key, minVersion: 'TLSv1.2' }, serve);
-      secure.on('upgrade', upgrade);
-      secure.requestTimeout = 10000; secure.headersTimeout = 10000; secure.maxConnections = 32;
-      await new Promise((resolve, reject) => {
-        secure.once('error', reject); secure.listen(tls.port, tls.bind, resolve);
-      });
-      secureServer = secure;
+    if (closed) throw new Error('The host has closed.');
+    if (isNetworkReceiverMode(connection) && tls) {
+      secureListening ??= startSecureListener().catch(error => { secureListening = null; throw error; });
+      await secureListening;
+      if (closed) throw new Error('The host has closed.');
     }
   }
   async function invite(connection = 'local', policy = {}, grant = null) {
@@ -547,6 +577,7 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
     if (closed) return; closed = true;
     cancel();
     await pendingCleanup;
+    await Promise.allSettled([listening, secureListening]);
     wss.close();
     if (listening) await new Promise((resolve) => { server.close(resolve); server.closeAllConnections(); });
     if (secureServer) await new Promise((resolve) => { secureServer.close(resolve); secureServer.closeAllConnections(); });

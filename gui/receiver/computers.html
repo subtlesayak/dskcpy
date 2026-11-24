@@ -3,7 +3,10 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#080f13">
   <title>Paired computers · dskcpy</title>
+  <link rel="manifest" href="/computers/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/computers/icon-192.png">
   <link rel="stylesheet" href="/receiver.css">
   <script type="module" src="/computers/computers.mjs"></script>
 </head>
@@ -15,7 +18,12 @@
       <div class="paired-actions">
         <button id="check-computers" type="button" hidden>Check reachability</button>
         <button id="cancel-directory-request" type="button" hidden>Cancel request</button>
+        <button id="install-app" type="button" hidden>Install dskcpy</button>
       </div>
+      <details id="install-help" hidden>
+        <summary>Install dskcpy</summary>
+        <p>Choose <strong>Install app</strong> or <strong>Add to Home screen</strong> from your browser menu. On iPhone or iPad, open this page in Safari and choose <strong>Share → Add to Home Screen</strong>.</p>
+      </details>
       <p id="directory-status" role="status"></p>
       <p id="empty-computers">Add a computer using its receiver link.</p>
       <ul id="paired-computers" aria-label="Saved computers"></ul>
@@ -26,6 +34,7 @@
         <p id="add-error" role="status"></p>
         <button type="submit">Add computer</button>
       </form>
+      <p><a class="receiver-link" href="/">Open this computer’s receiver</a></p>
       <dialog id="edit-computer" aria-labelledby="edit-title">
         <form id="edit-computer-form">
           <h2 id="edit-title"></h2>

@@ -1,6 +1,71 @@
-import { channelToken, directoryMessage, nonce, publicIdentity, receiverAddress } from './computers-common.mjs';
+import { channelToken, directoryMessage, nonce, pairedAppIntent, pairedComputersKey, proveComputer, publicIdentity, readPairedComputers, receiverAddress } from './computers-common.mjs';
 
 const storageKey = 'dskcpy.computer-directory-link.v1';
+
+function readRemoteLink() {
+  try { return JSON.parse(localStorage.getItem(storageKey)); } catch { return null; }
+}
+
+function readLink(origin, binding, fingerprint) {
+  if (origin === location.origin) {
+    const entry = readPairedComputers().find(item => item.origin === origin && item.binding === binding
+      && item.fingerprint === fingerprint && /^[a-f0-9]{32}$/.test(item.pairingId || ''));
+    if (entry) return entry;
+  }
+  return readRemoteLink();
+}
+
+export function saveComputerInPairedApp(remembered) {
+  const panel = document.getElementById('directory-stream');
+  if (!panel) return;
+  const save = panel.querySelector('.directory-save'), feedback = panel.querySelector('.directory-feedback');
+  panel.querySelector('.directory-origin').hidden = true;
+  panel.hidden = false;
+  save.addEventListener('click', async () => {
+    if (save.disabled) return;
+    save.disabled = true; feedback.textContent = '';
+    try {
+      const { computer, pairingId, paired } = await remembered.inspect();
+      if (!paired || !pairingId || !publicIdentity(computer)) {
+        feedback.textContent = 'Request pairing and wait for the host to approve it first.';
+        return;
+      }
+      if (await proveComputer(location.origin, computer) !== 'reachable') {
+        feedback.textContent = 'Could not verify this computer. Check its connection and try again.';
+        return;
+      }
+      const computers = readPairedComputers();
+      const existing = computers.find(item => item.fingerprint === computer.fingerprint);
+      if (!existing && computers.length >= 16) {
+        feedback.textContent = 'Forget a computer from the paired list before adding another.';
+        return;
+      }
+      const entry = { ...computer, name: existing?.name || computer.name, origin: location.origin,
+        binding: nonce(), pairingId };
+      localStorage.setItem(pairedComputersKey, JSON.stringify([...computers.filter(item => item !== existing), entry]));
+      feedback.textContent = 'Saved to paired computers in this app.';
+    } catch {
+      feedback.textContent = 'Could not save this computer. Check the connection and try again.';
+    } finally { save.disabled = false; }
+  });
+}
+
+export async function requestFromPairedApp(remembered) {
+  let intent;
+  try {
+    const saved = sessionStorage.getItem(pairedAppIntent);
+    sessionStorage.removeItem(pairedAppIntent);
+    intent = JSON.parse(saved);
+  } catch { /* The receiver still offers its normal Connect controls. */ }
+  const info = await remembered.inspect();
+  const link = readLink(location.origin, intent?.binding, intent?.fingerprint);
+  if (!Number.isSafeInteger(intent?.expiresAt) || intent.expiresAt <= Date.now()
+      || !channelToken(intent.binding) || !link || link.origin !== location.origin
+      || link.binding !== intent.binding || link.fingerprint !== intent.fingerprint
+      || info.phase !== 'reachable' || !info.pairingId || info.pairingId !== link.pairingId
+      || info.computer?.fingerprint !== link.fingerprint) return;
+  await remembered.requestConnection({ owner: 'paired-app' });
+}
 
 export function linkComputerDirectory(remembered) {
   const opener = window.opener;
@@ -14,9 +79,6 @@ export function linkComputerDirectory(remembered) {
   function store(value) {
     try { localStorage.setItem(storageKey, JSON.stringify(value)); return true; } catch { return false; }
   }
-  function load() {
-    try { return JSON.parse(localStorage.getItem(storageKey)); } catch { return null; }
-  }
   async function save() {
     const current = job;
     if (!current || current.action !== 'add' || current.saving) return;
@@ -27,6 +89,11 @@ export function linkComputerDirectory(remembered) {
     const feedback = text => panels.forEach(panel => { panel.querySelector('.directory-feedback').textContent = text; });
     if (!info.paired || !info.pairingId || !publicIdentity(info.computer)) {
       feedback('Connect first, then open Options → Remember this browser and get pairing approved.'); return;
+    }
+    if (current.fingerprint && info.computer.fingerprint !== current.fingerprint) {
+      send(current, 'result', { phase: 'changed' });
+      feedback('This address belongs to a different computer.');
+      completed = current.id; job = null; return;
     }
     const binding = nonce();
     if (!store({ origin: current.origin, binding, pairingId: info.pairingId, fingerprint: info.computer.fingerprint })) {
@@ -55,7 +122,8 @@ export function linkComputerDirectory(remembered) {
       if (job.id === value.id && job.origin === event.origin) send(job, 'ready');
       return;
     }
-    const current = job = { id: value.id, origin: event.origin, action: value.action, binding: value.binding };
+    const current = job = { id: value.id, origin: event.origin, action: value.action, binding: value.binding,
+      fingerprint: channelToken(value.fingerprint) ? value.fingerprint : null };
     send(current, 'ready');
     if (current.action === 'add') {
       for (const panel of panels) {
@@ -66,7 +134,7 @@ export function linkComputerDirectory(remembered) {
       return;
     }
     try {
-      const link = load();
+      const link = readLink(current.origin, current.binding, value.fingerprint);
       if (!link || link.origin !== current.origin || !channelToken(current.binding) || link.binding !== current.binding
           || link.fingerprint !== value.fingerprint) { send(current, 'result', { phase: 'pairing-required' }); return; }
       const info = await remembered.inspect();
@@ -77,7 +145,10 @@ export function linkComputerDirectory(remembered) {
       else if (current.action === 'forget' && ['reachable', 'pairing-required', 'paused'].includes(phase)) {
         phase = await remembered.forgetComputer() ? 'forgotten' : 'request-failed';
         if (phase === 'forgotten') {
-          try { localStorage.removeItem(storageKey); } catch { /* The host credential was already revoked. */ }
+          const remote = readRemoteLink();
+          if (remote?.origin === current.origin && remote.binding === current.binding) {
+            try { localStorage.removeItem(storageKey); } catch { /* The host credential was already revoked. */ }
+          }
         }
       } else if (current.action === 'request' && phase === 'reachable') {
         phase = await remembered.requestConnection({ owner: current.id, onWaiting: () => send(current, 'waiting') });
