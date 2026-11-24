@@ -108,6 +108,10 @@ supply-chain audit.
 
 These checks do not establish minimum-OS or physical media compatibility.
 
+Mac packages write the numeric product version and build number to the bundle
+metadata. The package command checks the actual `Info.plist` after packaging.
+The preview label remains in the package and source identity metadata.
+
 The optional native-license input is for development staging; a missing input
 is recorded as incomplete. Public distribution remains blocked on a reviewed
 complete notice/source-offer set. Electron and npm notices must also ship.

@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { readFile } from 'node:fs/promises';
-import { spawn } from 'node:child_process';
+import { spawn, execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { macHostArchitecture } from '../release/package_macos_host.mjs';
@@ -30,6 +31,9 @@ export async function packageMac() {
     child.once('error', reject);
     child.once('exit', code => code === 0 ? resolve() : reject(Error('Unsigned Mac packaging failed')));
   });
+  const { stdout } = await promisify(execFile)('/usr/bin/plutil', ['-convert', 'json', '-o', '-',
+    path.join(directory, 'out', target.output, 'dskcpy Host.app/Contents/Info.plist')], { timeout: 10000, maxBuffer: 1024 * 1024 });
+  require('./bundle-version.cjs').verifyMacBundleVersions(JSON.parse(stdout), require('./electron-builder.cjs').mac);
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url))
   packageMac().catch(error => { console.error(error.message); process.exitCode = 1; });
