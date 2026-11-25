@@ -1,13 +1,21 @@
 # Project status and verification
 
-Updated **21 November 2026 (IST)**. This is a dated development snapshot;
+Updated **25 November 2026 (IST)**. This is a dated development snapshot;
 draft branches and their CI results may advance after this update.
 Prebuilt Android, Mac and Windows [preview downloads](downloads.md) are
 available. Desktop apps are unsigned; Mac is not notarized. There is no qualified
-stable desktop release yet. A build, simulated regression or short device test qualifies only
-the behavior it actually exercised.
+stable desktop release yet. The downloads contain source `ed8d33ef`.
+The newer changes below are available in source. A build, simulated regression
+or short device test qualifies only the behavior it exercised.
 
 ## Merged implementation baseline
+
+| PR | Merged source | Change |
+| --- | --- | --- |
+| [#60](https://github.com/subtlesayak/dskcpy/pull/60) | `113f53b5` | Installable browser receiver, offline saved-computer list, same-window pairing and trusted-HTTPS LAN pairing. Browser setup over a network works without ADB. Each new stream still requires host approval and an active route to the host. |
+| [#62](https://github.com/subtlesayak/dskcpy/pull/62) | `2eda11d9` | An authorized Android USB launch survives Activity recreation and is delivered once the receiver is visible and the service is bound. The wire protocol and Android version code are unchanged. The historical display-socket stall still needs a physical reproduction. |
+| [#61](https://github.com/subtlesayak/dskcpy/pull/61) | `23aed2ea` | New Mac packages write and verify numeric bundle versions while preserving the preview label in source and release metadata. |
+
 
 [PR #55](https://github.com/subtlesayak/dskcpy/pull/55) merged as
 [`4b4e3e32`](https://github.com/subtlesayak/dskcpy/commit/4b4e3e329ec29fd2941ad934bbec7547003c16ea),
@@ -54,6 +62,26 @@ for source/artifact identity and signing-lineage limits. An Android version bump
 cannot make a differently signed APK a compatible update.
 
 ## Automated verification
+
+### 25 November merged source
+
+[CI 45607156335](https://github.com/subtlesayak/dskcpy/actions/runs/45607156335)
+passed all eight jobs on `2eda11d9`, including native tests and packaging on
+both Mac architectures, Windows native and GUI, Android debug and release, and
+generated browser media. [PR #62 CI](https://github.com/subtlesayak/dskcpy/actions/runs/45431625787)
+recorded 117 Android tests across 19 suites, including the three pending-launch
+cases.
+
+[CI for `23aed2ea`](https://github.com/subtlesayak/dskcpy/actions/runs/45610162388)
+is tracked separately. A local unsigned Apple-silicon package from that revision
+has bundle versions `0.1.0` and `5.0.3`. Both UI builds, hidden Electron IPC
+with a fake host and runtime verification after fresh ZIP extraction passed.
+Chromium and WebKit also passed the paired-computer fixture from the merged
+source, including address verification, re-pairing with fresh host approval and
+same-capture recovery after a lost authentication reply. These checks used
+disposable browser profiles and simulated capture. Normal app launch,
+physical Android startup and Safari on iPhone/iPad remain open.
+
 
 ### 21 November downloadable preview
 
@@ -236,19 +264,23 @@ does not control the system keyboard's position or replace its IME.
 
 ## Unmerged follow-ups
 
-The default branch still has the paired-computer implementation from PR #55,
-with release packaging from PR #58. The following **local, unmerged
-development checkpoints**, recorded on 19 November, are separate from that
-published runtime. Their source
-identifiers distinguish test evidence; they are not download links or claims that
-these features are available in a GitHub release.
+The following PRs are under review as of this snapshot.
+
+| PR | Change and local evidence |
+| --- | --- |
+| [#63](https://github.com/subtlesayak/dskcpy/pull/63) | Releases held mouse input when the phone controller rotates. Chromium and WebKit passed generated presentation flows. Physical rotation and casting remain open. |
+| [#64](https://github.com/subtlesayak/dskcpy/pull/64) | Refreshes busy-host availability before enabling retry and keeps the approval countdown accurate across clock differences. Chromium and WebKit passed disposable paired-computer flows. |
+| [#65](https://github.com/subtlesayak/dskcpy/pull/65) | Runs check-only launcher diagnostics without probing the dashboard port. All 17 focused tests passed. |
+| [#66](https://github.com/subtlesayak/dskcpy/pull/66) | Verifies the capture-recovery deadline with a controlled timer and real loopback sockets. This updates the test fixture. |
+| [#67](https://github.com/subtlesayak/dskcpy/pull/67) | Refreshes Mac screen and control permission status on focus and normal status updates. Browser fixtures exercised simulated grants. Actual macOS grants and relaunch still need a hardware check. |
+
+The following development checkpoints remain separate from the merged source and
+the preview downloads.
 
 | Development area | Recorded implementation and automated evidence |
 | --- | --- |
 | Background recovery and Gaming | `30fb845b` combines same-capture recovery, relative mouse/keyboard input and a latency workload. Generated browser tests release held input and require a fresh user gesture for Pointer Lock after recovery. Physical game input and input-to-photon measurements remain open. |
 | Private access and video preferences | `d05a2c8d` combines private password access with recovery/Gaming; `08dce4e5` adds named credentials and `e5946870` adds bounded per-pair video preferences. Chromium/WebKit HTTPS sign-in, resume and revocation checks pass. This is local development; the published paired flow still requires host approval for each new stream. |
-| Address changes and browser installation | `48deef9f` preserves verified identity while re-pairing at a new origin. `65b46ce4`, `ed7e32a6` and `f2ef681d` add an installable browser receiver and same-window request/first-pairing flows. Chromium/WebKit HTTPS fixtures pass with simulated standalone mode; physical Android/iOS home-screen installation is unqualified. This installs a receiver web app, not a Mac host. |
-| Android launch lifecycle | `acf098e7` retains an undelivered ADB launch across ordinary intents and Activity recreation, then delivers it once. All 117 Android unit tests across 19 suites pass, including three launch cases. This does not establish the cause of the historical phone startup stall. |
 | Presentation and packaged host | `6bb4ecba` adds presentation audio/controller recovery tests: 20 generated scenarios pass across Chromium/WebKit and WebRTC/WebCodecs. `a6e0a67d` adds a default-off, per-invitation phone-controller choice in the desktop host; 587 Node tests pass with eight skips, seven service cases and four renderer layouts. Both GUI builds, unsigned Apple-silicon payload and hidden fake-IPC checks pass. Generated silent-output audio does not qualify audible playback or casting. |
 
 A private test bundle for host `a6e0a67d` and the matching development-signed
@@ -266,10 +298,10 @@ integration and physical gates stay on the [roadmap](roadmap.md).
 
 Further 21 November local records identify candidate `43a9a35b`, combining
 separate Gaming fixtures with route-readiness changes `588bd33d`, `33c4572a`
-and `673c0920`. Those changes keep network-only browser setup independent of
-Android tooling while retaining ADB checks for USB. The records report 591 Node
-passes/eight skips, both UI builds, extracted-payload and utility-IPC checks.
-They are not part of the published preview. Separate generated-pixel VideoToolbox
+and `673c0920`. PR #60 brought network-only browser setup to the default branch
+while retaining ADB checks for USB. The combined candidate's 591 Node passes
+with eight skips, both UI builds, extracted-payload and utility-IPC checks apply
+to that local build. Separate generated-pixel VideoToolbox
 tests exercised encoder-property acceptance and bounded worker pacing; they do
 not qualify screen capture, network delivery or physical input-to-display latency.
 
