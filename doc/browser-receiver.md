@@ -71,6 +71,10 @@ open through a new browser tab.
 After the first online visit, the paired list can open offline on browsers
 with service worker support. The host still needs to be online to connect,
 and each new paired stream still requires host approval.
+The browser installs the directory files together. If the host is midway
+through an update, the previous complete set stays available. To use an
+installed update, close the paired-computers app and any open directory tabs,
+then reopen it. This keeps your saved computers.
 
 ## Choose a connection
 

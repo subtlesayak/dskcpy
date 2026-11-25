@@ -5,6 +5,7 @@ import net from 'node:net';
 import http from 'node:http';
 import https from 'node:https';
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -59,6 +60,26 @@ async function resumable(f, cookie, extra = {}) {
   const response = await fetch(f.invitation.url + 'stream/session', { headers: { Cookie: cookie, ...extra } });
   return (await response.json()).resumable;
 }
+
+test('offline directory worker is versioned by its exact static assets', async t => {
+  const { invitation } = await fixture(t);
+  const worker = await fetch(new URL('/computers/computers-sw.mjs', invitation.url));
+  assert.equal(worker.status, 200);
+  assert.equal(worker.headers.get('cache-control'), 'no-store');
+  const [descriptor] = (await worker.text()).split('\n');
+  const { version, entries } = JSON.parse(/^const directoryShell = (.+);$/.exec(descriptor)[1]);
+  assert.match(version, /^[a-f0-9]{64}$/);
+  assert.deepEqual(entries.map(([pathname]) => pathname).sort(), [
+    '/computers/', '/computers/computers-common.mjs', '/computers/computers.mjs',
+    '/computers/icon-192.png', '/computers/icon-512.png', '/computers/manifest.webmanifest', '/receiver.css',
+  ]);
+  for (const [pathname, integrity] of entries) {
+    const response = await fetch(new URL(pathname, invitation.url));
+    assert.equal(response.status, 200);
+    const hash = createHash('sha256').update(Buffer.from(await response.arrayBuffer())).digest('base64');
+    assert.equal(integrity, `sha256-${hash}`, pathname);
+  }
+});
 
 test('native capture recovery preserves authorization, clears old media and adopts fresh geometry', async t => {
   const nextHeader=Buffer.from(header);nextHeader.writeUInt32BE(1280,8);nextHeader.writeUInt32BE(720,12);
