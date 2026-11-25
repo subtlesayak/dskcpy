@@ -9,11 +9,15 @@ export function createRelativeTrackpad({ geometry, emit, changed = () => {}, now
     const g = geometry();
     return g && ['width', 'height', 'cssWidth', 'cssHeight'].every(k => Number.isFinite(g[k]) && g[k] > 0) ? g : null;
   };
-  const position = () => {
-    const g = bounds();
-    return g ? { x: x * (g.width - 1), y: y * (g.height - 1), width: g.width, height: g.height } : null;
+  const position = (g = bounds()) => {
+    if (!g || ![g.width, g.height].every(value => Number.isFinite(value) && value > 0)) return null;
+    return { x: x * (g.width - 1), y: y * (g.height - 1), width: g.width, height: g.height };
   };
-  const output = (type, extra = {}) => { const p = position(); return p ? emit({ type, ...p, ...extra }) !== false : false; };
+  const output = (type, extra = {}) => {
+    // Cancellation still needs host coordinates when the local surface has no size.
+    const p = type === 'cancel' ? position(geometry()) : position();
+    return p ? emit({ type, ...p, ...extra }) !== false : false;
+  };
   function release() {
     fingerScroll.reset();
     if (dragging) output('cancel');
