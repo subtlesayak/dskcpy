@@ -155,6 +155,83 @@ Developer signing/notarization and Windows signing require separate approval.
 The stable intended bundle identity is `com.dskcpy.host`; an unsigned prototype
 does not prove permission continuity across upgrades.
 
+### Windows development installer source
+
+On native Windows x64, after creating and verifying the development stage:
+
+```sh
+npm run package:windows-installer:development --prefix desktop -- VERIFIED_STAGE NEW_OUTPUT_DIRECTORY
+```
+
+This separate opt-in command prepares an unsigned NSIS installer configured for
+one-click, per-user installation, desktop/Start-menu shortcuts and opening the
+app after installation. It requests no installer elevation and configures
+uninstall to preserve app data. These are source settings, not completed
+Windows installation or upgrade qualification. It keeps the stable app ID;
+running an installer may replace an existing installation, so a physical test
+requires an agreed session interruption and rollback first.
+
+The command requires a clean, identified x64 Windows stage and its pinned x86
+ADB runtime, verifies the declared first-party/native payload and runtime notice,
+and checks PE architectures without starting the host or ADB. It refuses an
+existing output or output inside the stage. Standard builder signing is disabled
+for the app, installer and uninstaller, including when a signing environment is
+present. Explicit `publish: null` also disables inferred updater/publisher
+metadata; `--publish never` alone only prevents uploading. No signing keys or
+accounts are configured by this command.
+
+The pinned NSIS build executes a temporary generator executable to produce its
+uninstaller. The wrapper does not run the finished installer or launch the app.
+Build logs/configuration can contain local paths; keep them private and share
+only the sanitized hash/identity receipt. A successful build also verifies the
+input stage remained unchanged and records the generated installer hash.
+
+Native Windows compilation, Windows acceptance, actual install/uninstall,
+stable signing, data-preserving upgrades, minimum OS and physical host/device
+tests remain open. No Windows installer was built or installed by preparing
+this source on a Mac. Public distribution is not enabled (`--publish never`).
+
+### Local Mac installer-image preview
+
+After verifying a development app directory, create a separate disk image:
+
+```sh
+npm run package:mac-image:development --prefix desktop -- \
+  PATH_TO_DSKCPY_HOST_APP NEW_OUTPUT_DIRECTORY
+```
+
+Run on native macOS with the same architecture as the packaged host and ADB.
+The command verifies the declared first-party/native payload and pinned runtime
+notice, preserves the app's files, executable modes and internal framework links,
+and refuses an existing output or an output inside the app. External or broken
+app links fail instead of copying files from outside the bundle.
+Before creating the image, the builder reads the selected architecture's Mach-O
+deployment target for each bundled binary, including Electron helpers and
+libraries. A missing slice or a target above `LSMinimumSystemVersion` fails
+the build. The receipt lists the inspected binaries and their declared targets.
+
+The image contains dskcpy Host, an Applications shortcut and short setup
+instructions. Packaging creates and checks a compressed HFS+ disk image without
+mounting it, opening the app, installing it, enumerating devices, changing
+permissions, signing, notarizing or publishing. A relative-path inventory and
+`installer-receipt.json` record the application source commit, manifest/image
+hashes and verification limits. Local tool logs may contain local paths; keep
+them private when sharing the sanitized receipt. Failed new output is retained
+for inspection; existing app directories are never replaced.
+
+This is a controlled development preview. Image checksums and copied-file
+integrity do not prove Finder layout, OS acceptance, a clean installation,
+permission retention, minimum-OS support or a compatible upgrade. Public release
+signing, notices and physical installation/upgrade qualification remain open.
+The build procedure is repeatable; disk-image timestamps are not normalized, so
+byte-for-byte reproducibility is not established by this command.
+
+The verification workflow builds the development installers on native Windows,
+Intel Mac and Apple silicon runners. It uses the Windows stage and the Mac app
+from the preceding desktop checks. Installer build results appear in each job.
+Use absolute input and output paths for local commands from outside `desktop/`,
+since `npm --prefix desktop` runs the script from that directory.
+
 ## Checks
 
 ```sh
