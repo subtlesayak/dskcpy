@@ -49,6 +49,19 @@ test('explicit drag survives clutching but releases on cancellation and two-fing
   pad.pointerMove(event(2, 40, 0)); assert.equal(packets.at(-1).type, 'scroll'); assert.equal(packets.at(-1).dy, 10);
   pad.up(event(2)); const n = packets.length; pad.pointerMove(event(1, 30, 30)); pad.up(event(1)); assert.equal(packets.length, n);
 });
+test('a drag sends cancel even if the local surface collapses during resize', () => {
+  const { pad, packets, geometry, event } = fixture();
+  pad.toggleDrag();
+  pad.down(event(1, 20, 20));
+  geometry.cssHeight = 0;
+  pad.release();
+  pad.pointerMove(event(1, 40, 40));
+  pad.up(event(1));
+  assert.equal(pad.dragging, false);
+  assert.deepEqual(packets.map(packet => packet.type), ['down', 'cancel']);
+  assert.equal(packets[1].width, geometry.width);
+  assert.equal(packets[1].height, geometry.height);
+});
 test('invalid geometry, stale pointers, excessive contacts and non-finite deltas stay inert', () => {
   const { pad, packets, geometry, event } = fixture();
   pad.pointerMove(event(8, 1, 1)); pad.up(event(8)); pad.move(NaN, 1); pad.scroll(0, Infinity); assert.equal(packets.length, 0);

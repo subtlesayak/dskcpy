@@ -126,9 +126,23 @@ try {
       await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
       await until(() => scrolls > before, 'actual Chromium two-finger scroll'); await cdp.detach();
     }
+    const rotationChecked = variant.width === 390 && variant.height === 844 && variant.pointerButtons !== false;
+    if (rotationChecked) {
+      await controller.getByRole('button', { name: 'Start drag', exact: true }).click();
+      await until(() => held.has('mouse'), 'drag held before portrait-to-landscape');
+      const controllerSockets = await controller.evaluate(() => window.__testControllerSockets.length);
+      const pictureBefore = await decodedFrames(picture);
+      await controller.setViewportSize({ width: 844, height: 390 });
+      await until(() => held.size === 0, 'controller resize releases drag');
+      assert.equal(await controller.getByRole('button', { name: 'Start drag', exact: true }).isEnabled(), true);
+      await until(async () => await decodedFrames(picture) > pictureBefore + 1, 'presentation picture continues through rotation');
+      assert.equal(await controller.evaluate(() => window.__testControllerSockets.length), controllerSockets);
+      assert.equal(nativeCalls, 1);
+    }
     await controller.getByRole('button', { name: 'Start drag', exact: true }).click(); await until(() => held.has('mouse'), 'held drag');
     await controller.getByRole('button', { name: 'Keyboard', exact: true }).click(); await until(() => held.size === 0, 'keyboard cancels drag');
     await controller.locator('#controller-input').fill('café 😊'); await until(() => typed === 'café 😊', 'committed Unicode through existing helper');
+    if (rotationChecked) await controller.setViewportSize({ width: 390, height: 844 });
     assert.equal(await controller.locator('#controller-input').inputValue(), 'café 😊');
     if (variant.width > variant.height) await controller.setViewportSize({ width: variant.width, height: 220 });
     await until(async () => {
@@ -211,6 +225,7 @@ try {
       keyboardFocusVisible: true, nativeFocusTraversal: engine === 'webkit' ? 'Option+Tab' : 'Tab', pointerPreferenceKeyboardAndReload: true, explicitModifierShortcut: true, secondaryClickPacket: variant.pointerButtons !== false, oldHostSecondaryClickDenied: variant.pointerButtons === false,
       autoKeyboardWithoutOptionsFocusSteal: true, suggestionReplacementAfterRepeatedFocus: true, simulatedVisibilityLifecycle: true,
       presentationContinued: true, controllerReload: true, noControllerMediaOrAudioContext: true,
+      rotationChecked,
       cancelEndPreservedSession: true, separateEndPresentation: true, endedControllerStatusRecovery: true, confirmedStop: true,
       nativeCalls, generatedFrames: frames, generatedAcks: acks, physicalDevice: false, castingQualified: false });
   } catch (error) {

@@ -6,6 +6,7 @@ import { WebSocket } from 'ws';
 import { createBrowserReceiver } from './browser.mjs';
 import { touchPacket, scrollPacket, secondaryClickPacket, ack, controllerJoinUrl, parseControllerFragment } from '../receiver/protocol.mjs';
 import { clipboardRequest } from '../receiver/clipboard.mjs';
+import { createRelativeTrackpad } from '../receiver/trackpad.mjs';
 
 const header = Buffer.from('535244310000000100000280000001e0', 'hex');
 const releaseKeys = Buffer.from([8, 2, 0, 0, 0]);
@@ -128,6 +129,41 @@ test('pairing transfers input once, while only the presentation receives media',
   await until(() => f.bytes().includes(Buffer.from(ack(6, 2))));
   assert.equal(f.presentation.readyState, WebSocket.OPEN);
   assert.equal(texts(c.ws).find(m => m.type === 'controller-authenticated').role, 'controller');
+});
+
+test('controller layout collapse delivers mouse cancellation without interrupting presentation', async t => {
+  const f = await fixture(t);
+  const { ws } = await f.pair();
+  ws.send('resume');
+  const geometry = { width: 640, height: 480, cssWidth: 340, cssHeight: 440 };
+  const actions = { down: 0, up: 1, cancel: 3 };
+  const pad = createRelativeTrackpad({
+    geometry: () => geometry,
+    emit({ type, x, y, width, height }) {
+      ws.send(touchPacket(actions[type], 0, x, y, width, height));
+    },
+  });
+
+  const press = Buffer.from(touchPacket(0, 0, 319.5, 239.5, 640, 480));
+  const cancel = Buffer.from(touchPacket(3, 0, 319.5, 239.5, 640, 480));
+  f.clear();
+  pad.toggleDrag();
+  await until(() => f.bytes().includes(press));
+  geometry.cssHeight = 0;
+  pad.release();
+  await until(() => f.bytes().includes(cancel));
+  assert.equal(pad.dragging, false);
+
+  const frame = media(10, 2);
+  const sound = media(11, 8);
+  f.native().write(frame);
+  f.native().write(sound);
+  await until(() => [frame, sound].every(packet =>
+    f.presentation.received.some(message => message.binary && message.data.equals(packet))));
+  assert.equal(f.bytes().includes(Buffer.from([5, 7])), false);
+  assert.equal(f.calls(), 1);
+  assert.equal(ws.readyState, WebSocket.OPEN);
+  assert.equal(f.presentation.readyState, WebSocket.OPEN);
 });
 
 test('controller background and transport loss release input without pausing presentation', async t => {
