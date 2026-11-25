@@ -44,3 +44,11 @@ before interrupting a stream, a matching certificate-verified companion/native
 pair, USB/Wi-Fi/direct-IP runs, and phone service/foreground/permission evidence
 captured privately before restoration. A successful retry is not a fix. Share
 only sanitized phase histories and artifact hashes in coordination notes.
+
+The Android companion now holds an undelivered ADB launch in an
+Activity-scoped ViewModel. The launch waits until the screen is visible and
+the service is bound, then is consumed once. An ordinary launcher intent
+leaves it in place, and a newer valid ADB launch can replace it. This addresses
+two source-observed ways to lose a pending launch before opening the display
+socket. The pending launch is held in process memory and does not survive
+process death. The historical hardware stall still needs controlled retesting.

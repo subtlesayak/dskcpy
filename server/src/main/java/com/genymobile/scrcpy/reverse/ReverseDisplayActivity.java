@@ -9,6 +9,8 @@ import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
+import androidx.lifecycle.ViewModel;
+import androidx.lifecycle.ViewModelProvider;
 import com.google.android.material.bottomnavigation.BottomNavigationView;
 import com.google.android.material.navigation.NavigationBarView;
 import com.google.android.material.navigationrail.NavigationRailView;
@@ -108,7 +110,10 @@ public final class ReverseDisplayActivity extends AppCompatActivity
     private ReverseSessionService session;
     private boolean bound;
     private boolean activityVisible;
-    private String pendingScid;
+    private PendingUsbLaunch pendingUsb;
+    public static final class UsbLaunchModel extends ViewModel {
+        private final PendingUsbLaunch pending = new PendingUsbLaunch();
+    }
     private boolean stopping;
     private final Runnable sessionChanged = this::syncSession;
     private final ServiceConnection serviceConnection = new ServiceConnection() {
@@ -146,23 +151,25 @@ public final class ReverseDisplayActivity extends AppCompatActivity
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
                 | WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED);
 
-        pendingScid = getIntent().getStringExtra("scid");
-        getIntent().removeExtra("scid"); // Do not restart an old USB session on Activity recreation.
+        // Keep an undelivered launch across recreation in this process, without
+        // saving it to disk or reusing it after the service has taken it.
+        pendingUsb = new ViewModelProvider(this).get(UsbLaunchModel.class).pending;
+        pendingUsb.offer(getIntent().getStringExtra("scid"));
+        getIntent().removeExtra("scid");
         showConnectionInfo();
         bound = bindService(new Intent(this, ReverseSessionService.class), serviceConnection, BIND_AUTO_CREATE);
     }
 
     private void startPendingUsb() {
-        if (session != null && activityVisible && pendingScid != null) {
-            String scid = pendingScid;
-            pendingScid = null;
+        String scid = pendingUsb.takeIfReady(activityVisible, session != null);
+        if (scid != null) {
             session.startUsb(scid);
         }
     }
 
     @Override protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
-        pendingScid = intent.getStringExtra("scid");
+        pendingUsb.offer(intent.getStringExtra("scid"));
         intent.removeExtra("scid");
         setIntent(intent);
         startPendingUsb();
