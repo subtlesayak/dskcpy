@@ -29,7 +29,7 @@ async function until(check, label) {
   assert.fail(label);
 }
 async function proxyHost(tls, hostname, filename) {
-  let broker, captures = 0, offline = false, holdBootstrap = false, alternateProof;
+  let broker, captures = 0, offline = false, dropNextBootstrap = false, droppedBootstraps = 0, alternateProof;
   const natives = new Set(), sockets = new Set();
   const requestOptions = req => ({ hostname: '127.0.0.1', port: broker.port, path: req.url, method: req.method, headers: req.headers });
   const proxy = https.createServer(tls, (req, res) => {
@@ -53,11 +53,21 @@ async function proxyHost(tls, hostname, filename) {
       const headers = response.rawHeaders.reduce((result, value, index) => result + value + (index % 2 ? '\r\n' : ': '), '');
       socket.write(`HTTP/1.1 101 Switching Protocols\r\n${headers}\r\n`);
       if (head.length) remote.write(head);
-      if (remoteHead.length) socket.write(remoteHead);
       socket.on('error', () => remote.destroy()); remote.on('error', () => socket.destroy());
       socket.on('close', () => remote.destroy()); remote.on('close', () => socket.destroy());
       socket.pipe(remote);
-      remote.on('data', chunk => { if (!holdBootstrap) socket.write(chunk); });
+      function forward(chunk) {
+        if (dropNextBootstrap) {
+          dropNextBootstrap = false;
+          droppedBootstraps++;
+          remote.destroy();
+          socket.destroy();
+          return;
+        }
+        socket.write(chunk);
+      }
+      remote.on('data', forward);
+      if (remoteHead.length) forward(remoteHead);
     });
     upstream.on('response', response => { response.resume(); socket.end(`HTTP/1.1 ${response.statusCode} Rejected\r\nConnection: close\r\n\r\n`); });
     upstream.on('error', () => socket.destroy()); upstream.end();
@@ -68,7 +78,8 @@ async function proxyHost(tls, hostname, filename) {
     origin, get broker() { return broker; }, get captures() { return captures; },
     replaceIdentityProof(prove) { alternateProof = prove; },
     proveIdentity(origin, challenge) { return store.proveIdentity(origin, challenge); },
-    holdBootstrap(value) { holdBootstrap = value; },
+    dropBootstrap() { dropNextBootstrap = true; },
+    get droppedBootstraps() { return droppedBootstraps; },
     setOffline(value) { offline = value; if (value) for (const socket of sockets) socket.destroy(); },
     async close() {
       for (const socket of [...sockets, ...natives]) socket.destroy();
@@ -345,10 +356,16 @@ try {
   await addComputer(directory, a, 'Bootstrap fixture browser');
   const bootstrapName = await directory.locator('#paired-computers li').last().getByRole('heading').innerText();
   receiver = await select(directory, bootstrapName);
-  a.holdBootstrap(true);
+  a.dropBootstrap();
   await a.broker.trustAction('allow-stream', a.broker.trustedStatus().streamRequest.id);
-  await until(() => a.captures === priorBootstrapCaptures + 2, 'Approved capture should start before the dropped acknowledgement');
-  a.holdBootstrap(false);
+  await until(() => a.droppedBootstraps === 1, 'The proxy should drop the approved capture’s first reply');
+  assert.equal(a.captures, priorBootstrapCaptures + 2, 'Approval should start exactly one capture before the reply is dropped');
+  await receiver.waitForFunction(async () => {
+    const response = await fetch('/stream/session', { cache: 'no-store' });
+    return response.ok && (await response.json()).resumable === true;
+  });
+  assert.equal(new URL(receiver.url()).hash, '', 'Approval should retire the new-tab guard before a lost reply');
+  assert.equal(await receiver.locator('#stream-panel').isVisible(), false);
   await receiver.reload();
   await receiver.locator('#stream-panel').waitFor();
   assert.equal(a.captures, priorBootstrapCaptures + 2, 'A lost initial acknowledgement must resume the same capture');
