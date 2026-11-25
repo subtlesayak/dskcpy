@@ -3,6 +3,10 @@ name: Verify reverse display
 on:
   pull_request:
   push:
+    # Feature branches receive verification through their pull request.
+    branches: [master]
+    tags: ['**']
+  # Verify a branch before opening a pull request when needed.
   workflow_dispatch:
 
 permissions:
