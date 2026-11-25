@@ -21,6 +21,7 @@ try { for (const variant of [{ width: 620, height: 740, reason: 'certificate' },
   const page = await browser.newPage({ viewport: { width: variant.width, height: variant.height } }); page.setDefaultTimeout(6000);
   const errors = []; page.on('pageerror', e => errors.push(e.message));
   let status = { running: false, browser: { waiting: false, connected: false } }, invites = 0, resolveProbe, signal;
+  let permissions = { screen: false, control: false }, setupChecks = 0;
   const route = { connected: true, ready: true, origin: 'https://fixture.test.ts.net:8443' };
   const backend = {
     status: async () => status,
@@ -29,7 +30,10 @@ try { for (const variant of [{ width: 620, height: 740, reason: 'certificate' },
       return { mode: 'internet', url: route.origin + '/', key: 'a'.repeat(32), expiresAt: Date.now() + 300000, status }; },
     stop: async () => { status = { running: false, browser: { waiting: false, connected: false } }; }, shutdown: async () => {},
   };
-  const host = new HostController({ backend, checkSetup: async () => ({ permissions: { screen: true, control: true }, runtimeReady: true, route, features: { keyboard: true } }),
+  const host = new HostController({ backend, readPermissions: () => permissions, checkSetup: async () => {
+    setupChecks++;
+    return { runtimeReady: true, route, features: { keyboard: true } };
+  },
     probeReceiver: (_descriptor, _origin, options) => { signal = options.signal; return new Promise(resolve => resolveProbe = resolve); },
     onChange: snapshot => { void page.evaluate(state => window.fixtureChange?.(state), snapshot).catch(() => {}); } });
   try {
@@ -46,6 +50,14 @@ try { for (const variant of [{ width: 620, height: 740, reason: 'certificate' },
     }; });
     await page.goto(`http://127.0.0.1:${server.address().port}/desktop/index.html`);
     await page.locator('html').evaluate((html, v) => { html.dir = v.rtl ? 'rtl' : 'ltr'; if (v.zoom) html.style.zoom = v.zoom; }, variant);
+    await page.getByRole('heading', { name: 'Allow your screen to be shared', exact: true }).waitFor();
+    permissions = { screen: true, control: false };
+    await host.refresh();
+    await page.getByRole('heading', { name: 'Allow remote mouse and keyboard', exact: true }).waitFor();
+    permissions = { screen: true, control: true };
+    await host.refresh();
+    await page.getByRole('button', { name: 'Start sharing', exact: true }).waitFor();
+    assert.equal(setupChecks, 1); assert.equal(invites, 0);
     await page.getByRole('button', { name: 'Start sharing', exact: true }).click();
     await page.getByRole('heading', { name: 'Checking your private link', exact: true }).waitFor();
     assert.equal(invites, 0); assert.equal(await page.locator('.qr').count(), 0); assert.equal(host.snapshot().invitation, null);
@@ -76,7 +88,8 @@ try { for (const variant of [{ width: 620, height: 740, reason: 'certificate' },
     await page.getByRole('button', { name: 'Cancel invitation', exact: true }).click();
     await page.getByRole('button', { name: 'Start sharing', exact: true }).waitFor();
     assert.deepEqual(errors, []);
-    results.push({ ...variant, keyboardCancel: true, noInvitationBeforeSuccess: true, failureGuidance: true, retry: true, existingPendingConnectionPreserved: true, syntheticBackendAndProbe: true });
+    results.push({ ...variant, permissionStepsAdvanceOnStatus: true, keyboardCancel: true, noInvitationBeforeSuccess: true,
+      failureGuidance: true, retry: true, existingPendingConnectionPreserved: true, syntheticBackendAndProbe: true });
   } finally { await host.close(); await page.close(); }
 } await writeFile(path.join(output, 'result.json'), JSON.stringify({ realRouteOrCertificate: false, realGrantOrCapture: false, results }, null, 2) + '\n');
 console.log(`${results.length} Chromium private-link check flows pass with fake backend/probe.`);

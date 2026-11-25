@@ -79,13 +79,13 @@ else {
       onExit: () => { if (!quitting && host) { host.status = null; host.invitation = null;
         host.error = 'The sharing service closed. Reopen dskcpy to try again.'; host.emit(); } },
     });
-    host = new HostController({ backend, onChange: update, checkSetup: async connection => {
+    host = new HostController({ backend, onChange: update, readPermissions: permissions, checkSetup: async connection => {
       // Cable setup does not inspect or modify Tailscale, routes or accounts.
       const route = connection === 'usb' ? { connected: false, ready: false } : await privateRoute.check();
       await backend.ensure(route);
       const readiness = await backend.readiness({ checkAdb: connection === 'usb' });
       const usb = connection === 'usb' ? { available: readiness.adb, ...(readiness.adb ? await backend.usbDevices() : { devices: [], error: false }) } : undefined;
-      return { route, usb, permissions: permissions(), runtimeReady: readiness.ready, features: { keyboard: readiness.keyboard, clipboard: readiness.clipboard } };
+      return { route, usb, runtimeReady: readiness.ready, features: { keyboard: readiness.keyboard, clipboard: readiness.clipboard } };
     } });
     requestStop = createStopAction({ snapshot: () => ({ ...host.snapshot(), canStop: !quitting && host.snapshot().canStop }),
       stop: () => host.stop(), confirm: async snapshot => {
@@ -100,7 +100,7 @@ else {
       title: 'dskcpy Host', backgroundColor: '#0a1419', show: false,
       webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true,
         nodeIntegration: false, sandbox: true, webSecurity: true } });
-    window.on('focus', () => { startup.refresh(); update(host.snapshot()); });
+    window.on('focus', () => { startup.refresh(); host.refreshPermissions(); update(host.snapshot()); });
     window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
     window.webContents.on('will-navigate', (event, url) => { if (url !== page) event.preventDefault(); });
     window.webContents.session.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
