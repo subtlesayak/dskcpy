@@ -68,7 +68,7 @@ export function rememberedBrowser({ connectApproved, document = globalThis.docum
         : !known ? 'Pairing required. Ask the host for a new invitation.'
           : result.streamApproval !== true ? 'Update the computer to request a new stream.'
             : result.paused ? 'Connection requests are paused on the computer.'
-              : result.busy ? 'Computer is busy. Check again when the other session ends.' : 'Reachable');
+              : result.busy ? 'Computer is busy. Check again when it is free.' : 'Reachable');
       $('remember-status').textContent = result.status === 'pending' ? 'Waiting for pairing approval on the computer. Keep this session open.'
         : known ? result.paused ? 'Saved. Requests are paused on the computer.' : 'Paired. Return to this address to request a new stream.'
         : 'Ask the computer to pair this browser. Use only a device you own.';
@@ -167,13 +167,17 @@ export function rememberedBrowser({ connectApproved, document = globalThis.docum
     feedback.textContent = 'Sending connection request…';
     try {
       const pending = await request('trusted/connect', { action: 'request' });
-      if (!/^[a-f0-9]{32}$/.test(pending.id || '') || !Number.isSafeInteger(pending.expiresAt)) throw Error('Update the host to request a new stream.');
+      const remaining = pending.expiresInMs;
+      const hasWindow = remaining !== undefined;
+      if (!/^[a-f0-9]{32}$/.test(pending.id || '') || (!hasWindow && !Number.isSafeInteger(pending.expiresAt))
+          || (hasWindow && (!Number.isSafeInteger(remaining) || remaining < 0 || remaining > 120000)))
+        throw Error('Update the host to request a new stream.');
       attempt.id = pending.id;
       if (attempt.cancelled) return await finishCancellation();
       feedback.textContent = 'Waiting for host approval';
       onWaiting();
-      const deadline = Math.min(Date.now() + 120000, pending.expiresAt);
-      while (!attempt.cancelled && Date.now() < deadline) {
+      const deadline = performance.now() + (hasWindow ? remaining : Math.min(120000, pending.expiresAt - Date.now()));
+      while (!attempt.cancelled && performance.now() < deadline) {
         if (owner && !canClaim()) { await new Promise(resolve => setTimeout(resolve, 1000)); continue; }
         const result = await request('trusted/status', { id: attempt.id });
         if (attempt.cancelled) return await finishCancellation();
@@ -192,9 +196,16 @@ export function rememberedBrowser({ connectApproved, document = globalThis.docum
       if (!attempt.cancelled) feedback.textContent = 'The request expired. Try again when ready.';
       return attempt.cancelled ? await finishCancellation() : 'expired';
     } catch (error) {
-      if (!attempt.cancelled) { feedback.textContent = error.message; if ([403, 409].includes(error.status)) void status(); }
       if (attempt.cancelled) return await finishCancellation();
-      return error.status === 409 ? 'busy' : error.status === 403 ? 'pairing-required' : 'request-failed';
+      feedback.textContent = error.message;
+      const outcome = error.status === 409 ? 'busy' : error.status === 403 ? 'pairing-required' : 'request-failed';
+      if (outcome !== 'request-failed') {
+        // The request response supersedes the last availability check.
+        available = false;
+        phase = outcome;
+        void status();
+      }
+      return outcome;
     }
     finally {
       connectionAttempt = null;

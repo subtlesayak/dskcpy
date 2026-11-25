@@ -231,7 +231,9 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
           connectionRequest = { id: randomBytes(16).toString('hex'), device, expiresAt: Math.min(Date.now() + connectionRequestMs, device.expiresAt), status: 'pending' };
           onChange();
         }
-        json(202, { id: connectionRequest.id, status: connectionRequest.status, expiresAt: connectionRequest.expiresAt }); return;
+        const { id, status, expiresAt } = connectionRequest;
+        const expiresInMs = Math.max(0, Math.min(connectionRequestMs, expiresAt - Date.now()));
+        json(202, { id, status, expiresAt, expiresInMs }); return;
       }
       const request = connectionRequest;
       if (!request || body.id !== request.id || request.device.id !== device.id || request.device.digest !== device.digest || request.expiresAt <= Date.now()) {

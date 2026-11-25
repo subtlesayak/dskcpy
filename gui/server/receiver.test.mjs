@@ -831,6 +831,60 @@ test('an expired session waits for a new deliberate request and host approval', 
 });
 
 
+for (const expiresInMs of [60_000, 0]) test(`paired approval uses the host's remaining window of ${expiresInMs}ms with a skewed receiver clock`, async t => {
+  const h = receiver(t);
+  h.socket.close(1000);
+  await new Promise(setImmediate);
+  let polls = 0;
+  h.context.fetch = async url => {
+    let value = { status: 'approved', streamApproval: true };
+    if (url.endsWith('/trusted/connect')) value = { id: 'a'.repeat(32), expiresAt: Date.now() - 300_000, expiresInMs };
+    else if (url.endsWith('/trusted/status')) { polls++; value = { key: 'r'.repeat(32) }; }
+    return { ok: true, json: async () => value };
+  };
+  await h.$('paired-refresh').emit('click');
+  await new Promise(setImmediate);
+  assert.equal(await h.$('remembered-reconnect').emit('click'), expiresInMs ? 'approved' : 'expired');
+  assert.equal(polls, expiresInMs ? 1 : 0);
+  assert.equal(h.sockets.length, expiresInMs ? 2 : 1);
+  if (expiresInMs) { h.sockets[1].emit('open'); assert.equal(h.sockets[1].sent[0], 'r'.repeat(32)); }
+});
+
+test('a competing connection request disables retry until host availability is refreshed', async t => {
+  const h = receiver(t);
+  h.socket.close(1000);
+  await new Promise(setImmediate);
+  const paired = { status: 'approved', streamApproval: true };
+  const response = (body, status = 200) => ({ ok: status === 200, status, json: async () => body });
+  let finishRefresh, statusCalls = 0, connectCalls = 0;
+  h.context.fetch = async url => {
+    if (url.endsWith('/trusted/connect')) {
+      connectCalls++;
+      return response({ error: 'The host is busy with another request, invitation or session.' }, 409);
+    }
+    assert.equal(url, '/stream/remember/status');
+    if (++statusCalls === 2) return new Promise(resolve => { finishRefresh = resolve; });
+    return response(paired);
+  };
+  const reconnect = h.$('remembered-reconnect');
+  await h.$('paired-refresh').emit('click');
+  await new Promise(setImmediate);
+  assert.equal(reconnect.disabled, false);
+  assert.equal(await reconnect.emit('click'), 'busy');
+  assert.equal(reconnect.disabled, true);
+  await reconnect.emit('click');
+  assert.equal(connectCalls, 1);
+
+  finishRefresh(response({ ...paired, busy: true }));
+  await new Promise(setImmediate);
+  assert.equal(reconnect.disabled, true);
+  assert.match(h.$('paired-availability').textContent, /Computer is busy/);
+  await h.$('paired-refresh').emit('click');
+  await new Promise(setImmediate);
+  assert.equal(reconnect.disabled, false);
+  assert.equal(h.sockets.length, 1);
+});
+
 test('arrow pad sends complete direction pairs without opening the soft keyboard', t => {
   const h = receiver(t, { keyboard: true });
   assert.equal(h.$('arrows').hidden, false); assert.equal(h.$('arrows').disabled, false);
