@@ -260,7 +260,11 @@ window.addEventListener('pageshow', event => {
 });
 
 if (location.protocol === 'https:' && 'serviceWorker' in navigator) {
-  void navigator.serviceWorker.register('/computers/computers-sw.mjs', { scope: '/computers/' }).catch(() => {});
+  void navigator.serviceWorker.register('/computers/computers-sw.mjs', {
+    scope: '/computers/', updateViaCache: 'none',
+  }).then(registration => {
+    if (navigator.serviceWorker.controller) return registration.update();
+  }).catch(() => {});
   if (!standalone) {
     const install = $('install-app'), help = $('install-help');
     let pendingPrompt = null, installed = false;

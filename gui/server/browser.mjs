@@ -3,7 +3,6 @@ import https from 'node:https';
 import net from 'node:net';
 import { randomBytes, timingSafeEqual, createHash, X509Certificate } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
-import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { createBrowserSession } from './browser-session.mjs';
 import { BROWSER_RESUME_MS } from '../receiver/protocol.mjs';
@@ -43,6 +42,22 @@ const assets = new Map([
   ['/controller.css', ['controller.css', 'text/css; charset=utf-8']],
   ['/presentation.mjs', ['presentation.mjs', 'text/javascript; charset=utf-8']],
 ]);
+
+const directoryShellPaths = ['/computers/', '/computers/computers.mjs', '/computers/computers-common.mjs',
+  '/computers/manifest.webmanifest', '/computers/icon-192.png', '/computers/icon-512.png', '/receiver.css'];
+const readReceiverAsset = file => readFile(new URL(`../receiver/${file}`, import.meta.url));
+
+async function directoryWorker(file) {
+  const [worker, entries] = await Promise.all([
+    readReceiverAsset(file),
+    Promise.all(directoryShellPaths.map(async path => {
+      const data = await readReceiverAsset(assets.get(path)[0]);
+      return [path, `sha256-${createHash('sha256').update(data).digest('base64')}`];
+    })),
+  ]);
+  const version = createHash('sha256').update(worker).update(JSON.stringify(entries)).digest('hex');
+  return Buffer.concat([Buffer.from(`const directoryShell = ${JSON.stringify({ version, entries })};\n`), worker]);
+}
 
 export function receiverOrigin(value) {
   if (!value) return null;
@@ -412,7 +427,8 @@ export function createBrowserReceiver({ configuredPort = 27180, origin,
     }
     if (!asset || req.method !== 'GET') { res.writeHead(404).end(); return; }
     try {
-      const data = await readFile(fileURLToPath(new URL(`../receiver/${asset[0]}`, import.meta.url)));
+      const data = req.url === '/computers/computers-sw.mjs'
+        ? await directoryWorker(asset[0]) : await readReceiverAsset(asset[0]);
       res.writeHead(200, { 'Content-Type': asset[1] }).end(data);
     } catch { res.writeHead(503).end('Receiver assets unavailable.'); }
   };
