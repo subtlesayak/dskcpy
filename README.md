@@ -99,9 +99,9 @@ operation uses an external VPN such as Tailscale and its access controls.
 | Desktop → iPhone/iPad browser | Safari/iOS compatibility needs physical qualification; no native iOS receiver or iPhone USB tunnel is provided. |
 | Linux desktop hosting | Not implemented. Linux can still use the inherited Android-to-computer mode. |
 
-A source implementation or automated pass is not a physical-device pass. See
-[validation notes](doc/reverse-display-validation.md), the
-[Mac testing record](doc/testing/mac/README.md), and the [roadmap](doc/roadmap.md).
+See the [build-specific support and test matrix](doc/platform-support.md),
+[validation notes](doc/reverse-display-validation.md),
+[Mac testing record](doc/testing/mac/README.md), and [roadmap](doc/roadmap.md).
 
 ## Prerequisites
 
