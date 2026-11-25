@@ -85,14 +85,33 @@ test('native capture recovery preserves authorization, clears old media and adop
   second.close(4000);
 });
 
-test('native transport loss holds only a bounded owner-classification grace; it does not itself start capture', async t=>{
-  const f=await fixture(t,{inputPolicy:{captureRecovery:true},nativeEndGraceMs:40});
-  const ws=await login(f),cookie=ws.cookie.split(';')[0];
-  const ended=once(ws,'close');f.native().destroy();
-  await until(()=>f.receiver.status().recovering);
-  assert.equal(await resumable(f,cookie),true);
-  const [code]=await ended;assert.equal(code,1008);assert.equal(f.calls(),1);
-  assert.equal(await resumable(f,cookie),false);assert.equal(f.calls(),1);
+test('native transport loss holds only a bounded owner-classification grace; it does not itself start capture', { timeout: 5000 }, async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const recovery = Promise.withResolvers();
+  let f;
+  f = await fixture(t, {
+    inputPolicy: { captureRecovery: true },
+    nativeEndGraceMs: 40,
+    onChange() { if (f?.receiver.status().recovering) recovery.resolve(); },
+  });
+  const ws = await f.open();
+  ws.send(f.invitation.key);
+  // The sockets still use real I/O. Only the classification timer advances
+  // explicitly, so a slow HTTP request cannot skip the recoverable window.
+  while (!ws.received.some(message => message.binary)) await once(ws, 'message');
+  const cookie = ws.cookie.split(';')[0];
+  const ended = once(ws, 'close');
+  f.native().destroy();
+  await recovery.promise;
+  t.mock.timers.tick(39);
+  assert.equal(await resumable(f, cookie), true);
+  assert.equal(f.calls(), 1);
+  t.mock.timers.tick(1);
+  const [code, reason] = await ended;
+  assert.equal(code, 1008);
+  assert.equal(reason.toString(), 'capture-recovery');
+  assert.equal(await resumable(f, cookie), false);
+  assert.equal(f.calls(), 1);
 });
 
 test('capture recovery budget and cancellation never create an unbounded or unauthorized restart', async t=>{
