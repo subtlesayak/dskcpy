@@ -71,7 +71,8 @@ jobs:
           node desktop/test/window-host-ui.mjs
           node desktop/test/video-preference-ui.mjs chromium
           node desktop/test/host-presentation-ui.mjs chromium
-      - name: Check Firefox pairing and generated receiver media
+      - name: Set up Firefox and check paired browser access
+        id: firefox_pairing
         if: runner.os == 'Linux'
         env:
           PLAYWRIGHT_BROWSERS_PATH: desktop/.browsers
@@ -79,7 +80,25 @@ jobs:
           node desktop/node_modules/playwright/cli.js install --with-deps firefox
           sudo apt-get install -y ffmpeg
           node desktop/test/paired-computers-ui.mjs firefox
-          node desktop/test/browser-media-ui.mjs firefox webrtc
+      - name: Check Firefox native WebRTC receiving
+        if: runner.os == 'Linux' && steps.firefox_pairing.outcome == 'success'
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: desktop/.browsers
+        run: node desktop/test/browser-media-ui.mjs firefox webrtc
+      - name: Check Firefox WebCodecs receiving separately
+        if: ${{ !cancelled() && runner.os == 'Linux' && steps.firefox_pairing.outcome == 'success' }}
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: desktop/.browsers
+        run: node desktop/test/browser-media-ui.mjs firefox webcodecs
+      - name: Report Firefox generated-media diagnostics
+        if: failure() && runner.os == 'Linux' && steps.firefox_pairing.outcome == 'success'
+        run: |
+          for transport in webrtc webcodecs; do
+            report="desktop/out/browser-media-firefox-$transport/failure.json"
+            if [ -f "$report" ]; then
+              jq '{engine,transport,browserVersion,failure,counts,brokerModes,inbound,state:{videoCodecs:.state.videoCodecs,peers:.state.peers,video:.state.video}}' "$report"
+            fi
+          done
       - name: Artifact identity and upgrade preflight regressions
         run: node --test tools/*.test.mjs
 

@@ -304,6 +304,15 @@ try {
     report.state = await page.evaluate(() => ({ videoCodecs: window.RTCRtpReceiver?.getCapabilities?.('video')?.codecs.map(c => ({ mimeType: c.mimeType, parameters: c.sdpFmtpLine })), sockets: window.__testSockets, status: document.getElementById('status')?.textContent, error: document.getElementById('error')?.textContent,
       peers: window.__testPeers?.map(p => ({ connection: p.connectionState, ice: p.iceConnectionState, gathering: p.iceGatheringState, candidates: p.__iceCounts, localSdpLength: p.localDescription?.sdp.length, localHasCandidate: p.localDescription?.sdp.includes('a=candidate:'), media: p.localDescription?.sdp.split(/\r?\n/).filter(l => l.startsWith('m=')).map(l => ({ kind: l.split(' ')[0], accepted: l.split(' ')[1] !== '0' })) })),
       video: { width: document.getElementById('rtc-display')?.videoWidth, ready: document.getElementById('rtc-display')?.readyState } })).catch(() => null);
+    report.inbound = await page.evaluate(async () => {
+      const peer = window.__testPeers?.at(-1);
+      if (!peer) return [];
+      const stats = [...(await peer.getStats()).values()];
+      return stats.filter(item => item.type === 'inbound-rtp').map(item => ({
+        kind: item.kind, packetsReceived: item.packetsReceived, bytesReceived: item.bytesReceived,
+        framesReceived: item.framesReceived, framesDecoded: item.framesDecoded,
+      }));
+    }).catch(() => []);
     await page.screenshot({ path: path.join(output, 'failure.png'), fullPage: true }).catch(() => {});
   }
   await writeFile(path.join(output, 'failure.json'), JSON.stringify(report, null, 2) + '\n');
