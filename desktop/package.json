@@ -8,7 +8,9 @@
   "scripts": {
     "test": "node --test test/*.test.mjs",
     "package:mac": "node package-mac.mjs",
-    "package:windows": "electron-builder --config electron-builder.cjs --win dir --x64 --publish never"
+    "package:mac-image:development": "node package-mac-image.mjs --development",
+    "package:windows": "electron-builder --config electron-builder.cjs --win dir --x64 --publish never",
+    "package:windows-installer:development": "node package-windows-installer.mjs --development"
   },
   "devDependencies": {
     "electron": "45.3.1",

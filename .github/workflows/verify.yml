@@ -210,6 +210,10 @@ jobs:
           path: .tmp/dskcpy-windows-x64.zip
           if-no-files-found: error
           retention-days: 14
+      - name: Compile the per-user Windows development installer
+        env:
+          MSYS2_PATH_TYPE: inherit
+        run: npm run package:windows-installer:development --prefix desktop -- stage out/windows-development-installer
 
   native-macos:
     name: ${{ matrix.arch == 'arm64' && 'native-macos' || 'native-macos-intel' }}
@@ -296,6 +300,12 @@ jobs:
           name: unsigned-macos-host-${{ matrix.arch }}-candidate
           path: release/work/host-${{ matrix.arch }}.tar.gz
           retention-days: 7
+      - name: Build and verify the Mac development installer image
+        env:
+          DSKCPY_ELECTRON_OUTPUT: ${{ matrix.arch == 'arm64' && 'mac-arm64' || 'mac' }}
+        run: |
+          npm run package:mac-image:development --prefix desktop -- \
+            "out/$DSKCPY_ELECTRON_OUTPUT/dskcpy Host.app" out/mac-development-installer
 
   android-packaging:
     runs-on: ubuntu-latest
