@@ -41,9 +41,12 @@ is needed to run the desktop app.
 | Browser receiver | Open the invitation served by the running desktop host | [Browser setup](doc/browser-receiver.md) |
 
 Read the [package contents, checksums and upgrade limits](doc/downloads.md)
-before replacing a working installation. The newer local development listed in
-[project status](doc/project-status.md#unmerged-follow-ups) is separate from this
-published implementation. [Source builds](#get-the-source) remain available.
+before replacing a working installation. The preview contains the November 21
+receiver. Current source also includes an installable browser receiver, an
+offline list of saved computers and trusted-HTTPS LAN pairing. Live video,
+audio and input require a connection to the host. See
+[project status](doc/project-status.md#merged-implementation-baseline) for the
+newer source and its verification, or [build from source](#get-the-source).
 
 ## What it does
 
