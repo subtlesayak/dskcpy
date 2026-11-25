@@ -75,6 +75,7 @@ async function requestApproval(f, cookie) {
   const request = await f.post('trusted/connect', cookie, { action: 'request' });
   assert.equal(request.status, 202);
   assert.equal(request.body.key, undefined);
+  assert.ok(Number.isSafeInteger(request.body.expiresInMs) && request.body.expiresInMs >= 0 && request.body.expiresInMs <= 120000);
   const id = request.body.id;
   assert.equal((await f.post('trusted/status', cookie, { id })).body.status, 'pending');
   assert.deepEqual(f.receiver.trustedStatus().streamRequest.permissions, ['view', 'audio', 'control']);

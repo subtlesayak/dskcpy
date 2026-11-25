@@ -406,7 +406,7 @@ try {
   await installed.goto(`${a.origin}/computers/`);
   await button(installed, `Request to connect for ${bootstrapName}`).click();
   await installed.waitForURL(receiverURL);
-  await installed.getByText('Computer is busy. Check again when the other session ends.', { exact: true }).waitFor();
+  await installed.getByText('Computer is busy. Check again when it is free.', { exact: true }).waitFor();
   assert.equal(await installed.locator('#stream-panel').isVisible(), false);
   assert.equal(a.captures, capturesBeforeApp + 1, 'A new app request cannot attach to a held stream');
   a.broker.cancel(); await installed.close();
