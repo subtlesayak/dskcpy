@@ -29,19 +29,45 @@ async function until(check, label) {
   assert.fail(label);
 }
 async function proxyHost(tls, hostname, filename) {
-  let broker, captures = 0, offline = false, dropNextBootstrap = false, droppedBootstraps = 0, alternateProof;
+  let broker, captures = 0, offline = false, directoryUnavailable = false, dropNextBootstrap = false, droppedBootstraps = 0, alternateProof;
   const natives = new Set(), sockets = new Set();
+  let directoryUpdate;
+  const updatedCss = Buffer.concat([await readFile(new URL('../../gui/receiver/receiver.css', import.meta.url)),
+    Buffer.from('\n/* verified directory update fixture */\n')]);
   const requestOptions = req => ({ hostname: '127.0.0.1', port: broker.port, path: req.url, method: req.method, headers: req.headers });
   const proxy = https.createServer(tls, (req, res) => {
     if (offline) { req.socket.destroy(); return; }
+    if (directoryUnavailable && (req.url === '/computers/' || req.url === '/computers/computers.mjs')) {
+      res.writeHead(503).end('Synthetic partial update');
+      return;
+    }
+    if (directoryUpdate === 'complete' && req.url === '/receiver.css') {
+      res.writeHead(200, { 'Content-Type': 'text/css; charset=utf-8', 'Cache-Control': 'no-store' }).end(updatedCss);
+      return;
+    }
     const challenge = /^\/pairing-identity\?challenge=([a-f0-9]{64})$/.exec(req.url)?.[1];
     if (alternateProof && challenge && req.method === 'GET') {
       res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
       res.end(JSON.stringify(alternateProof(origin, challenge)));
       return;
     }
-    const upstream = http.request(requestOptions(req), response => {
-      res.writeHead(response.statusCode, response.headers); response.pipe(res);
+    const update = req.url === '/computers/computers-sw.mjs' && directoryUpdate;
+    const upstream = http.request(requestOptions(req), async response => {
+      if (!update || response.statusCode !== 200) {
+        res.writeHead(response.statusCode, response.headers); response.pipe(res);
+        return;
+      }
+      try {
+        let body = '';
+        for await (const chunk of response) body += chunk;
+        const boundary = body.indexOf('\n');
+        const shell = JSON.parse(body.slice('const directoryShell = '.length, boundary - 1));
+        shell.version = createHash('sha256').update(shell.version).update(update).digest('hex');
+        shell.entries.find(([pathname]) => pathname === '/receiver.css')[1] =
+          `sha256-${createHash('sha256').update(updatedCss).digest('base64')}`;
+        res.writeHead(200, { 'Content-Type': response.headers['content-type'], 'Cache-Control': 'no-store' })
+          .end(`const directoryShell = ${JSON.stringify(shell)};${body.slice(boundary)}`);
+      } catch { res.writeHead(503).end(); }
     });
     upstream.on('error', () => { res.writeHead(502).end(); }); req.pipe(upstream);
   });
@@ -80,6 +106,8 @@ async function proxyHost(tls, hostname, filename) {
     proveIdentity(origin, challenge) { return store.proveIdentity(origin, challenge); },
     dropBootstrap() { dropNextBootstrap = true; },
     get droppedBootstraps() { return droppedBootstraps; },
+    setDirectoryUnavailable(value) { directoryUnavailable = value; },
+    updateDirectory(value) { directoryUpdate = value; },
     setOffline(value) { offline = value; if (value) for (const socket of sockets) socket.destroy(); },
     async close() {
       for (const socket of [...sockets, ...natives]) socket.destroy();
@@ -270,11 +298,53 @@ try {
     await directory.waitForFunction(() => Boolean(navigator.serviceWorker.controller));
     const paths = await directory.evaluate(async () => {
       await Promise.all([fetch('/join'), fetch('/stream/session')]);
-      const cache = await caches.open('dskcpy-paired-computers-v2');
+      const names = (await caches.keys()).filter(name => /^dskcpy-paired-computers-[a-f0-9]{64}$/.test(name));
+      if (names.length !== 1) throw Error('Expected one complete, versioned directory cache');
+      const cache = await caches.open(names[0]);
       return (await cache.keys()).map(request => new URL(request.url).pathname).sort();
     });
     assert.deepEqual(paths, ['/computers/', '/computers/computers-common.mjs', '/computers/computers.mjs',
       '/computers/icon-192.png', '/computers/icon-512.png', '/computers/manifest.webmanifest', '/receiver.css']);
+    a.setDirectoryUnavailable(true);
+    await directory.reload();
+    for (const name of [nameA, nameB]) await directory.getByRole('heading', { name, exact: true }).waitFor();
+    a.setDirectoryUnavailable(false);
+    const getDirectoryCache = page => page.evaluate(async () =>
+      (await caches.keys()).filter(name => /^dskcpy-paired-computers-[a-f0-9]{64}$/.test(name)));
+    const originalCaches = await getDirectoryCache(directory);
+    const updateState = () => directory.evaluate(async () => {
+      const registration = await navigator.serviceWorker.ready;
+      return new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => reject(Error('Directory update state did not settle')), 10000);
+        registration.addEventListener('updatefound', () => {
+          const worker = registration.installing;
+          const settle = () => {
+            if (!['installed', 'redundant'].includes(worker.state)) return;
+            clearTimeout(timeout); resolve(worker.state);
+          };
+          worker.addEventListener('statechange', settle); settle();
+        }, { once: true });
+        registration.update().catch(reject);
+      });
+    });
+    await directory.evaluate(async () => { await (await navigator.serviceWorker.ready).update(); });
+    a.updateDirectory('invalid');
+    assert.equal(await updateState(), 'redundant', 'The mismatched CSS must reject the entire update');
+    assert.deepEqual(await getDirectoryCache(directory), originalCaches);
+    await directory.getByRole('heading', { name: nameA, exact: true }).waitFor();
+    a.updateDirectory('complete');
+    assert.equal(await updateState(), 'installed', 'The complete version should wait for the existing window');
+    assert.equal((await getDirectoryCache(directory)).length, 2);
+    const reopened = await context.newPage();
+    await reopened.goto(`${a.origin}/join`);
+    await directory.close();
+    directory = reopened;
+    await directory.waitForFunction(async original => {
+      const cachesForDirectory = (await caches.keys()).filter(name => /^dskcpy-paired-computers-[a-f0-9]{64}$/.test(name));
+      return cachesForDirectory.length === 1 && cachesForDirectory[0] !== original;
+    }, originalCaches[0]);
+    await directory.goto(`${a.origin}/computers/`);
+    assert.match(await directory.evaluate(async () => (await fetch('/receiver.css')).text()), /verified directory update fixture/);
     a.setOffline(true);
     await directory.reload();
     for (const name of [nameA, nameB]) await directory.getByRole('heading', { name, exact: true }).waitFor();
