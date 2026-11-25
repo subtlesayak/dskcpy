@@ -65,11 +65,10 @@ test('check and help never start a service, open a browser or capture', async ()
   assert.equal((await launch({ ...f.options, readiness: async () => failed })).exitCode, 1);
 });
 
-test('check reports local components even if an existing dashboard is running', async () => {
-  const f = fixture({ args: ['--check'], probe: async () => 'dskcpy' });
-  await launch(f.options);
+test('check reports local components without probing the dashboard port', async () => {
+  const f = fixture({ args: ['--check'], probe: async () => assert.fail('Check only must work without loopback access') });
+  assert.equal((await launch(f.options)).exitCode, 0);
   assert.deepEqual(f.calls, ['inspect']);
-  assert.ok(f.messages.some((message) => /left unchanged/.test(message)));
 });
 
 test('browser launch checks report only the requirements of the selected route', async () => {

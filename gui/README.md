@@ -93,7 +93,8 @@ error; nothing is killed. Stop that older service manually when idle, or set
 Missing Node.js, npm dependencies or built dashboard files require setup before
 launch. The dashboard can open to help diagnose missing host components.
 `--check` checks the requirements for desktop-to-browser streaming over the
-network without starting an ADB probe. Use `--check --browser-usb` to include
+network without contacting the dashboard port or starting an ADB probe.
+Use `--check --browser-usb` to include
 ADB as a requirement for the Android USB browser tunnel. The companion APK is only used by the
 Android app receiver. Readiness does not start capture or verify desktop
 permissions, phone authorization or network connectivity.

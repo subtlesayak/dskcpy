@@ -108,13 +108,15 @@ export async function launch({ args = [], environment = process.env, repoDir = d
       catch { log('Could not open the browser automatically. Open the dashboard address above on this computer.'); }
     }
   };
-  const existing = await probe(options.port);
-  if (existing === 'occupied') throw occupiedError(options.port);
-  if (existing === 'dskcpy' && !options.check) {
-    if (!options.reuse) throw new Error('A dskcpy dashboard is already running. Stop its Terminal launcher before starting this configuration.');
-    log('Using the running dskcpy dashboard. Its stream and settings were not changed.');
-    await showDashboard();
-    return { exitCode: 0, reused: true };
+  if (!options.check) {
+    const existing = await probe(options.port);
+    if (existing === 'occupied') throw occupiedError(options.port);
+    if (existing === 'dskcpy') {
+      if (!options.reuse) throw new Error('A dskcpy dashboard is already running. Stop its Terminal launcher before starting this configuration.');
+      log('Using the running dskcpy dashboard. Its stream and settings were not changed.');
+      await showDashboard();
+      return { exitCode: 0, reused: true };
+    }
   }
   await inspect(repoDir);
   const status = await readiness(repoDir, { ...environment }, options.browserUsb);
@@ -135,7 +137,6 @@ export async function launch({ args = [], environment = process.env, repoDir = d
   const canStream = browser.ready && (!options.browserUsb || status.checks.some(check => check.id === 'adb' && check.ready));
   if (options.check) {
     log('Check only: no service, browser, device connection or capture was started.');
-    if (existing === 'dskcpy') log('An existing dashboard was left unchanged; checks above describe this checkout.');
     return { exitCode: canStream ? 0 : 1, readiness: status };
   }
   if (!canStream) log(`${options.browserUsb ? 'USB browser sharing' : 'Browser sharing'} needs the components marked CHECK. The dashboard can still open for diagnostics.`);
