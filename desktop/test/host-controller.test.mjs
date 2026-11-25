@@ -4,7 +4,7 @@ import { HostController, hostPhase, validateInvitation } from '../host-controlle
 import { inspectPrivateRoute } from '../private-route.mjs';
 
 const blank = () => ({ running: false, browser: { waiting: false, connected: false } });
-function fixture() {
+function fixture({ readPermissions } = {}) {
   let status = blank(), invites = 0, stops = 0, closed = 0, ready = true;
   const setup = { permissions: { screen: true, control: true }, runtimeReady: true,
     route: { connected: true, ready: true, origin: 'https://host.test.ts.net:8443' } };
@@ -12,7 +12,8 @@ function fixture() {
     invite: async () => { invites++; status = { running: false, browser: { waiting: true, connected: false } };
       return { mode: 'internet', url: setup.route.origin + '/', key: 'a'.repeat(32), expiresAt: 301000, status }; },
     stop: async () => { stops++; status = blank(); }, shutdown: async () => { closed++; } };
-  const host = new HostController({ backend, probeReceiver: async () => ({ ready: true }), checkSetup: async () => ({ ...setup, runtimeReady: ready }), now: () => 1000 });
+  const host = new HostController({ backend, readPermissions, probeReceiver: async () => ({ ready: true }),
+    checkSetup: async () => ({ ...setup, runtimeReady: ready }), now: () => 1000 });
   return { host, backend, setup, setStatus: next => { status = next; }, counts: () => ({ invites, stops, closed }), setReady: next => { ready = next; } };
 }
 const tick = () => new Promise(resolve => setImmediate(resolve));
@@ -45,6 +46,28 @@ test('an existing owned stream remains visible and stoppable even if later setup
   const f = fixture(); f.setStatus({ running: true, browser: { connected: true } });
   f.setup.permissions.screen = false; await f.host.refresh({ setup: true }); await f.host.start();
   assert.equal(f.host.snapshot().phase, 'sharing'); assert.equal(f.host.snapshot().canStop, true); assert.equal(f.counts().stops, 0);
+});
+test('focus and status refresh advance Mac permission setup without probing again or altering a stream', async () => {
+  let permissions = { screen: false, control: false };
+  const f = fixture({ readPermissions: () => permissions });
+  await f.host.refresh({ setup: true });
+  assert.equal(f.host.snapshot().phase, 'screen-permission');
+  f.host.checkSetup = () => assert.fail('Permission rechecks must not run network setup');
+
+  permissions = { screen: true, control: false };
+  f.host.refreshPermissions();
+  assert.equal(f.host.snapshot().phase, 'control-permission');
+  permissions = { screen: true, control: true };
+  assert.equal((await f.host.refresh()).phase, 'ready');
+
+  f.setStatus({ running: true, browser: { connected: true }, nativeInputPermission: 'blocked' });
+  permissions = { screen: false, control: false };
+  const sharing = await f.host.refresh();
+  assert.deepEqual(sharing.permissions, permissions);
+  assert.equal(sharing.phase, 'sharing');
+  assert.equal(sharing.nativeInputPermission, 'blocked');
+  assert.equal(sharing.canStop, true);
+  assert.deepEqual(f.counts(), { invites: 0, stops: 0, closed: 0 });
 });
 test('native Mac denial overrides shell-ready guidance while sharing remains stoppable', async () => {
   const f = fixture();

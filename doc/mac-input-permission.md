@@ -25,6 +25,12 @@ reported by the same native process clears the warning without a restart. These
 are permission results, not proof that a target application accepted an event.
 There is no automatic permission reset, process replacement or reconnect.
 
+The setup window checks macOS screen and control access when it regains focus
+and during status refresh. When macOS reports a newly granted permission, the
+window advances to the next setup step. Follow any system request to quit and
+reopen the app so macOS can apply the grant. An active stream keeps its sharing
+status and Stop action during these checks.
+
 ## Software qualification
 
 - Original service and shell snapshots fail the new fake-native regressions;

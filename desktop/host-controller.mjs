@@ -43,9 +43,10 @@ export function validateInvitation(invitation, expectedOrigin, now = Date.now(),
 }
 
 export class HostController {
-  constructor({ backend, checkSetup, probeReceiver = probePrivateReceiver, now = Date.now, onChange = () => {} }) {
+  constructor({ backend, checkSetup, readPermissions, probeReceiver = probePrivateReceiver, now = Date.now, onChange = () => {} }) {
     this.backend = backend; this.checkSetup = checkSetup; this.probeReceiver = probeReceiver; this.probeAbort = null; this.linkChecking = false; this.linkVerified = null; this.now = now; this.onChange = onChange;
     this.status = null; this.permissions = { screen: false, control: false };
+    this.readPermissions = readPermissions;
     this.route = { connected: false, ready: false }; this.runtimeReady = false;
     this.features = { keyboard: false, clipboard: false }; this.clipboardAllowed = false;
     this.connection = 'internet'; this.usb = { available: false, error: false, devices: [], selected: null };
@@ -67,6 +68,9 @@ export class HostController {
       canStop: Boolean(this.busy || this.status?.running || this.status?.browser?.waiting || this.status?.browser?.connected) };
   }
   emit() { if (!this.closed) this.onChange(this.snapshot()); }
+  refreshPermissions() {
+    if (!this.closed && this.readPermissions) this.permissions = this.readPermissions();
+  }
   async refresh({ setup = false } = {}) {
     if (this.closed) return this.snapshot();
     const mine = this.generation;
@@ -76,7 +80,8 @@ export class HostController {
       if (setup) {
         const next = await this.checkSetup(this.connection);
         if (this.closed || mine !== this.generation) return this.snapshot();
-        this.permissions = next.permissions; this.route = next.route; this.runtimeReady = next.runtimeReady;
+        if (next.permissions) this.permissions = next.permissions;
+        this.route = next.route; this.runtimeReady = next.runtimeReady;
         this.features = { keyboard: next.features?.keyboard === true, clipboard: next.features?.clipboard === true };
         if (!this.features.clipboard) this.clipboardAllowed = false;
         if (this.connection === 'usb') {
@@ -92,6 +97,7 @@ export class HostController {
       }
       const status = await this.backend.status();
       if (this.closed || mine !== this.generation) return this.snapshot();
+      this.refreshPermissions();
       if ((this.status?.running || this.status?.browser?.waiting || this.status?.browser?.connected)
           && !status.running && !status.browser?.waiting && !status.browser?.connected) this.clipboardAllowed = false;
       this.status = status;
