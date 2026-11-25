@@ -9,12 +9,12 @@ import https from 'node:https';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
-import { chromium, webkit } from 'playwright';
+import { chromium, firefox, webkit } from 'playwright';
 import { createBrowserReceiver } from '../../gui/server/browser.mjs';
 import { createTrustedDevices } from '../../gui/server/trusted-devices.mjs';
 
 const engine = process.argv[2] || 'chromium';
-assert.ok(['chromium', 'webkit'].includes(engine));
+assert.ok(['chromium', 'firefox', 'webkit'].includes(engine));
 const dir = await mkdtemp(path.join(os.tmpdir(), 'dskcpy-paired-computers-'));
 const profile = { maxSize: 1600, maxFps: 30, bitRateMbps: 8 };
 const policy = { keyboard: true, rememberProfile: profile };
@@ -216,12 +216,12 @@ try {
   // disposable fixture's key in this instance, including worker fetches.
   const spki = createHash('sha256').update(new X509Certificate(tls.cert).publicKey.export({ type: 'spki', format: 'der' })).digest('base64');
   const browserOptions = {
-    ignoreHTTPSErrors: engine === 'webkit', headless: true,
+    ignoreHTTPSErrors: engine !== 'chromium', headless: true,
     ...(engine === 'chromium' && { channel: 'chromium', args: ['--disable-gpu', `--ignore-certificate-errors-spki-list=${spki}`] }),
   };
   const errors = [];
   async function openDirectory() {
-    context = await ({ chromium, webkit })[engine].launchPersistentContext(path.join(dir, 'receiver-profile'), browserOptions);
+    context = await ({ chromium, firefox, webkit })[engine].launchPersistentContext(path.join(dir, 'receiver-profile'), browserOptions);
     // Header-only WebCodecs runs the join and cookie paths without capture.
     await context.addInitScript(() => { delete window.RTCPeerConnection; });
     context.on('page', page => page.on('pageerror', error => errors.push(error.message)));

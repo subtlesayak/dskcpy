@@ -1,7 +1,7 @@
 import { confirmReceiverAction } from './browser-actions.mjs';
 // Actual browser codecs/RTC with synthetic lavfi media and a fake native input
 // collector. Never starts the real host, reads capture devices or sends OS input.
-import { chromium, webkit } from 'playwright';
+import { chromium, firefox, webkit } from 'playwright';
 import { createBrowserReceiver } from '../../gui/server/browser.mjs';
 import { createRtcMedia } from '../../gui/server/browser-rtc.mjs';
 import { validBrowserInput } from '../../gui/server/browser-protocol.mjs';
@@ -13,14 +13,14 @@ import path from 'node:path';
 import { mkdir, writeFile } from 'node:fs/promises';
 
 const engine = process.argv[2] || 'webkit';
-assert.ok(['webkit', 'chromium'].includes(engine), 'Choose webkit or chromium');
+assert.ok(['webkit', 'chromium', 'firefox'].includes(engine), 'Choose webkit, chromium or firefox');
 const transport = process.argv[3] || 'webrtc';
 assert.ok(['webrtc', 'webcodecs', 'fallback', 'auto', 'native-only', 'connected-fallback', 'adaptive', 'codec-update'].includes(transport), 'Choose a supported generated-media test transport');
 const output = path.resolve(`desktop/out/browser-media-${engine}-${transport}`); await mkdir(output, { recursive: true });
 const fixture = await generateMediaFixture({outOfBandParameters:transport==='codec-update',retainSps:transport==='codec-update'});
 const replacement = transport==='codec-update' ? await generateMediaFixture({replacement:true,outOfBandParameters:true}) : null;
 let activeFixture=fixture;
-const browser = await ({ chromium, webkit })[engine].launch(engine === 'chromium'
+const browser = await ({ chromium, firefox, webkit })[engine].launch(engine === 'chromium'
   ? { headless: true, channel: 'chromium', args: ['--disable-gpu'] } : { headless: true });
 const until = async (condition, label, timeout = 15000) => {
   const deadline = Date.now() + timeout;
@@ -304,6 +304,15 @@ try {
     report.state = await page.evaluate(() => ({ videoCodecs: window.RTCRtpReceiver?.getCapabilities?.('video')?.codecs.map(c => ({ mimeType: c.mimeType, parameters: c.sdpFmtpLine })), sockets: window.__testSockets, status: document.getElementById('status')?.textContent, error: document.getElementById('error')?.textContent,
       peers: window.__testPeers?.map(p => ({ connection: p.connectionState, ice: p.iceConnectionState, gathering: p.iceGatheringState, candidates: p.__iceCounts, localSdpLength: p.localDescription?.sdp.length, localHasCandidate: p.localDescription?.sdp.includes('a=candidate:'), media: p.localDescription?.sdp.split(/\r?\n/).filter(l => l.startsWith('m=')).map(l => ({ kind: l.split(' ')[0], accepted: l.split(' ')[1] !== '0' })) })),
       video: { width: document.getElementById('rtc-display')?.videoWidth, ready: document.getElementById('rtc-display')?.readyState } })).catch(() => null);
+    report.inbound = await page.evaluate(async () => {
+      const peer = window.__testPeers?.at(-1);
+      if (!peer) return [];
+      const stats = [...(await peer.getStats()).values()];
+      return stats.filter(item => item.type === 'inbound-rtp').map(item => ({
+        kind: item.kind, packetsReceived: item.packetsReceived, bytesReceived: item.bytesReceived,
+        framesReceived: item.framesReceived, framesDecoded: item.framesDecoded,
+      }));
+    }).catch(() => []);
     await page.screenshot({ path: path.join(output, 'failure.png'), fullPage: true }).catch(() => {});
   }
   await writeFile(path.join(output, 'failure.json'), JSON.stringify(report, null, 2) + '\n');
