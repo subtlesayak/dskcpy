@@ -71,6 +71,15 @@ jobs:
           node desktop/test/window-host-ui.mjs
           node desktop/test/video-preference-ui.mjs chromium
           node desktop/test/host-presentation-ui.mjs chromium
+      - name: Check Firefox pairing and generated receiver media
+        if: runner.os == 'Linux'
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: desktop/.browsers
+        run: |
+          node desktop/node_modules/playwright/cli.js install --with-deps firefox
+          sudo apt-get install -y ffmpeg
+          node desktop/test/paired-computers-ui.mjs firefox
+          node desktop/test/browser-media-ui.mjs firefox webrtc
       - name: Artifact identity and upgrade preflight regressions
         run: node --test tools/*.test.mjs
 

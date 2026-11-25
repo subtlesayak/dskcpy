@@ -21,6 +21,14 @@ PLAYWRIGHT_BROWSERS_PATH=desktop/.browsers node desktop/test/browser-media-ui.mj
 PLAYWRIGHT_BROWSERS_PATH=desktop/.browsers node desktop/test/browser-media-ui.mjs webkit webcodecs
 ```
 
+On Linux, the Firefox checks exercise pairing and the native WebRTC media path:
+
+```sh
+PLAYWRIGHT_BROWSERS_PATH=desktop/.browsers node desktop/node_modules/playwright/cli.js install --with-deps firefox
+PLAYWRIGHT_BROWSERS_PATH=desktop/.browsers node desktop/test/paired-computers-ui.mjs firefox
+PLAYWRIGHT_BROWSERS_PATH=desktop/.browsers node desktop/test/browser-media-ui.mjs firefox webrtc
+```
+
 Each run checks actual decoded color pixels, explicit audio enable/mute/resume,
 touch down/up, a balanced shortcut, exact UTF-8 text, held-key cleanup during
 reload, decoded video after reconnect, initial mute and clean Disconnect. WebRTC
